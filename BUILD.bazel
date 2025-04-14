@@ -1,213 +1,509 @@
-# SPDX-License-Identifier: GPL-2.0-only
-# SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: GPL-2.0-or-later
 
-load("//build/kernel/kleaf:kernel.bzl", "kernel_module")
+load("//build/kernel/kleaf:kernel.bzl", "ddk_headers", "ddk_module")
+load("//build/kernel/kleaf:hermetic_tools.bzl", "hermetic_genrule")
 
-package(
-    default_visibility = [
-        "//visibility:public",
+package(default_visibility = ["//vendor/nvidia:__subpackages__"])
+
+alias(
+    name = "kernel",
+    actual = "//vendor/nvidia/tegra:kernel_tegra",
+)
+
+ddk_headers(
+    name = "uapi_headers",
+    hdrs = glob([
+        "drivers/gpu/drm/tegra/include/uapi/**/*.h",
+        "drivers/gpu/host1x-fence/include/uapi/**/*.h",
+        "include/uapi/**/*.h",
+    ]),
+)
+
+# Common headers
+ddk_headers(
+    name = "nvidia-oot_common_headers",
+    hdrs = glob([
+        "include/devfreq/**/*.h",
+        "include/dt-bindings/**/*.h",
+        "include/linux/**/*.h",
+        "include/soc/**/*.h",
+        "include/sound/**/*.h",
+        "include/trace/**/*.h",
+    ]),
+    includes = ["include",],
+)
+
+filegroup(
+    name = "nvidia-oot_openrm_headers",
+    srcs = [
+        "include/linux/host1x-next.h",
+        "include/linux/platform/tegra/dce/dce-client-ipc.h",
+        "include/linux/platform/tegra/mc_utils.h",
+        "include/dt-bindings/interconnect/tegra_icc_id.h",
+        "include/linux/nvhost.h",
+        "include/linux/nvhost_t194.h",
     ],
 )
 
-filegroup(
-    name = "oot.includes",
-    srcs = glob([
-        "include/**/*.h",
-    ]),
-)
-
-filegroup(
-    name = "host1x.includes",
-    srcs = glob([
-        "drivers/gpu/host1x/include/**/*.h",
-        "drivers/gpu/host1x-fence/include/**/*.h",
-    ]),
-)
-
-filegroup(
-    name = "virt.tegra.includes",
-    srcs = glob([
-        "drivers/virt/tegra/*.h",
-    ]),
-)
-
-filegroup(
-    name = "nvmap.includes",
-    srcs = glob([
-        "drivers/video/tegra/nvmap/include/**/*.h",
-    ]),
-)
-
-filegroup(
-    name = "pci.includes",
-    srcs = glob([
-        "drivers/pci/endpoint/functions/*.h",
-    ]),
-)
-
-kernel_module(
-    name = "nvoot",
-    srcs = glob(
-        ["**"],
-        exclude = [
-          ".*",
-          ".*/**",
-          "*.bazel",
-          "**/*.bzl",
-        ],
-    ) + [
-        "//hwpm:hwpm_headers",
-        "//ootm/nvidia-public/scripts/conftest:conftest_headers",
+hermetic_genrule(
+    name = "conftest",
+    srcs = [
+        "scripts/conftest/conftest.h",
+        "//vendor/nvidia/kernel:kernel_aarch64",
+        "//vendor/nvidia/kernel:kernel_aarch64_headers",
+        "//vendor/nvidia/kernel:kernel_aarch64_sources",
     ],
     outs = [
-        # keep sorted
-        "drivers/block/tegra_oops_nvlog/tegra_oops_nvlog.ko",
-        "drivers/block/tegra_oops_virt_storage/tegra_hv_vblk_oops.ko",
-        "drivers/block/tegra_virt_storage/tegra_vblk.ko",
-        "drivers/bluetooth/realtek/rtk_btusb.ko",
-        "drivers/bus/tegra-aocluster.ko",
-        "drivers/cpuidle/cpuidle-debugfs.ko",
-        "drivers/cpuidle/cpuidle-tegra-auto.ko",
-        "drivers/crypto/tegra-hv-vse-safety.ko",
-        "drivers/crypto/tegra-nvvse-cryptodev.ko",
-        "drivers/crypto/nvvse/nvvse.ko",
-        "drivers/crypto/nvvse/nvvse-soc-plugin-t26x.ko",
-        "drivers/crypto/nvvse/nvvse-soc-plugin-t23x.ko",
-        "drivers/crypto/tegra-se-nvrng.ko",
-        "drivers/crypto/tegra/tegra-se-kds.ko",
-        "drivers/crypto/tegra/tegra-se.ko",
-        "drivers/devfreq/governor_pod_scaling.ko",
-        "drivers/devfreq/tegra_wmark.ko",
-        "drivers/firmware/tegra/ivc_ext.ko",
-        "drivers/firmware/tegra/tegra_bpmp.ko",
-        "drivers/gpio/gpio-max77851.ko",
-        "drivers/gpu/drm/tegra/tegra-drm.ko",
-        "drivers/gpu/host1x-emu/host1x-emu.ko",
-        "drivers/gpu/host1x-fence/host1x-fence.ko",
-        "drivers/gpu/host1x/host1x.ko",
-        "drivers/gpu/host1x-nvhost/host1x-nvhost.ko",
-        "drivers/gpu/power/tegra/nv-gpu-static-pg.ko",
-        "drivers/hid/hid-jarvis-remote.ko",
-        "drivers/hwmon/f75308.ko",
-        "drivers/hwmon/ina232.ko",
-        "drivers/i2c/busses/i2c-nvvrs11.ko",
-        "drivers/i2c/busses/i2c-tegra-slave-byte.ko",
-        "drivers/media/i2c/max9295.ko",
-        "drivers/media/i2c/max9296.ko",
-        "drivers/media/platform/tegra/cam_fsync/cam_fsync.ko",
-        "drivers/media/platform/tegra/cdi/cdi_dev.ko",
-        "drivers/media/platform/tegra/cdi/cdi_gpio.ko",
-        "drivers/media/platform/tegra/cdi/cdi_mgr.ko",
-        "drivers/media/platform/tegra/cdi/cdi_pwm.ko",
-        "drivers/media/platform/tegra/isc/isc_dev.ko",
-        "drivers/media/platform/tegra/isc/isc_gpio.ko",
-        "drivers/media/platform/tegra/isc/isc_mgr.ko",
-        "drivers/media/platform/tegra/isc/isc_pwm.ko",
-        "drivers/media/platform/tegra/v4l2loopback/v4l2loopback.ko",
-        "drivers/memory/tegra/mc-t26x.ko",
-        "drivers/memory/tegra/mem-qual.ko",
-        "drivers/memory/tegra/smmu-hwpm.ko",
-        "drivers/memory/tegra/tegra264-mc-hwpm.ko",
-        "drivers/mfd/max77851.ko",
-        "drivers/mfd/nvidia-vrs-pseq.ko",
-        "drivers/misc/bluedroid_pm.ko",
-        "drivers/misc/ioctl_example.ko",
-        "drivers/misc/nvscic2c-pcie/nvscic2c-pcie-epc.ko",
-        "drivers/misc/nvscic2c-pcie/nvscic2c-pcie-epf.ko",
-        "drivers/misc/nvsciipc/nvsciipc.ko",
-        "drivers/misc/tegra-cec/tegra_cec.ko",
-        "drivers/misc/tegra-pcie-dma-test.ko",
-        "drivers/mtd/devices/tegra_hv_mtd.ko",
-        "drivers/net/can/mttcan/mttcan.ko",
-        "drivers/net/ethernet/marvell/oak/oak_pci.ko",
-        "drivers/net/ethernet/microchip/lan743x.ko",
-        "drivers/net/ethernet/nvidia/nvethernet/nvethernet.ko",
-        "drivers/net/ethernet/nvidia/pcie/tegra_vnet.ko",
-        "drivers/net/ethernet/realtek/r8125/r8125.ko",
-        "drivers/net/ethernet/realtek/r8126/r8126.ko",
-        "drivers/net/ethernet/realtek/r8168/r8168.ko",
-        "drivers/net/nv_vsock_transport.ko",
-        "drivers/net/tegra_hv_net.ko",
-        "drivers/nv-p2p/nvidia-p2p.ko",
-        "drivers/nvpmodel/nvpmodel-clk-cap.ko",
-        "drivers/nvpps/nvpps.ko",
-        "drivers/nvtzvault/nvtzvault.ko",
-        "drivers/nvtzvault/nvtzvault-soc-comms.ko",
-        "drivers/nv-virtio/nv-virtio-console-poc.ko",
-        "drivers/pci/controller/pcie-tegra-vf.ko",
-        "drivers/pci/controller/pcie-tegra264.ko",
-        "drivers/pci/controller/pcie-tegra264-ep.ko",
-        "drivers/pci/controller/tegra-pcie-dma-lib.ko",
-        "drivers/pci/endpoint/functions/pci-epf-dma-test.ko",
-        "drivers/pci/endpoint/functions/pci-epf-tegra-vnet.ko",
-        "drivers/pinctrl/pinctrl-max77851.ko",
-        "drivers/pinctrl/pinctrl-tegra194-pexclk-padctrl.ko",
-        "drivers/pinctrl/pinctrl-tegra234-dpaux.ko",
-        "drivers/platform/tegra/aon/tegra234-aon.ko",
-        "drivers/platform/tegra/aon/tegra-aon-ivc-echo.ko",
-        "drivers/platform/tegra/dce/tegra-dce.ko",
-        "drivers/platform/tegra/mce/tegra-mce.ko",
-        "drivers/platform/tegra/mc-hwpm.ko",
-        "drivers/platform/tegra/mc-utils/mc-utils.ko",
-        "drivers/platform/tegra/nvadsp/nvadsp.ko",
-        "drivers/platform/tegra/psc/tegra23x_psc.ko",
-        "drivers/platform/tegra/tegra-bootloader-debug/tegra-bootloader-debug.ko",
-        "drivers/platform/tegra/tegra-bpmp-bwmgr.ko",
-        "drivers/platform/tegra/tegra-cactmon-mc-all.ko",
-        "drivers/platform/tegra/tegra-fsicom.ko",
-        "drivers/platform/tegra/tegra-hv-xhci.ko",
-        "drivers/platform/tegra/tegra-hv-xhci-debug.ko",
-        "drivers/platform/tegra/tegra-uss-io-proxy.ko",
-        "drivers/platform/tegra/uncore_pmu/tegra23x_perf_uncore.ko",
-        "drivers/power/reset/max77851-poweroff.ko",
-        "drivers/pwm/pwm-tegra-tachometer.ko",
-        "drivers/ras/arm64-ras.ko",
-        "drivers/regulator/max77851-regulator.ko",
-        "drivers/rtc/nvvrs-pseq-rtc.ko",
-        "drivers/rtc/rtc-max77851.ko",
-        "drivers/scsi/ufs/ufs-tegra.ko",
-        "drivers/soc/tegra/fuse/kfuse.ko",
-        "drivers/spi/spi-aurix-tegra.ko",
-        "drivers/spi/spi-tegra124-slave.ko",
-        "drivers/spi/spi-tegra210-quad.ko",
-        "drivers/thermal/max77851_thermal.ko",
-        "drivers/tty/serial/wch_35x/wch.ko",
-        "drivers/tty/serial/tegra_hv_comm.ko",
-        "drivers/usb/typec/fusb301.ko",
-        "drivers/video/tegra/camera/tegra_camera_platform.ko",
-        "drivers/video/tegra/dc/bridge/maxim_gmsl_dp_serializer.ko",
-        "drivers/video/tegra/dc/bridge/maxim_gmsl_hdmi_serializer.ko",
-        "drivers/video/tegra/dc/bridge/nvdisp_serdes.ko",
-        "drivers/video/tegra/dc/bridge/ti_fpdlink_dp_serializer.ko",
-        "drivers/video/tegra/host/capture/nvhost-capture.ko",
-        "drivers/video/tegra/host/nvcsi/nvhost-nvcsi.ko",
-        "drivers/video/tegra/host/nvdla/nvhost-nvdla.ko",
-        "drivers/video/tegra/nvmap/nvmap.ko",
-        "drivers/video/tegra/tsec/tsecriscv.ko",
-        "drivers/video/tegra/virt/tegra_gr_comm.ko",
-        "drivers/virt/tegra/hvc_sysfs.ko",
-        "drivers/virt/tegra/ivc-cdev.ko",
-        "drivers/virt/tegra/tegra_hv.ko",
-        "drivers/virt/tegra/tegra_hv_pm_ctl.ko",
-        "drivers/virt/tegra/tegra_hv_vcpu_yield.ko",
-        "drivers/virt/tegra/userspace_ivc_mempool.ko",
-        "drivers/ivc_sample_server/tegra_hv_sysfs_sample_server.ko",
-        "drivers/watchdog/max77851_wdt.ko",
-        "drivers/watchdog/softdog-platform.ko",
-        "drivers/watchdog/watchdog-tegra-t18x.ko",
-        "sound/soc/tegra/snd-soc-tegra186-arad.ko",
-        "sound/soc/tegra/snd-soc-tegra210-adsp.ko",
-        "sound/soc/tegra/snd-soc-tegra210-afc.ko",
-        "sound/soc/tegra/snd-soc-tegra210-iqc.ko",
-        "sound/soc/tegra/snd-soc-tegra-controls.ko",
-        "sound/soc/tegra/snd-soc-tegra-utils.ko",
-        "sound/soc/tegra-virt-alt/snd-soc-tegra210-virt-alt-admaif.ko",
-        "sound/soc/tegra-virt-alt/snd-soc-tegra210-virt-alt-adsp.ko",
-        "sound/soc/tegra-virt-alt/snd-soc-tegra-virt-t210ref-pcm.ko",
-        "sound/tegra-safety-audio/safety-i2s.ko",
+        "scripts/conftest/nvidia/conftest.h",
+        "scripts/conftest/nvidia/conftest/functions.h",
+        "scripts/conftest/nvidia/conftest/generic.h",
+        "scripts/conftest/nvidia/conftest/headers.h",
+        "scripts/conftest/nvidia/conftest/macros.h",
+        "scripts/conftest/nvidia/conftest/patches.h",
+        "scripts/conftest/nvidia/conftest/symbols.h",
+        "scripts/conftest/nvidia/conftest/types.h",
     ],
-    kernel_build = "//nvidia-build/kleaf:tegra_android",
+    cmd = """
+        mkdir -p out
+        tar -xzf $$(find bazel-out/ -name kernel-headers.tar.gz -print -quit) -C out
+        cp $$(find bazel-out/ -name kernel_aarch64_Module.symvers -print -quit) out/kernel-headers/Module.symvers
+        export NV_KERNEL_SOURCES=$$(realpath vendor/nvidia/kernel)
+        export NV_KERNEL_OUTPUT=$$(realpath out/kernel-headers)
+        export ARCH=arm64
+        export src=$$(dirname $(location scripts/conftest/conftest.sh))
+        export obj=$(@D)/scripts/conftest/nvidia
+        export IGNORE_CC_MISMATCH=1
+        export CC="clang --target=aarch64-linux-gnu"
+        export EXTRA_CFLAGS="-I$$(realpath $$obj) -Wno-pointer-sign -Wno-gnu-variable-sized-type-not-at-end -Wno-unused-value -Wno-return-type"
+        make -f $(location scripts/conftest/Makefile)
+        cp $(location scripts/conftest/conftest.h) $(@D)/scripts/conftest/nvidia/
+    """,
+    tools = [
+      "scripts/conftest/conftest.sh",
+      "scripts/conftest/Makefile",
+    ],
+    use_cc_toolchain = True,
+)
+ddk_headers(
+    name = "conftest_headers",
+    hdrs = [":conftest",],
+    includes = ["scripts/conftest"],
+)
+
+
+# Host1x
+ddk_module(
+    name = "host1x",
+    srcs = glob([
+        "drivers/gpu/host1x/*.c",
+        "drivers/gpu/host1x/hw/host1x*.c",
+    ]),
+    hdrs = [
+        "drivers/gpu/host1x/hw/cdma_hw.c",
+        "drivers/gpu/host1x/hw/channel_hw.c",
+        "drivers/gpu/host1x/hw/debug_hw.c",
+        "drivers/gpu/host1x/hw/debug_hw_1x01.c",
+        "drivers/gpu/host1x/hw/debug_hw_1x06.c",
+        "drivers/gpu/host1x/hw/intr_hw.c",
+        "drivers/gpu/host1x/hw/intr_general_hw.c",
+        "drivers/gpu/host1x/hw/syncpt_hw.c",
+    ] + glob([
+        "drivers/gpu/host1x/**/*.h",
+    ]),
+    includes = [
+        "drivers/gpu/host1x/hw",
+        "drivers/gpu/host1x/include",
+    ],
+    local_defines = [
+        "CONFIG_TEGRA_HOST1X_FIREWALL",
+        "CONFIG_HOST1X_HAVE_SYNCPT_BASE",
+        "CONFIG_DRM_TEGRA_HAVE_DISPLAY",
+    ],
+    out = "host1x-next.ko",
+    kernel_build = ":kernel",
     deps = [
-        "//hwpm/drivers/tegra/hwpm:hwpm",
+        ":conftest_headers",
+        ":nvidia-oot_common_headers",
+    ],
+)
+
+ddk_module(
+    name = "host1x-nvhost",
+    srcs = [
+        "drivers/gpu/host1x-nvhost/nvhost.c",
+    ],
+    local_defines = [
+        "CONFIG_TEGRA_HOST1X",
+    ],
+    out = "host1x-nvhost.ko",
+    kernel_build = ":kernel",
+    deps = [
+        ":conftest_headers",
+        ":nvidia-oot_common_headers",
+        ":host1x",
+    ],
+)
+
+ddk_module(
+    name = "nvmap",
+    srcs = [
+        "drivers/video/tegra/nvmap/nvmap_core.c",
+        "drivers/video/tegra/nvmap/nvmap_alloc.c",
+        "drivers/video/tegra/nvmap/nvmap_cache.c",
+        "drivers/video/tegra/nvmap/nvmap_dev.c",
+        "drivers/video/tegra/nvmap/nvmap_dmabuf.c",
+        "drivers/video/tegra/nvmap/nvmap_fault.c",
+        "drivers/video/tegra/nvmap/nvmap_handle.c",
+        "drivers/video/tegra/nvmap/nvmap_heap.c",
+        "drivers/video/tegra/nvmap/nvmap_ioctl.c",
+        "drivers/video/tegra/nvmap/nvmap_init.c",
+        "drivers/video/tegra/nvmap/nvmap_tag.c",
+        "drivers/video/tegra/nvmap/nvmap_stats.c",
+        "drivers/video/tegra/nvmap/nvmap_carveout.c",
+        "drivers/video/tegra/nvmap/nvmap_kasan_wrapper.c",
+        "drivers/video/tegra/nvmap/nvmap_cache_maint.S",
+        # NVMAP_CONFIG_HANDLE_AS_ID
+        "drivers/video/tegra/nvmap/nvmap_id_array.c",
+        # NVMAP_CONFIG_SCIIPC
+        "drivers/video/tegra/nvmap/nvmap_sci_ipc.c",
+        # NVMAP_CONFIG_PAGE_POOLS
+        "drivers/video/tegra/nvmap/nvmap_pp.c",
+    ],
+    conditional_srcs = {
+        "CONFIG_DEBUG_FS": { True: ["drivers/video/tegra/nvmap/nvmap_debug.c"] }
+    },
+    hdrs = glob(["drivers/video/tegra/nvmap/**/*.h",]),
+    includes = ["drivers/video/tegra/nvmap/include",],
+    local_defines = [
+        "CONFIG_TEGRA_SYSTEM_TYPE_ACK",
+        "NVMAP_CONFIG",
+        "NVMAP_CONFIG_PAGE_POOLS",
+        "NVMAP_CONFIG_PAGE_POOL_SIZE=0x0",
+        "NVMAP_CONFIG_FD_START=0x0",
+        "NVMAP_CONFIG_HANDLE_AS_ID",
+        "NVMAP_CONFIG_CACHE_FLUSH_AT_ALLOC",
+        "NVMAP_CONFIG_ENABLE_FOREIGN_BUFFER",
+        "NVMAP_CONFIG_PP_RESIZE",
+        "CONFIG_GENERIC_IOREMAP",
+    ],
+    out = "nvmap.ko",
+    kernel_build = ":kernel",
+    deps = [
+        ":conftest_headers",
+        ":nvidia-oot_common_headers",
+        ":uapi_headers",
+    ],
+)
+
+
+# Tegra-drm
+ddk_module(
+    name = "tegra-drm",
+    srcs = [
+        "drivers/gpu/drm/tegra/drm.c",
+        "drivers/gpu/drm/tegra/uapi.c",
+        "drivers/gpu/drm/tegra/submit.c",
+        "drivers/gpu/drm/tegra/gem.c",
+        "drivers/gpu/drm/tegra/fb.c",
+        "drivers/gpu/drm/tegra/virt.c",
+        "drivers/gpu/drm/tegra/falcon.c",
+        "drivers/gpu/drm/tegra/hwpm.c",
+        "drivers/gpu/drm/tegra/vic.c",
+        "drivers/gpu/drm/tegra/nvdec.c",
+        "drivers/gpu/drm/tegra/nvenc.c",
+        "drivers/gpu/drm/tegra/nvjpg.c",
+        "drivers/gpu/drm/tegra/riscv.c",
+        "drivers/gpu/drm/tegra/util.c",
+        "drivers/gpu/drm/tegra/ofa.c",
+        "drivers/gpu/drm/tegra/trace.c",
+    ],
+    conditional_srcs = {
+        "CONFIG_DRM_FBDEV_EMULATION": { True: ["drivers/gpu/drm/tegra/fbdev.c"] },
+    },
+    hdrs = glob(["drivers/gpu/drm/tegra/**/*.h",]),
+    includes = ["drivers/gpu/drm/tegra/include",],
+    local_defines = [
+        "CONFIG_TEGRA_SYSTEM_TYPE_ACK",
+    ],
+    copts = [
+        "-Wno-sometimes-uninitialized",
+    ],
+    out = "tegra-drm-next.ko",
+    kernel_build = ":kernel",
+    deps = [
+        ":conftest_headers",
+        ":nvidia-oot_common_headers",
+        "//vendor/nvidia/hwpm:nvhwpm",
+        ":host1x",
+    ],
+)
+
+
+# APE drivers
+ddk_module(
+    name = "snd-soc-tegra-utils",
+    srcs = [
+        "sound/soc/tegra/tegra_asoc_machine.c",
+        "sound/soc/tegra/tegra_isomgr_bw.c",
+    ],
+    hdrs = [
+        "sound/soc/tegra/tegra_asoc_machine.h",
+        "sound/soc/tegra/tegra_isomgr_bw.h",
+    ],
+    out = "snd-soc-tegra-utils.ko",
+    kernel_build = ":kernel",
+    deps = [
+        ":conftest_headers",
+        ":nvidia-oot_common_headers",
+    ],
+)
+
+ddk_module(
+    name = "snd-soc-tegra210-adsp",
+    srcs = ["sound/soc/tegra/tegra210_adsp.c"],
+    hdrs = ["sound/soc/tegra/tegra210_adsp.h"],
+    out = "snd-soc-tegra210-adsp.ko",
+    kernel_build = ":kernel",
+    deps = [
+        ":snd-soc-tegra-utils",
+        ":conftest_headers",
+        ":nvidia-oot_common_headers",
+    ],
+)
+
+ddk_module(
+    name = "snd-soc-tegra210-afc",
+    srcs = ["sound/soc/tegra/tegra210_afc.c"],
+    hdrs = ["sound/soc/tegra/tegra210_afc.h"],
+    out = "snd-soc-tegra210-afc.ko",
+    kernel_build = ":kernel",
+    deps = [
+        ":conftest_headers",
+        ":nvidia-oot_common_headers",
+    ],
+)
+
+ddk_module(
+    name = "snd-soc-tegra210-iqc",
+    srcs = ["sound/soc/tegra/tegra210_iqc.c"],
+    hdrs = ["sound/soc/tegra/tegra210_iqc.h"],
+    out = "snd-soc-tegra210-iqc.ko",
+    kernel_build = ":kernel",
+    deps = [
+        ":conftest_headers",
+        ":nvidia-oot_common_headers",
+    ],
+)
+
+ddk_module(
+    name = "snd-soc-tegra186-arad",
+    srcs = ["sound/soc/tegra/tegra186_arad.c"],
+    hdrs = ["sound/soc/tegra/tegra186_arad.h"],
+    out = "snd-soc-tegra186-arad.ko",
+    kernel_build = ":kernel",
+    deps = [
+        ":conftest_headers",
+        ":nvidia-oot_common_headers",
+    ],
+)
+
+
+# Devfreq
+ddk_module(
+    name = "governor_pod_scaling",
+    srcs = ["drivers/devfreq/governor_pod_scaling.c"],
+    out = "governor_pod_scaling.ko",
+    kernel_build = ":kernel",
+    deps = [
+        ":conftest_headers",
+        ":nvidia-oot_common_headers",
+    ],
+)
+
+
+# Pwm
+ddk_module(
+    name = "pwm-tegra-tachometer",
+    srcs = ["drivers/pwm/pwm-tegra-tachometer.c"],
+    out = "pwm-tegra-tachometer.ko",
+    kernel_build = ":kernel",
+    deps = [
+        ":conftest_headers",
+    ],
+)
+
+
+# Pmodel
+ddk_module(
+    name = "nvpmodel-clk-cap",
+    srcs = ["drivers/nvpmodel/nvpmodel-clk-cap.c"],
+    out = "nvpmodel-clk-cap.ko",
+    kernel_build = ":kernel",
+    deps = [
+        ":conftest_headers",
+    ],
+)
+
+
+# Mfd
+ddk_module(
+    name = "nvidia-vrs-pseq",
+    srcs = ["drivers/mfd/nvidia-vrs-pseq.c"],
+    out = "nvidia-vrs-pseq.ko",
+    kernel_build = ":kernel",
+    deps = [
+        ":conftest_headers",
+        ":nvidia-oot_common_headers",
+    ],
+)
+
+
+# Memory
+ddk_module(
+    name = "tegra-bpmp-bwmgr",
+    srcs = ["drivers/platform/tegra/tegra-bpmp-bwmgr.c"],
+    out = "tegra-bpmp-bwmgr.ko",
+    kernel_build = ":kernel",
+    deps = [
+        ":conftest_headers",
+        ":nvidia-oot_common_headers",
+    ],
+)
+
+ddk_module(
+    name = "mc-utils",
+    srcs = ["drivers/platform/tegra/mc-utils/mc-utils.c"],
+    out = "mc-utils.ko",
+    kernel_build = ":kernel",
+    deps = [
+        ":nvidia-oot_common_headers",
+    ],
+)
+
+ddk_module(
+    name = "tegra-cactmon-mc-all",
+    srcs = ["drivers/platform/tegra/tegra-cactmon-mc-all.c"],
+    out = "tegra-cactmon-mc-all.ko",
+    kernel_build = ":kernel",
+    deps = [
+        ":conftest_headers",
+    ],
+)
+
+
+# Crypto
+ddk_module(
+    name = "tegra-se-kds",
+    srcs = ["drivers/crypto/tegra/tegra-se-kds.c"],
+    hdrs = ["drivers/crypto/tegra/tegra-se.h"],
+    out = "tegra-se-kds.ko",
+    kernel_build = ":kernel",
+    deps = [
+        ":conftest_headers",
+        ":nvidia-oot_common_headers",
+    ],
+)
+
+ddk_module(
+    name = "tegra-se",
+    srcs = [
+        "drivers/crypto/tegra/tegra-se-aes.c",
+        "drivers/crypto/tegra/tegra-se-hash.c",
+        "drivers/crypto/tegra/tegra-se-key.c",
+        "drivers/crypto/tegra/tegra-se-main.c",
+        "drivers/crypto/tegra/tegra-se-sm4.c",
+    ],
+    hdrs = ["drivers/crypto/tegra/tegra-se.h"],
+    copts = [
+        "-Wno-sometimes-uninitialized",
+    ],
+    out = "tegra-se.ko",
+    kernel_build = ":kernel",
+    deps = [
+        ":tegra-se-kds",
+        ":conftest_headers",
+        ":nvidia-oot_common_headers",
+        ":host1x",
+    ],
+)
+
+ddk_module(
+    name = "tegra-se-nvrng",
+    srcs = ["drivers/crypto/tegra-se-nvrng.c"],
+    out = "tegra-se-nvrng.ko",
+    kernel_build = ":kernel",
+    deps = [
+        ":conftest_headers",
+    ],
+)
+
+ddk_module(
+    name = "tsecriscv",
+    srcs = [
+        "drivers/video/tegra/tsec/tsec.c",
+        "drivers/video/tegra/tsec/tsec_boot.c",
+        "drivers/video/tegra/tsec/tsec_t23x.c",
+        "drivers/video/tegra/tsec/tsec_t264.c",
+        "drivers/video/tegra/tsec/tsec_comms/tsec_comms.c",
+    ],
+    hdrs = glob(["drivers/video/tegra/tsec/**/*.h"]),
+    includes = ["drivers/video/tegra/tsec",],
+    out = "tsecriscv.ko",
+    kernel_build = ":kernel",
+    deps = [
+        ":conftest_headers",
+    ],
+)
+
+
+# Tegra-dce
+ddk_module(
+    name = "tegra-dce",
+    srcs = glob([
+        "drivers/platform/tegra/dce/*.c",
+    ], exclude = [
+        "drivers/platform/tegra/dce/dce-debug.c",
+        "drivers/platform/tegra/dce/dce-admin-debug.c",
+        "drivers/platform/tegra/dce/dce-debug-perf.c",
+    ]),
+    conditional_srcs = {
+        "CONFIG_DEBUG_FS": {
+            True: [
+                "drivers/platform/tegra/dce/dce-debug.c",
+                "drivers/platform/tegra/dce/dce-admin-debug.c",
+                "drivers/platform/tegra/dce/dce-debug-perf.c",
+            ]
+        }
+    },
+    hdrs = glob([
+        "drivers/platform/tegra/dce/include/**/*.h",
+        "drivers/platform/tegra/dce/os/include/**/*.h",
+        "drivers/platform/tegra/dce/os/linux/include/**/*.h",
+    ]),
+    includes = [
+        "drivers/platform/tegra/dce/include",
+        "drivers/platform/tegra/dce/os/include",
+        "drivers/platform/tegra/dce/os/linux/include",
+    ],
+    local_defines = [
+        "NV_DCE_CORE_ENABLE_ASYNC_RM_EVENT",
+    ],
+    out = "tegra-dce.ko",
+    kernel_build = ":kernel",
+    deps = [
+        ":conftest_headers",
+        ":nvidia-oot_common_headers",
+    ],
+)
+
+
+# Usb
+ddk_module(
+    name = "fusb301",
+    srcs = ["drivers/usb/typec/fusb301.c"],
+    out = "fusb301.ko",
+    kernel_build = ":kernel",
+    deps = [
+        ":conftest_headers",
     ],
 )

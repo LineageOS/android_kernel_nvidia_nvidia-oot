@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /* Copyright (c) 2017-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
 
 #ifndef UAPI_IMX318_H

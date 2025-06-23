@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2020-2022, NVIDIA CORPORATION & AFFILIATES.All rights reserved.
  *
- * SPDX-License-Identifier: GPL-2.0
+ * SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note
  */
 
 #ifndef _TEGRA_GTE_IOCTL_H

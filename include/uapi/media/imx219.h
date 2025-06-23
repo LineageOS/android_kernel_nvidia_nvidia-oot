@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: GPL-2.0-only WITH Linux-syscall-note
 /*
  * Copyright (c) 2014-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *

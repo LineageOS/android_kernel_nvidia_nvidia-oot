@@ -6556,7 +6556,7 @@ compile_test() {
             #include \"conftest$$.h\"
             "
 
-            compile_check_conftest "$CODE" "NV___ASSIGN_STR_HAS_NO_SRC_ARG" "" "types"
+            echo "#define NV___ASSIGN_STR_HAS_NO_SRC_ARG " | append_conftest "types"
             rm conftest$$.h
         ;;
 

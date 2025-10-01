@@ -114,7 +114,7 @@ static unsigned long system_heap_total_mem(void)
 #define MEMINFO_SIZE 1536
 static int compute_memory_stat(u64 *total, u64 *free, int numa_id)
 {
-#ifdef CONFIG_NUMA
+#if defined(CONFIG_NUMA) && !defined(CONFIG_ANDROID) && !defined(CONFIG_TEGRA_SYSTEM_TYPE_ACK)
 	struct file *file;
 	char meminfo_path[64] = {'\0'};
 	u8 *buf;
@@ -178,6 +178,8 @@ static int compute_hugetlbfs_stat(u64 *total, u64 *free, int numa_id)
 	 * heap is not present.
 	 */
 	return -ENODEV;
+#elif defined(CONFIG_ANDROID) || defined(CONFIG_TEGRA_SYSTEM_TYPE_ACK)
+	return -EINVAL;
 #else
 	struct file *file;
 	char meminfo_path[64] = {'\0'};

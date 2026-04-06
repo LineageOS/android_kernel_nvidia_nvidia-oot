@@ -7,6 +7,8 @@
 
 #define pr_fmt(fmt)	"nvmap: %s() " fmt, __func__
 
+#include <nvidia/conftest.h>
+
 #include <linux/dma-mapping.h>
 #include <linux/export.h>
 #include <linux/fs.h>
@@ -44,7 +46,11 @@
 #include <linux/nodemask.h>
 
 #if defined(CONFIG_TEGRA_SYSTEM_TYPE_ACK)
+#if defined(NV_MODULE_IMPORT_NS_CALLS_STRINGIFY)
 MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);
+#else
+MODULE_IMPORT_NS("ANDROID_GKI_VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver");
+#endif
 #endif
 
 #define SIZE_2MB 0x200000

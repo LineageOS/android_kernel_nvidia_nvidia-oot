@@ -73,24 +73,6 @@ struct nvhost_syncpt_interface {
 	uint32_t page_size;
 };
 
-u32 host1x_readl(struct platform_device *pdev, u32 r)
-{
-	struct nvhost_device_data *pdata = platform_get_drvdata(pdev);
-	void __iomem *addr = pdata->aperture[0] + r;
-
-	return readl(addr);
-}
-EXPORT_SYMBOL(host1x_readl);
-
-void host1x_writel(struct platform_device *pdev, u32 r, u32 v)
-{
-	struct nvhost_device_data *pdata = platform_get_drvdata(pdev);
-	void __iomem *addr = pdata->aperture[0] + r;
-
-	writel(v, addr);
-}
-EXPORT_SYMBOL(host1x_writel);
-
 static struct device *nvhost_client_device_create(struct platform_device *pdev,
 						  struct cdev *cdev,
 						  const char *cdev_name,

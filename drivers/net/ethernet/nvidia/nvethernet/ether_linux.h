@@ -1,5 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
-/* SPDX-FileCopyrightText: Copyright (c) 2019-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+/* SPDX-License-Identifier: GPL-2.0-only
+ * SPDX-FileCopyrightText: Copyright (c) 2019-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -133,6 +133,12 @@
 /** @} */
 
 /**
+ * @brief Ethernet default RXQ enable value
+ */
+
+#define ETHER_DFLT_RXQ_ENABLE_VAL	2U
+
+/**
  * @brief Ethernet default PTP clock frequency
  */
 #define ETHER_DFLT_PTP_CLK		312500000U
@@ -239,7 +245,7 @@
 /**
  * @brief IVC wait timeout cnt in micro seconds.
  */
-#define IVC_WAIT_TIMEOUT_CNT		200000
+#define IVC_WAIT_TIMEOUT_CNT		5000000
 
 /**
  * @brief Broadcast and MAC address macros
@@ -281,7 +287,11 @@
 #define ETHER_MAX_RX_COALESCE_USEC	1020U
 #define ETHER_EQOS_MIN_RX_COALESCE_USEC	5U
 #define ETHER_MGBE_MIN_RX_COALESCE_USEC	6U
+#define ETHER_DFLT_RX_COALESCE_USEC	512U
 /** @} */
+
+/* Clear the field in the tx_swcx structure */
+#define CLEAR_TX_SWCX(tx_swcx, field, val) ((tx_swcx)->field = (val))
 
 #define ETHER_INVALID_CHAN_NUM		0xFFU
 /**
@@ -362,6 +372,22 @@ static inline int ether_avail_txdesc_cnt(struct osi_dma_priv_data *osi_dma,
 
 #define ETHER_VM_IRQ_TX_CHAN_MASK(x)	BIT((x) * 2U)
 #define ETHER_VM_IRQ_RX_CHAN_MASK(x)	BIT(((x) * 2U) + 1U)
+#define ETHER_SENTRY_MODE		1U
+#define ETHER_SENTRY_MODE_ENTERED	2U
+#define ETHER_SENTRY_MODE_EXITED	3U
+#define ETHER_MAX_IP_INSTANCES		5U
+
+/**
+ * @addtogroup MDIO address bounds
+ *
+ * @brief Macros defining MDIO address bounds for Clause 22 and 45
+ * @{
+ */
+/* Maximum value for Clause 22/45  port address (prtad) - 5 bits */
+#define MDIO_PRTAD_MAX		0x1FU
+/* Maximum value for Clause 22/45 device address (devad) - 5 bits */
+#define MDIO_DEVAD_MAX		0x1FU
+/** @} */
 
 /* MDIO clause 45 bit */
 #define MII_DEVADDR_C45_SHIFT	16
@@ -412,8 +438,6 @@ struct ether_ivc_ctxt {
 	struct tegra_hv_ivc_cookie *ivck;
 	/** ivc lock */
 	raw_spinlock_t ivck_lock;
-	/** Flag to indicate ivc started or stopped */
-	unsigned int ivc_state;
 };
 
 /**
@@ -755,14 +779,22 @@ struct ether_priv_data {
 	/** tx bandwidth pkt work queue */
 	struct workqueue_struct *tx_bw_wq;
 #endif
-	/** COE mode enabled */
-	u32 coe_enable;
-	/** OSI instance of COE */
-	struct osi_mgbe_coe mgbe_coe;
+#ifdef ETHER_PRBS_SUPPORT
+	/** PRBS mode enable flag from DT (0: disabled, 1: enabled) */
+	unsigned int prbs_mode;
+#endif /* ETHER_PRBS_SUPPORT */
+	/** SentryMode state - 1 - Sentrymode entered, 0 - sentry mode exited */
+	u32 sentrymode_state;
 	/** Flag to retry restart_lane_bringup logic */
 	u32 force_restart_lane_bringup;
 	/** MDIO lock for OSI function calls **/
 	struct mutex osi_mdio_lock;
+	/** COE mode enabled */
+	u32 coe_enable;
+	/** OSI instance of COE */
+	struct osi_mgbe_coe mgbe_coe;
+	/** wol configs */
+	struct ethtool_wolinfo wol;
 };
 
 /**
@@ -773,6 +805,21 @@ struct ether_priv_data {
  * @note Network device needs to created.
  */
 void ether_set_ethtool_ops(struct net_device *ndev);
+
+/**
+ * @brief Configure WOL settings in PHY subsystem
+ *
+ * @param[in] ndev – pointer to net device structure.
+ * @param[in] wol – pointer to ethtool_wolinfo structure.
+ *
+ * @note MAC and PHY need to be initialized.
+ *
+ * @retval zero on success and -ve number on failure.
+ */
+
+int ether_set_wol_impl(struct net_device *ndev, struct ethtool_wolinfo *wol);
+
+
 /**
  * @brief Creates Ethernet sysfs group
  *
@@ -853,10 +900,6 @@ int ether_padctrl_mii_rx_pins(void *priv, unsigned int enable);
 void ether_selftest_get_strings(struct ether_priv_data *pdata, u8 *data);
 int ether_selftest_get_count(struct ether_priv_data *pdata);
 #else
-static inline void ether_selftest_run(struct net_device *dev,
-                                     struct ethtool_test *etest, u64 *buf)
-{
-}
 static inline void ether_selftest_get_strings(struct ether_priv_data *pdata,
 					      u8 *data)
 {

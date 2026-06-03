@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2015-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2015-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include <nvidia/conftest.h>
 
@@ -931,6 +931,19 @@ void camera_common_dpd_disable(struct camera_common_data *s_data)
 	}
 	numports = result_add1 >> 1;
 
+#if defined(NV_TEGRA_PMC_IO_PAD_POWER_ENABLE_PRESENT) /* Linux v7.0 */
+	if (!s_data->pmc) {
+		s_data->pmc = devm_tegra_pmc_get(s_data->dev);
+
+		if (IS_ERR(s_data->pmc)) {
+			dev_err(s_data->dev, "Failed to get PMC device: %ld\n",
+				PTR_ERR(s_data->pmc));
+			s_data->pmc = NULL;
+			return;
+		}
+	}
+#endif
+
 	/* disable CSI IOs DPD mode to turn on camera */
 	for (i = 0; i < numports; i++) {
 		io_idx = s_data->csi_port + i;
@@ -940,12 +953,8 @@ void camera_common_dpd_disable(struct camera_common_data *s_data)
 		}
 		if (atomic_inc_return(
 			&camera_common_csi_io_pads[io_idx].ref) == 1) {
-#if defined(NV_TEGRA264_IO_PAD_POWER_ENABLE_PRESENT)
-			if (__tegra_get_chip_id() == TEGRA264)
-				tegra264_io_pad_power_enable(s_data->dev,
-						TEGRA_IO_PAD_CSIA + io_idx);
-			else
-				tegra_io_pad_power_enable(
+#if defined(NV_TEGRA_PMC_IO_PAD_POWER_ENABLE_PRESENT) /* Linux v7.0 */
+			tegra_pmc_io_pad_power_enable(s_data->pmc,
 						TEGRA_IO_PAD_CSIA + io_idx);
 #else
 			tegra_io_pad_power_enable(
@@ -975,6 +984,19 @@ void camera_common_dpd_enable(struct camera_common_data *s_data)
 	}
 	numports = result_add1 >> 1;
 
+#if defined(NV_TEGRA_PMC_IO_PAD_POWER_ENABLE_PRESENT) /* Linux v7.0 */
+	if (!s_data->pmc) {
+		s_data->pmc = devm_tegra_pmc_get(s_data->dev);
+
+		if (IS_ERR(s_data->pmc)) {
+			dev_err(s_data->dev, "Failed to get PMC device: %ld\n",
+				PTR_ERR(s_data->pmc));
+			s_data->pmc = NULL;
+			return;
+		}
+	}
+#endif
+
 	/* disable CSI IOs DPD mode to turn on camera */
 	for (i = 0; i < numports; i++) {
 		io_idx = s_data->csi_port + i;
@@ -984,12 +1006,8 @@ void camera_common_dpd_enable(struct camera_common_data *s_data)
 		}
 		if (atomic_dec_return(
 			&camera_common_csi_io_pads[io_idx].ref) == 0) {
-#if defined(NV_TEGRA264_IO_PAD_POWER_ENABLE_PRESENT)
-			if (__tegra_get_chip_id() == TEGRA264)
-				tegra264_io_pad_power_disable(s_data->dev,
-						TEGRA_IO_PAD_CSIA + io_idx);
-			else
-				tegra_io_pad_power_disable(
+#if defined(NV_TEGRA_PMC_IO_PAD_POWER_ENABLE_PRESENT) /* Linux v7.0 */
+			tegra_pmc_io_pad_power_disable(s_data->pmc,
 						TEGRA_IO_PAD_CSIA + io_idx);
 #else
 			tegra_io_pad_power_disable(

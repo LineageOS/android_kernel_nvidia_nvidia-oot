@@ -22,23 +22,78 @@
 #include <linux/io.h>
 #include <linux/reset.h>
 
+static uint32_t s_nvdla_aperture_to_id(struct platform_device *pdev,
+	enum nvdla_aperture_type aperture_type)
+{
+	uint32_t aperture_id;
+
+	(void) pdev;
+
+	switch (aperture_type) {
+	case NVDLA_APERTURE_TYPE_DLA: {
+		aperture_id = 0U;
+		break;
+	}
+	case NVDLA_APERTURE_TYPE_HFRP: {
+		aperture_id = 1U;
+		break;
+	}
+	case NVDLA_APERTURE_TYPE_MNOCRX: {
+		aperture_id = 2U;
+		break;
+	}
+	case NVDLA_APERTURE_TYPE_MNOCTX: {
+		aperture_id = 3U;
+		break;
+	}
+	default:
+		aperture_id = 0U;
+		break;
+	};
+
+	return aperture_id;
+}
+
 uint32_t nvdla_device_register_read(struct platform_device *pdev,
+	enum nvdla_aperture_type aperture_type,
 	uint32_t reg)
 {
 	struct nvhost_device_data *pdata = platform_get_drvdata(pdev);
-	void __iomem *addr = pdata->aperture[0] + reg;
+	uint32_t aperture_id = s_nvdla_aperture_to_id(pdev, aperture_type);
+	void __iomem *addr = pdata->aperture[aperture_id] + reg;
 
 	return readl(addr);
 }
 
 void nvdla_device_register_write(struct platform_device *pdev,
+	enum nvdla_aperture_type aperture_type,
 	uint32_t reg,
 	uint32_t value)
 {
 	struct nvhost_device_data *pdata = platform_get_drvdata(pdev);
-	void __iomem *addr = pdata->aperture[0] + reg;
+	uint32_t aperture_id = s_nvdla_aperture_to_id(pdev, aperture_type);
+	void __iomem *addr = pdata->aperture[aperture_id] + reg;
 
 	writel(value, addr);
+}
+
+void nvdla_device_register_set_aperture(struct platform_device *pdev,
+	enum nvdla_aperture_type aperture_type,
+	void __iomem *addr)
+{
+	struct nvhost_device_data *pdata = platform_get_drvdata(pdev);
+	uint32_t aperture_id = s_nvdla_aperture_to_id(pdev, aperture_type);
+
+	pdata->aperture[aperture_id] = addr;
+}
+
+void __iomem *nvdla_device_register_get_aperture(struct platform_device *pdev,
+	enum nvdla_aperture_type aperture_type)
+{
+	struct nvhost_device_data *pdata = platform_get_drvdata(pdev);
+	uint32_t aperture_id = s_nvdla_aperture_to_id(pdev, aperture_type);
+
+	return pdata->aperture[aperture_id];
 }
 
 static struct device *nvdla_client_device_create(struct platform_device *pdev,
@@ -235,6 +290,22 @@ void nvdla_module_deinit(struct platform_device *pdev)
 	debugfs_remove_recursive(pdata->debugfs);
 }
 
+int32_t nvdla_module_context_register(struct platform_device *pdev,
+		void *context)
+{
+	(void) pdev;
+	(void) context;
+
+	return 0;
+}
+
+void nvdla_module_context_unregister(struct platform_device *pdev,
+		void *context)
+{
+	(void) pdev;
+	(void) context;
+}
+
 int32_t nvdla_module_client_register(struct platform_device *pdev,
 	void *context)
 {
@@ -288,13 +359,15 @@ static void nvdla_module_load_regs(struct platform_device *pdev, bool prod)
 
 	while (regs->addr) {
 		if (prod) {
-			void __iomem *addr = pdata->aperture[0] + regs->addr;
-
-			writel(regs->prod, addr);
+			nvdla_device_register_write(pdev,
+				NVDLA_APERTURE_TYPE_DLA,
+				regs->addr,
+				regs->prod);
 		} else {
-			void __iomem *addr = pdata->aperture[0] + regs->addr;
-
-			writel(regs->disable, addr);
+			nvdla_device_register_write(pdev,
+				NVDLA_APERTURE_TYPE_DLA,
+				regs->addr,
+				regs->disable);
 		}
 		regs++;
 	}
@@ -372,30 +445,6 @@ static int nvdla_runtime_resume(struct device *dev)
 	return err;
 }
 
-/* Define our own suspend function for nvdla */
-static int nvdla_suspend(struct device *dev)
-{
-	struct platform_device *pdev = to_platform_device(dev);
-	struct nvhost_device_data *pdata = dev_get_drvdata(dev);
-	int err = 0;
-
-	if (pdata->prepare_poweroff) {
-		err = pdata->prepare_poweroff(pdev);
-		if (err)
-			return err;
-	}
-
-	clk_bulk_disable_unprepare(pdata->num_clks, pdata->clks);
-
-	return 0;
-}
-
-/* Define our own resume function for nvdla */
-static int nvdla_resume(struct device *dev)
-{
-	return nvdla_runtime_resume(dev);
-}
-
 /* Module runtime suspend implementation */
 int nvdla_module_runtime_suspend(struct device *dev)
 {
@@ -448,18 +497,10 @@ int nvdla_module_suspend(struct device *dev)
 	struct nvdla_device *nvdla_dev = pdata->private_data;
 	int err = 0;
 
-	/* Call directly to our own suspend */
-	err = nvdla_suspend(dev);
+	err = pm_runtime_force_suspend(dev);
 	if (err != 0) {
-		dev_err(dev, "(FAIL) NVDLA suspend\n");
+		dev_err(dev, "(FAIL) PM suspend\n");
 		goto fail_nvhost_module_suspend;
-	}
-
-	if (nvdla_dev->icc_write) {
-		err = icc_set_bw(nvdla_dev->icc_write, 0, 0);
-		if (err)
-			dev_warn(&nvdla_dev->pdev->dev,
-				 "failed to set icc_write bw: %d\n", err);
 	}
 
 	/* Mark module to be in suspend state. */
@@ -481,10 +522,9 @@ int nvdla_module_resume(struct device *dev)
 		goto fail_not_in_suspend;
 	}
 
-	/* Call directly to our own resume */
-	err = nvdla_resume(dev);
+	err = pm_runtime_force_resume(dev);
 	if (err != 0) {
-		dev_err(dev, "(FAIL) NVDLA resume\n");
+		dev_err(dev, "(FAIL) PM resume\n");
 		goto fail_nvhost_module_resume;
 	}
 
@@ -542,24 +582,29 @@ static struct host1x_driver host1x_nvdla_driver = {
 	},
 };
 
-int32_t nvdla_driver_register(struct platform_driver *pdriver)
+int32_t nvdla_driver_register(void)
 {
 	int32_t err;
 
-	host1x_nvdla_driver.subdevs = pdriver->driver.of_match_table;
+	host1x_nvdla_driver.subdevs = nvdla_driver.driver.of_match_table;
 	err = host1x_driver_register(&host1x_nvdla_driver);
 	if (err < 0)
-		return err;
+		goto fail;
 
-	err = platform_driver_register(pdriver);
+	err = platform_driver_register(&nvdla_driver);
 	if (err < 0)
-		host1x_driver_unregister(&host1x_nvdla_driver);
+		goto unregister_host1x_driver;
 
+	return 0;
+
+unregister_host1x_driver:
+	host1x_driver_unregister(&host1x_nvdla_driver);
+fail:
 	return err;
 }
 
-void nvdla_driver_unregister(struct platform_driver *pdriver)
+void nvdla_driver_unregister(void)
 {
-	platform_driver_unregister(pdriver);
+	platform_driver_unregister(&nvdla_driver);
 	host1x_driver_unregister(&host1x_nvdla_driver);
 }

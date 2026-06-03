@@ -1,23 +1,13 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2022-2024 NVIDIA CORPORATION & AFFILIATES.
+ * SPDX-FileCopyrightText: Copyright (c) 2022-2026 NVIDIA CORPORATION & AFFILIATES.
  * All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #ifndef __camera_common__
 #define __camera_common__
+
+#include <nvidia/conftest.h>
 
 #include <linux/clk.h>
 #include <linux/debugfs.h>
@@ -241,6 +231,11 @@ struct camera_common_data {
 	struct tegracam_ctrl_handler		*tegracam_ctrl_hdl;
 	struct regmap				*regmap;
 	struct camera_common_pdata		*pdata;
+
+#if defined(NV_TEGRA_PMC_IO_PAD_POWER_ENABLE_PRESENT) /* Linux v7.0 */
+	struct tegra_pmc			*pmc;
+#endif
+
 	/* TODO: cleanup needed for priv once all the sensors adapt new framework */
 	void	*priv;
 	int	numctrls;

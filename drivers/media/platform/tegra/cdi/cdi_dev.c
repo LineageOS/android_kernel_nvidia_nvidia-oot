@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-only
 // SPDX-FileCopyrightText: Copyright (c) 2015-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include <nvidia/conftest.h>
@@ -14,7 +14,6 @@
 #include <linux/regmap.h>
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
-#include <linux/version.h>
 #include <media/cdi-dev.h>
 #include <uapi/media/cdi-mgr.h>
 
@@ -41,10 +40,14 @@ static int i2c_val_get(void *data, u64 *val)
 	struct cdi_dev_info *cdi_dev = data;
 	u8 temp = 0;
 
+	mutex_lock(&cdi_dev->mutex);
+
 	if (cdi_dev_raw_rd(cdi_dev, cdi_dev->reg_off, 0, &temp, 1)) {
 		dev_err(cdi_dev->dev, "ERR:%s failed\n", __func__);
+		mutex_unlock(&cdi_dev->mutex);
 		return -EIO;
 	}
+	mutex_unlock(&cdi_dev->mutex);
 	*val = (u64)temp;
 	return 0;
 }
@@ -55,10 +58,15 @@ static int i2c_val_set(void *data, u64 val)
 	u8 temp[3];
 
 	temp[2] = val & 0xff;
+
+	mutex_lock(&cdi_dev->mutex);
+
 	if (cdi_dev_raw_wr(cdi_dev, cdi_dev->reg_off, temp, 1)) {
 		dev_err(cdi_dev->dev, "ERR:%s failed\n", __func__);
+		mutex_unlock(&cdi_dev->mutex);
 		return -EIO;
 	}
+	mutex_unlock(&cdi_dev->mutex);
 	return 0;
 }
 
@@ -159,6 +167,9 @@ static void cdi_dev_dump(
    val    - buffer contains data to write.
    size   - number of bytes to be writen to device.
    offset - address in the device's register space to start with.
+
+   Note: This function assumes the caller has acquired the cdi mutex
+   to ensure thread-safe access to the I2C bus and device registers.
 */
 int cdi_dev_raw_rd(
 	struct cdi_dev_info *info, unsigned int offset,
@@ -169,10 +180,8 @@ int cdi_dev_raw_rd(
 	struct i2c_msg i2cmsg[2];
 
 	dev_dbg(info->dev, "%s\n", __func__);
-	mutex_lock(&info->mutex);
 	if (!info->power_is_on) {
 		dev_err(info->dev, "%s: power is off.\n", __func__);
-		mutex_unlock(&info->mutex);
 		return ret;
 	}
 
@@ -208,7 +217,6 @@ int cdi_dev_raw_rd(
 	ret = i2c_transfer(info->i2c_client->adapter, i2cmsg, 2);
 	if (ret > 0)
 		ret = 0;
-	mutex_unlock(&info->mutex);
 
 	if (!ret)
 		cdi_dev_dump(__func__, info, offset, val, size);
@@ -222,6 +230,9 @@ int cdi_dev_raw_rd(
    offset - address in the device's register space to start with.
 		if offset == -1, it will be ignored and no offset
 		value will be integrated into the data buffer.
+
+   Note: This function assumes the caller has acquired the cdi mutex
+   to ensure thread-safe access to the I2C bus and device registers.
 */
 int cdi_dev_raw_wr(
 	struct cdi_dev_info *info, unsigned int offset, u8 *val, size_t size)
@@ -232,17 +243,14 @@ int cdi_dev_raw_wr(
 	unsigned int num_msgs = 0, total_size, i;
 
 	dev_dbg(info->dev, "%s\n", __func__);
-	mutex_lock(&info->mutex);
 
 	if (size == 0) {
 		dev_dbg(info->dev, "%s: size is 0.\n", __func__);
-		mutex_unlock(&info->mutex);
 		return 0;
 	}
 
 	if (!info->power_is_on) {
 		dev_err(info->dev, "%s: power is off.\n", __func__);
-		mutex_unlock(&info->mutex);
 		return ret;
 	}
 
@@ -274,7 +282,6 @@ int cdi_dev_raw_wr(
 	if (!i2cmsg) {
 		dev_err(info->dev, "%s: failed to allocate memory\n",
 			__func__);
-		mutex_unlock(&info->mutex);
 		return -ENOMEM;
 	}
 
@@ -309,7 +316,6 @@ int cdi_dev_raw_wr(
 		ret = 0;
 
 	kfree(i2cmsg);
-	mutex_unlock(&info->mutex);
 	return ret;
 }
 
@@ -522,11 +528,15 @@ static long cdi_dev_ioctl(struct file *file,
 
 	switch (cmd) {
 	case CDI_DEV_IOCTL_RW:
+		mutex_lock(&info->mutex);
 		err = cdi_dev_get_package(info, arg);
-		if (err)
+		if (err) {
+			mutex_unlock(&info->mutex);
 			break;
+		}
 
 		err = cdi_dev_raw_rw(info);
+		mutex_unlock(&info->mutex);
 		break;
 	case CDI_DEV_IOCTL_GET_PWR_INFO:
 		err = cdi_dev_get_pwr_info(info, (void __user *)arg);

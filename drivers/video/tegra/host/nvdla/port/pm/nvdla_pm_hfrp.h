@@ -45,6 +45,9 @@ struct hfrp {
 	struct dla_lpwr_config *lpwr_config_va;
 	dma_addr_t lpwr_config_pa;
 
+	struct dla_dvfs_config *dvfs_config_va;
+	dma_addr_t dvfs_config_pa;
+
 	/* HFRP command management */
 	struct mutex cmd_lock;
 

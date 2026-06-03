@@ -8,8 +8,8 @@
 #include "pva_bit.h"
 
 #define PVA_ROUND_UP(val, align) ((((val) + ((align)-1U)) / (align)) * (align))
-#define PVA_ALIGN4(n) PVA_ROUND_UP(n, 4)
-#define PVA_ALIGN8(n) PVA_ROUND_UP(n, 8)
+#define PVA_ALIGN4(n) PVA_ROUND_UP(n, 4U)
+#define PVA_ALIGN8(n) PVA_ROUND_UP(n, 8U)
 
 static inline uint64_t assemble_addr(uint8_t hi, uint32_t lo)
 {
@@ -58,6 +58,20 @@ static inline void *pva_uintptr_to_ptr(uintptr_t addr)
 	} converter;
 
 	converter.addr = addr;
+	return converter.ptr;
+}
+
+/* Convert volatile pointer to non-volatile void pointer
+ * (MISRA C-2023 Rule 11.8 compliant - uses union instead of cast)
+ */
+static inline void *pva_volatile_ptr_to_void_ptr(void volatile *vol_ptr)
+{
+	union {
+		void volatile *vol;
+		void *ptr;
+	} converter;
+
+	converter.vol = vol_ptr;
 	return converter.ptr;
 }
 

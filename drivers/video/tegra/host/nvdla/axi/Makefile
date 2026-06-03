@@ -35,6 +35,7 @@ ccflags-y += -DBUG_5054810=1
 
 NVDLA_OBJS := \
 	$(NVDLA_COMMON_OBJS) \
+	nvdla_t25x.o \
 	port/device/nvdla_device_axi.o \
 	port/fw/nvdla_fw_riscv.o \
 	port/pm/nvdla_pm_hfrp.o \

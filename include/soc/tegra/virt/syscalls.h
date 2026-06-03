@@ -16,14 +16,24 @@
 #define HVC_NR_READ_HYP_INFO		9
 #define HVC_NR_GUEST_RESET		10
 #define HVC_NR_SYSINFO_IPA		13
+#define HVC_NR_LCPU0_MPIDR		15
 #define HVC_NR_READ_VM_INFO		16
-#define HVC_NR_TRACE_GET_EVENT_MASK		0x8003U
-#define HVC_NR_TRACE_SET_EVENT_MASK		0x8004U
+#define HVC_NR_TRACE_GET_EVENT_DATA	0x8003U
+#define HVC_NR_TRACE_SET_EVENT_DATA	0x8004U
+#define HVC_NR_SMMU_DIAG		0x8009U
+#define HVC_NR_CBB_DIAG			0x8133U
+#define HVC_NR_MC_DIAG			0x8134U
 
 #define GUEST_PRIMARY		0
 #define GUEST_IVC_SERVER	0
 #define MAX_NVLOG_PRODUCERS	32U
+#define MAX_NVLOG_ENTITIES	3U
 #define HVC_NR_CPU_FREQ		0xC6000022
+
+#define TRACE_SET_EVENT_MASK		0x0U
+#define TRACE_GET_EVENT_MASK		0x1U
+#define TRACE_SET_PROFILER_FREQ	 	0x2U
+#define TRACE_GET_PROFILER_FREQ	 	0x3U
 
 #define NGUESTS_MAX 16
 
@@ -55,6 +65,18 @@ struct nvlog_producer {
 	char name[32];
 };
 
+/// @brief Structure to store information about an NvLog entity. An entity is
+/// generally an operating system deployment. Log producers belonging to an
+/// entity will inhabit the same PID space and share a log level region.
+struct nvlog_entity {
+	/** @brief The NvLog entity ID. */
+	uint16_t id;
+	/** @brief IPA of shared memory used to request NvLog log level changes. */
+	uint64_t log_level_region_ipa;
+	/** @brief Size of shared memory used to request NvLog log level changes. */
+	uint64_t log_level_region_size;
+} __attribute__((packed, aligned(8)));
+
 /*
  * Data structure for the VM Information Region.
  *
@@ -70,6 +92,11 @@ struct vm_info_region {
 	 * and buf_count' fields.
 	 */
 	struct nvlog_producer nvlog_producers[MAX_NVLOG_PRODUCERS];
+
+	/**
+	 * @brief NvLog Entity Info.
+	 */
+	struct nvlog_entity nvlog_entities[MAX_NVLOG_ENTITIES];
 };
 
 struct tegra_hv_queue_data {
@@ -364,6 +391,20 @@ __attribute__((no_sanitize_address)) static inline int hyp_guest_reset(unsigned 
 	return (int)r0;
 }
 
+__attribute__((no_sanitize_address))
+static inline int hyp_guest_enter_vm_op(unsigned int const id, unsigned int const vm_op)
+{
+	register uint64_t r0 asm("x0") = id;
+	register uint64_t r1 asm("x1") = vm_op;
+
+	asm volatile("hvc %2"
+		: "+r"(r0), "+r"(r1)
+		: "i"(HVC_NR_GUEST_RESET)
+		: "x2", _X3_X17);
+
+	return (int)r0;
+}
+
 __attribute__((no_sanitize_address)) static inline uint64_t hyp_sysinfo_ipa(void)
 {
 	register uint64_t r0 asm("x0");
@@ -510,21 +551,78 @@ __attribute__((no_sanitize_address)) static __attribute__((always_inline)) inlin
 		args[3] = x3;
 }
 
-__attribute__((no_sanitize_address)) static inline int hyp_trace_get_mask(uint64_t *value)
+__attribute__((no_sanitize_address))
+static inline int hyp_trace_get_mask(uint64_t *value)
 {
-	uint64_t args[4] = { *value, 0U, 0U, 0U };
-	hyp_call44(HVC_NR_TRACE_GET_EVENT_MASK, args);
+	uint64_t args[4] = { TRACE_GET_EVENT_MASK, 0U, 0U, 0U };
+	hyp_call44(HVC_NR_TRACE_GET_EVENT_DATA, args);
 	if (args[0] == 0U)
 		*value = args[1];
 
 	return (int) args[0];
 }
 
-__attribute__((no_sanitize_address)) static inline int hyp_trace_set_mask(uint64_t type, uint64_t value)
+__attribute__((no_sanitize_address))
+static inline int hyp_trace_set_mask(uint64_t mask)
 {
-	uint64_t args[4] = { type, value, 0U, 0U};
-	hyp_call44(HVC_NR_TRACE_SET_EVENT_MASK, args);
+	uint64_t args[4] = { TRACE_SET_EVENT_MASK, mask, 0U, 0U};
+	hyp_call44(HVC_NR_TRACE_SET_EVENT_DATA, args);
 	return (int) args[0];
+}
+
+__attribute__((no_sanitize_address))
+static inline int hyp_trace_get_profiler_freq(uint64_t *freq)
+{
+	uint64_t args[4] = { TRACE_GET_PROFILER_FREQ, 0U, 0U, 0U };
+	hyp_call44(HVC_NR_TRACE_GET_EVENT_DATA, args);
+	if (args[0] == 0U)
+		*freq = args[1];
+
+	return (int) args[0];
+}
+
+__attribute__((no_sanitize_address))
+static inline int hyp_trace_set_profiler_freq(uint64_t freq)
+{
+	uint64_t args[4] = { TRACE_SET_PROFILER_FREQ, freq, 0U, 0U};
+	hyp_call44(HVC_NR_TRACE_SET_EVENT_DATA, args);
+	return (int) args[0];
+}
+
+__attribute__((no_sanitize_address))
+static inline bool hyp_smmu_diagnostic(void)
+{
+	uint64_t args[4] = { 0U, 0U, 0U, 0U };
+	hyp_call44(HVC_NR_SMMU_DIAG, args);
+
+	return (args[0] == 0U);
+}
+
+__attribute__((no_sanitize_address))
+static inline bool hyp_cbb_err_diagnostic(void)
+{
+	uint64_t args[4] = { 0U, 0U, 0U, 0U };
+	hyp_call44(HVC_NR_CBB_DIAG, args);
+
+	return (args[0] == 0U);
+}
+
+__attribute__((no_sanitize_address))
+static inline bool hyp_mc_err_diagnostic(void)
+{
+	uint64_t args[4] = { 0U, 0U, 0U, 0U };
+	hyp_call44(HVC_NR_MC_DIAG, args);
+
+	return (args[0] == 0U);
+}
+
+__attribute__((no_sanitize_address))
+static inline long int hyp_lcpu0_mpidr(void)
+{
+	uint64_t args[4] = { 0U, 0U, 0U, 0U };
+	hyp_call44(HVC_NR_LCPU0_MPIDR, args);
+
+	return args[0];
 }
 
 #undef _X3_X17
@@ -538,6 +636,7 @@ int hyp_read_ivc_info(uint64_t *ivc_info_page_pa);
 int hyp_read_ipa_pa_info(struct hyp_ipa_pa_info *info, int guestid,
 		uint64_t ipa);
 int hyp_raise_irq(unsigned int irq, unsigned int vmid);
+int hyp_guest_enter_vm_op(unsigned int const id, unsigned int const arg);
 uint64_t hyp_sysinfo_ipa(void);
 
 /* ASM prototypes */

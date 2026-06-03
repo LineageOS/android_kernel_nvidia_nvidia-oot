@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/*
- * Copyright (c) 2015-2023, NVIDIA Corporation. All rights reserved.
+/* SPDX-FileCopyrightText: Copyright (c) 2015-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ *
  */
 
 #include "nvdla_falcon.h"
+#include "../../port/nvdla_device.h"
 #include "../../port/nvdla_host_wrapper.h"
 
 #include <linux/platform_device.h>
@@ -224,13 +225,13 @@ static int falcon_boot(struct falcon *falcon)
  */
 static irqreturn_t nvdla_flcn_isr(int irq, void *dev_id)
 {
-    struct platform_device *pdev = dev_id;
-    struct nvhost_device_data *pdata = platform_get_drvdata(pdev);
+	struct platform_device *pdev = dev_id;
+	struct nvhost_device_data *pdata = platform_get_drvdata(pdev);
 
-    if (pdata->flcn_isr)
-        pdata->flcn_isr(pdev);
+	if (pdata->flcn_isr)
+		pdata->flcn_isr(pdev);
 
-    return IRQ_HANDLED;
+	return IRQ_HANDLED;
 }
 
 /**
@@ -238,26 +239,26 @@ static irqreturn_t nvdla_flcn_isr(int irq, void *dev_id)
  */
 int nvdla_flcn_intr_init(struct platform_device *pdev)
 {
-    struct nvhost_device_data *pdata = platform_get_drvdata(pdev);
-    int ret = 0;
+	struct nvhost_device_data *pdata = platform_get_drvdata(pdev);
+	int ret = 0;
 
-    pdata->irq = platform_get_irq(pdev, 0);
-    if (pdata->irq < 0) {
-        dev_err(&pdev->dev, "failed to get IRQ\n");
-        return -ENXIO;
-    }
+	pdata->irq = platform_get_irq(pdev, 0);
+	if (pdata->irq < 0) {
+		dev_err(&pdev->dev, "failed to get IRQ\n");
+		return -ENXIO;
+	}
 
-    ret = devm_request_irq(&pdev->dev, pdata->irq, nvdla_flcn_isr, 0,
-                         dev_name(&pdev->dev), pdev);
-    if (ret) {
-        dev_err(&pdev->dev, "failed to request irq. err %d\n", ret);
-        return ret;
-    }
+	ret = devm_request_irq(&pdev->dev, pdata->irq, nvdla_flcn_isr, 0,
+			dev_name(&pdev->dev), pdev);
+	if (ret) {
+		dev_err(&pdev->dev, "failed to request irq. err %d\n", ret);
+		return ret;
+	}
 
-    /* keep irq disabled */
-    disable_irq(pdata->irq);
+	/* keep irq disabled */
+	disable_irq(pdata->irq);
 
-    return 0;
+	return 0;
 }
 
 /**
@@ -265,30 +266,31 @@ int nvdla_flcn_intr_init(struct platform_device *pdev)
  */
 int nvdla_flcn_reload_fw(struct platform_device *pdev)
 {
-    /* TODO: Used by debugfs */
-    return -EOPNOTSUPP;
+	/* TODO: Used by debugfs */
+	return -EOPNOTSUPP;
 }
 
 /**
  * Initialize DLA falcon
  */
 static int nvdla_flcn_init(struct platform_device *pdev,
-                         struct nvhost_device_data *pdata)
+		struct nvhost_device_data *pdata)
 {
-    struct falcon *falcon;
+	struct falcon *falcon;
 
-    falcon = devm_kzalloc(&pdev->dev, sizeof(*falcon), GFP_KERNEL);
-    if (!falcon)
-        return -ENOMEM;
+	falcon = devm_kzalloc(&pdev->dev, sizeof(*falcon), GFP_KERNEL);
+	if (!falcon)
+		return -ENOMEM;
 
-    falcon->dev = &pdev->dev;
-    falcon->regs = pdata->aperture[0];
+	falcon->dev = &pdev->dev;
+	falcon->regs = nvdla_device_register_get_aperture(pdev,
+			NVDLA_APERTURE_TYPE_DLA);
 
-    falcon_init(falcon);
+	falcon_init(falcon);
 
-    pdata->falcon_data = falcon;
+	pdata->falcon_data = falcon;
 
-    return 0;
+	return 0;
 }
 
 /**
@@ -296,51 +298,51 @@ static int nvdla_flcn_init(struct platform_device *pdev,
  */
 int nvdla_flcn_prepare_poweroff(struct platform_device *pdev)
 {
-    struct nvhost_device_data *pdata = platform_get_drvdata(pdev);
+	struct nvhost_device_data *pdata = platform_get_drvdata(pdev);
 
-    if (pdata->flcn_isr)
-        disable_irq(pdata->irq);
+	if (pdata->flcn_isr)
+		disable_irq(pdata->irq);
 
-    return 0;
+	return 0;
 }
 
 /**
  * Load firmware for DLA falcon
  */
 static int nvdla_flcn_load_firmware(struct platform_device *pdev,
-                                  struct falcon *falcon,
-                                  char *firmware_name)
+		struct falcon *falcon,
+		char *firmware_name)
 {
-    dma_addr_t iova;
-    size_t size;
-    void *virt;
-    int err;
+	dma_addr_t iova;
+	size_t size;
+	void *virt;
+	int err;
 
-    if (falcon->firmware.virt)
-        return 0;
+	if (falcon->firmware.virt)
+		return 0;
 
-    err = falcon_read_firmware(falcon, firmware_name);
-    if (err < 0)
-        return err;
+	err = falcon_read_firmware(falcon, firmware_name);
+	if (err < 0)
+		return err;
 
-    size = falcon->firmware.size;
-    virt = dma_alloc_coherent(&pdev->dev, size, &iova, GFP_KERNEL);
-    if (!virt)
-        return -ENOMEM;
+	size = falcon->firmware.size;
+	virt = dma_alloc_coherent(&pdev->dev, size, &iova, GFP_KERNEL);
+	if (!virt)
+		return -ENOMEM;
 
-    falcon->firmware.virt = virt;
-    falcon->firmware.iova = iova;
+	falcon->firmware.virt = virt;
+	falcon->firmware.iova = iova;
 
-    err = falcon_load_firmware(falcon);
-    if (err < 0)
-        goto cleanup;
+	err = falcon_load_firmware(falcon);
+	if (err < 0)
+		goto cleanup;
 
-    return 0;
+	return 0;
 
 cleanup:
-    dma_free_coherent(&pdev->dev, size, virt, iova);
+	dma_free_coherent(&pdev->dev, size, virt, iova);
 
-    return err;
+	return err;
 }
 
 /**
@@ -348,50 +350,50 @@ cleanup:
  */
 int nvdla_flcn_finalize_poweron(struct platform_device *pdev)
 {
-    struct nvhost_device_data *pdata = platform_get_drvdata(pdev);
+	struct nvhost_device_data *pdata = platform_get_drvdata(pdev);
 #ifdef CONFIG_IOMMU_API
-    struct iommu_fwspec *spec = dev_iommu_fwspec_get(&pdev->dev);
+	struct iommu_fwspec *spec = dev_iommu_fwspec_get(&pdev->dev);
 #endif
-    struct falcon *falcon;
-    int err;
-    u32 value;
+	struct falcon *falcon;
+	int err;
+	u32 value;
 
-    if (!pdata->falcon_data) {
-        err = nvdla_flcn_init(pdev, pdata);
-        if (err < 0)
-            return -ENOMEM;
-    }
+	if (!pdata->falcon_data) {
+		err = nvdla_flcn_init(pdev, pdata);
+		if (err < 0)
+			return -ENOMEM;
+	}
 
-    falcon = pdata->falcon_data;
+	falcon = pdata->falcon_data;
 
-    err = nvdla_flcn_load_firmware(pdev, falcon, pdata->firmware_name);
-    if (err < 0)
-        return err;
+	err = nvdla_flcn_load_firmware(pdev, falcon, pdata->firmware_name);
+	if (err < 0)
+		return err;
 
 #ifdef CONFIG_IOMMU_API
-    if (spec) {
-        host1x_writel(pdev, pdata->transcfg_addr, pdata->transcfg_val);
+	if (spec) {
+		host1x_writel(pdev, pdata->transcfg_addr, pdata->transcfg_val);
 
-        if (spec->num_ids > 0) {
-            value = spec->ids[0] & 0xffff;
-            host1x_writel(pdev, THI_STREAMID0, value);
-            host1x_writel(pdev, THI_STREAMID1, value);
-        }
-    }
+		if (spec->num_ids > 0) {
+			value = spec->ids[0] & 0xffff;
+			host1x_writel(pdev, THI_STREAMID0, value);
+			host1x_writel(pdev, THI_STREAMID1, value);
+		}
+	}
 #endif
 
-    err = falcon_boot(falcon);
-    if (err < 0)
-        return err;
+	err = falcon_boot(falcon);
+	if (err < 0)
+		return err;
 
-    err = falcon_wait_idle(falcon);
-    if (err < 0) {
-        dev_err(&pdev->dev, "falcon boot timed out\n");
-        return err;
-    }
+	err = falcon_wait_idle(falcon);
+	if (err < 0) {
+		dev_err(&pdev->dev, "falcon boot timed out\n");
+		return err;
+	}
 
-    if (pdata->flcn_isr)
-        enable_irq(pdata->irq);
+	if (pdata->flcn_isr)
+		enable_irq(pdata->irq);
 
-    return 0;
+	return 0;
 }

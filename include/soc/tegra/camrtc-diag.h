@@ -50,6 +50,9 @@
 /** Maximum number of diagnostic test vectors */
 #define CAMRTC_DIAG_MAX_ISP_PFSDF_NUM_VECTORS	MK_U32(40)
 
+/** Maximum number of ISP units for PFSD */
+#define CAMRTC_DIAG_MAX_ISP_UNITS		MK_U32(2)
+
 /**
  * @brief Header of an ISP PFSD test binary in shared memory.
  *

@@ -9,6 +9,8 @@
 #include <linux/types.h>
 #include <linux/host1x.h>
 #include <linux/platform_device.h>
+#include <linux/iommu.h>
+#include <linux/io.h>
 #include <linux/of.h>
 #include <linux/of_platform.h>
 
@@ -189,9 +191,6 @@ void nvhost_module_idle_mult(struct platform_device *pdev, int refs);
 int nvhost_module_busy(struct platform_device *dev);
 extern const struct dev_pm_ops nvhost_module_pm_ops;
 
-void host1x_writel(struct platform_device *dev, u32 r, u32 v);
-u32 host1x_readl(struct platform_device *dev, u32 r);
-
 /* common device management APIs */
 int nvhost_client_device_get_resources(struct platform_device *dev);
 int nvhost_client_device_release(struct platform_device *dev);
@@ -215,14 +214,27 @@ int nvhost_syncpt_is_expired_ext(struct platform_device *dev, u32 id,
 dma_addr_t nvhost_syncpt_address(struct platform_device *engine_pdev, u32 id);
 int nvhost_syncpt_unit_interface_init(struct platform_device *pdev);
 void nvhost_syncpt_unit_interface_deinit(struct platform_device *pdev);
+u32 nvhost_syncpt_unit_interface_get_byte_offset_ext(
+				struct platform_device *host_pdev,
+				u32 syncpt_id);
+#ifndef CONFIG_TEGRA_DRM_DISABLE_LEGACY_INTERFACE
 int nvhost_syncpt_unit_interface_get_aperture(
 				struct platform_device *host_pdev,
 				phys_addr_t *base,
 				size_t *size);
 u32 nvhost_syncpt_unit_interface_get_byte_offset(u32 syncpt_id);
-u32 nvhost_syncpt_unit_interface_get_byte_offset_ext(
-				struct platform_device *host_pdev,
-				u32 syncpt_id);
+#else
+static int nvhost_syncpt_unit_interface_get_aperture(struct platform_device *pdev,
+                                              u64 *base, size_t *size)
+{
+        return 0;
+}
+
+static u32 nvhost_syncpt_unit_interface_get_byte_offset(u32 syncpt_id)
+{
+        return 0;
+}
+#endif
 
 /* public host1x interrupt management APIs */
 int nvhost_intr_register_notifier(struct platform_device *pdev,
@@ -303,6 +315,22 @@ static inline struct host1x *nvhost_get_host1x(struct platform_device *client_pd
 	}
 
 	return host1x;
+}
+
+static inline u32 host1x_readl(struct platform_device *pdev, u32 r)
+{
+	struct nvhost_device_data *pdata = platform_get_drvdata(pdev);
+	void __iomem *addr = pdata->aperture[0] + r;
+
+	return readl(addr);
+}
+
+static inline void host1x_writel(struct platform_device *pdev, u32 r, u32 v)
+{
+	struct nvhost_device_data *pdata = platform_get_drvdata(pdev);
+	void __iomem *addr = pdata->aperture[0] + r;
+
+	writel(v, addr);
 }
 
 static inline int nvhost_module_set_rate(struct platform_device *dev, void *priv,

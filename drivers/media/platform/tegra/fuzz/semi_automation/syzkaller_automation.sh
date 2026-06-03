@@ -10,12 +10,12 @@ show_help() {
     echo "  source ./syzkaller_automation.sh [options]"
     echo ""
     echo "Options:"
-    echo "  --fuzz_module         test mode: all cdi_mgr.txt cdi_dev.txt capture_vi_channel.txt"
-    echo "                                   capture_isp_channel.txt cam_fsync.txt"
+    echo "  --fuzz_module         test mode: all cam_fsync cdi fusa-capture"
     echo "  --tegra_top           project directory"
     echo "  --colossus_ip         Colossus ip address"
     echo "  --tegra_ip            Tegra ip address"
     echo "  --mode MODE           Automation Mode valid mode: semi, full (default:semi)"
+    echo "  --run_time            Set the running time (default: unset)"
     echo "  -h, --help            Show this help message"
     echo ""
     echo "Examples:"
@@ -24,7 +24,8 @@ show_help() {
     echo "    --tegra_top /home/xx/automotive-dev-main-xxx \\"
     echo "    --colossus_ip 10.176.197.155 \\"
     echo "    --tegra_ip 192.168.1.141 \\"
-    echo "    --mode full"
+    echo "    --mode full \\"
+    echo "    --run_time 1h1m"
 }
 
 # Display confirmation message and wait for user input
@@ -39,14 +40,13 @@ confirm_message() {
     msg+="*********************************************************************************"
     echo -e "${RED}${msg}${NC}"
     local patch_base="https://git-master.nvidia.com/r/c/"
-    echo -e "1. When building the system image, please ensure\n" \
+    echo -e "1. When building the system image(t264), please ensure\n" \
           "  that the following two changes are included:\n" \
-          "  ${patch_base}linux-stable/+/3326676\n" \
-          "  ${patch_base}device/hardware/nvidia/platform/t23x/auto-pct/+/3207558\n"\
+          "  ${patch_base}linux-stable/+/3415286\n" \
+          "  ${patch_base}device/hardware/nvidia/platform/t264/automotive-pct/+/3415280\n"\
           "  Recompile the foundation and linux none debug, and flash the board.\n"
-    echo -e "2. Please update the configs file. <sshkey>,<user>,<repo-path> and module_obj path.\n"\
-          "  sshkey: /home/user/.ssh/id_rsa\n" \
-          "  repo-path:automotive-dev-main-20250310T181236003\n"
+    echo -e "2. Please update the configs file. <sshkey> id_rsa or id_ecdsa.\n"\
+          "  sshkey: /home/<user>/.ssh/id_rsa or /home/<user>/.ssh/id_ecdsa\n"
     echo -e "3. Please add LocalForward 50000 127.0.0.1:50000 to the ~/.ssh/config file.\n"
     echo -e "Please confirm whether the above operations have been completed: (y/N)"
 
@@ -81,6 +81,20 @@ syzkaller_setup() {
         mkdir -p "$SYZKALLER_DIR"
         syzkaller_installation
     fi
+
+    if [ -d "$SYZKALLER_DIR/syzkaller-scripts" ]; then
+        echo "syzkaller coverage scripts already installation"
+    else
+        cd "$SYZKALLER_DIR" || exit
+        git clone ssh://git@gitlab-master.nvidia.com:12051/offsec/syzkaller-scripts.git
+        if [ $? -ne 0 ]; then
+            echo "Error: Failed to clone the syzkaller coverage scripts"
+            return 1
+        fi
+        echo "syzkaller coverage scripts complete"
+    fi
+
+
 
     echo "check go installation"
 
@@ -151,7 +165,7 @@ syzkaller_build() {
     ARCH="arm64"
     SOURCEDIR="$TEGRA_TOP/kernel/kernel-oot"
     build_base_path="$TEGRA_TOP/out/embedded-linux-generic-debug-none/nvidia/kernel-oot/"
-    BUILDDIR="$build_base_path/kernel_prod-rt_patches-nvidia-oot/linux-headers/"
+    BUILDDIR="$build_base_path/kernel_prod-rt_patches-ootm-nvidia-public/linux-headers/"
 
     echo "syzkaller building..."
 
@@ -162,109 +176,91 @@ syzkaller_build() {
         mkdir -p $SYZKALLER_DIR/syzkaller/sys/linux
     fi
 
-    if [ "$fuzz_module" = "all" ]; then
-        for module_file in $(list_tests); do
-            source_file="$(get_module_file_path $module_file)"
-            echo "source_file: $source_file"
-            if [ ! -f "$source_file" ]; then
-                echo "Error: Source file not found: $source_file"
-                return 1
+    for description_file in $(list_description_files); do
+        source_file="$(get_description_file_path $description_file)"
+        echo "source_file: $source_file"
+        if [ ! -f "$source_file" ]; then
+            echo "Error: Source file not found: $source_file"
+            return 1
+        else
+            cp "$source_file" "$SYZKALLER_DIR/syzkaller/sys/linux"
+        fi
+    done
+
+    for description_file in $(list_description_files); do
+
+        INCLUDEDIRS="$(get_description_include_path $description_file)"
+
+        echo "run syzkaller:$SYZKALLER_DIR/syzkaller/bin/syz-extract" \
+                " -os $OS -arch $ARCH" \
+                " -sourcedir $SOURCEDIR" \
+                " -builddir $BUILDDIR" \
+                " -includedirs $INCLUDEDIRS $description_file"
+        $SYZKALLER_DIR/syzkaller/bin/syz-extract \
+            -os $OS \
+            -arch $ARCH \
+            -sourcedir $SOURCEDIR \
+            -builddir $BUILDDIR \
+            -includedirs $INCLUDEDIRS \
+            $description_file
+        if [ $? -ne 0 ]; then
+            echo "Error: Failed to run syz-extract on $description_file."
+            return 1
+        else
+            const_file="$SYZKALLER_DIR/syzkaller/sys/linux/${description_file}.const"
+            if [ -f "$const_file" ]; then
+                echo "Success: Generated valid const file $const_file"
             else
-                cp "$source_file" "$SYZKALLER_DIR/syzkaller/sys/linux"
+                echo "Warning: Expected const file $const_file was not generated."
             fi
-        done
-
-        for module_file in $(list_tests); do
-
-            INCLUDEDIRS="$(get_module_include_path $module_file)"
-
-            echo "run syzkaller:$SYZKALLER_DIR/syzkaller/bin/syz-extract" \
-                 " -os $OS -arch $ARCH" \
-                 " -sourcedir $SOURCEDIR" \
-                 " -builddir $BUILDDIR" \
-                 " -includedirs $INCLUDEDIRS $module_file"
-            $SYZKALLER_DIR/syzkaller/bin/syz-extract \
-                -os $OS \
-                -arch $ARCH \
-                -sourcedir $SOURCEDIR \
-                -builddir $BUILDDIR \
-                -includedirs $INCLUDEDIRS \
-                $module_file
-            if [ $? -ne 0 ]; then
-                echo "Error: Failed to run syz-extract on $module_file."
-                return 1
-            else
-                const_file="$SYZKALLER_DIR/syzkaller/sys/linux/${module_file}.const"
-                if [ -f "$const_file" ]; then
-                    echo "Success: Generated valid const file $const_file"
-                else
-                    echo "Warning: Expected const file $const_file was not generated."
-                fi
-            fi
-        done
-    fi
+        fi
+    done
 
     make HOSTOS=linux HOSTARCH=amd64 TARGETOS=linux TARGETARCH=arm64
 }
 
-# List all available test modules
-list_tests() {
-  echo "$module_tests"
+# List all available description files
+list_description_files() {
+  echo "$description_files"
 }
 
 # Get include paths for specified module
 # Parameters:
 #   $1 - module name
 # Returns: String containing include paths
-get_module_include_path() {
-    local module=$1
-    local base_path="$TEGRA_TOP/kernel/nvidia-oot"
-    case $module in
-        cdi_mgr.txt)
-            echo "${base_path}/include,"\
-                 "${base_path}/include/uapi/asm-generic" | tr -d ' '
-            ;;
-        cdi_dev.txt)
-            echo "${base_path}/include"
-            ;;
-        capture_vi_channel.txt)
-            echo "${base_path},${base_path}/include,${base_path}/include/uapi,"\
-                 "${TEGRA_TOP}/camera/firmware-api/kernel-include,"\
-                 "${TEGRA_TOP}/core/include" | tr -d ' '
-            ;;
-        capture_isp_channel.txt)
-            echo "${base_path},${base_path}/include,${base_path}/include/uapi,"\
-                 "${TEGRA_TOP}/camera/firmware-api/kernel-include,"\
-                 "${TEGRA_TOP}/core/include" | tr -d ' '
-            ;;
-        cam_fsync.txt)
-            echo "${base_path}/include/uapi/media" | tr -d ' '
-            ;;
-      esac
+get_description_include_path() {
+    local description=$1
+    local base_path="$TEGRA_TOP/kernel/ootm/nvoot-public"
+
+    case $description in
+    cdi_mgr.txt|cdi_dev.txt|cam_fsync.txt)
+        echo "${base_path}/include"
+        ;;
+    capture-vi-channel.txt|capture-isp-channel.txt)
+        echo "${base_path}/include"
+        ;;
+    esac
 }
 
-# Get file path for specified module
+# Get description file path for specified module
 # Parameters:
 #   $1 - module name
-# Returns: Complete path to module file
-get_module_file_path() {
-    local module=$1
-    local base_path="$TEGRA_TOP/kernel/nvidia-oot/drivers/media/platform/tegra/fuzz"
-    case $module in
+# Returns: Complete path to description file
+get_description_file_path() {
+    local description=$1
+    local base_path="$TEGRA_TOP/kernel/ootm/nvoot-public/drivers/media/platform/tegra/fuzz"
+    case $description in
         cdi_mgr.txt)
             echo "${base_path}/cdi/cdi_mgr.txt"
             ;;
         cdi_dev.txt)
             echo "${base_path}/cdi/cdi_dev.txt"
             ;;
-        isc_mgr.txt)
-            echo "${base_path}/isc/isc_mgr.txt"
+        capture-vi-channel.txt)
+            echo "${base_path}/fusa-capture/capture-vi-channel.txt"
             ;;
-        capture_vi_channel.txt)
-            echo "${base_path}/kmd_capture/capture_vi_channel.txt"
-            ;;
-        capture_isp_channel.txt)
-            echo "${base_path}/kmd_capture/capture_isp_channel.txt"
+        capture-isp-channel.txt)
+            echo "${base_path}/fusa-capture/capture-isp-channel.txt"
             ;;
         cam_fsync.txt)
             echo "${base_path}/cam_fsync/cam_fsync.txt"
@@ -284,19 +280,20 @@ run_script_colossus() {
 
 # Get script path for automation
 get_script_path() {
-    echo "$TEGRA_TOP/kernel/nvidia-oot/drivers/media/platform/tegra/fuzz/semi_automation"
+    echo "$TEGRA_TOP/kernel/ootm/nvoot-public/drivers/media/platform/tegra/fuzz/semi_automation"
 }
 
 SYZKALLER_DIR="${HOME}/syzkaller"
 GO_DIR="${HOME}/go"
-# Test case lists as strings
-module_tests="cdi_mgr.txt
+# Test description file list
+description_files="cdi_mgr.txt
 cdi_dev.txt
-capture_vi_channel.txt
-capture_isp_channel.txt
+capture-vi-channel.txt
+capture-isp-channel.txt
 cam_fsync.txt"
 
 automation_mode="semi"
+run_time="0h"
 
 # Main function
 # Processes command line arguments and coordinates automation workflow
@@ -335,6 +332,10 @@ main() {
             ;;
         --mode)
             automation_mode="$2"
+            shift 2
+            ;;
+        --run_time)
+            run_time="$2"
             shift 2
             ;;
         -h|--help)
@@ -381,17 +382,40 @@ main() {
     # It needs to be executed on the local PC.
     # ssh -fN -L 50000:127.0.0.1:50000 ubuntu24
 
-    config_base_path="$TEGRA_TOP/kernel/nvidia-oot/drivers/media/platform/tegra/fuzz"
-    config_file="$config_base_path/syzkaller_config/configs"
+    config_base_path="$TEGRA_TOP/kernel/ootm/nvoot-public/drivers/media/platform/tegra/fuzz"
+    if [ "$fuzz_module" = "all" ]; then
+        config_file="$config_base_path/syzkaller_config/configs"
+        else
+            config_file="$config_base_path/$fuzz_module/configs"
+    fi
+
     if [ ! -f "$config_file" ]; then
         echo "Error: Config file not found at $config_file"
         return 1
     fi
-    cp $config_file $SYZKALLER_DIR/syzkaller/bin/
-    echo "run syzkaller fuzzer"
-    cd $SYZKALLER_DIR/syzkaller/bin
-    ./syz-manager -config=configs
 
+    sed -i "s|<user>|$(whoami)|g" $config_file
+    sed -i "s|<repo-path>|$TEGRA_TOP|g" $config_file
+
+    echo "run syzkaller fuzzer $run_time"
+
+    cd $SYZKALLER_DIR/syzkaller/bin
+    if [ "$run_time" = "0h" ]; then
+        ./syz-manager -config=$config_file
+    else
+        timeout $run_time ./syz-manager -config=$config_file
+    fi
+
+    if [ $? -ne 0 ]; then
+        echo "Error: syz-manager failed to run"
+        return 1
+    fi
+
+    echo "run syzkaller fuzzer done"
+
+    source $(get_script_path)/syzkaller_coverage.sh --fuzz_module $fuzz_module --tegra_top $TEGRA_TOP
+
+    echo "syzkaller coverage done"
 }
 
 # Call main function with all passed arguments

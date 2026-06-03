@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2015-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2015-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include <nvidia/conftest.h>
 
@@ -48,6 +48,18 @@
 #define WB_USER_SPACE_OFFSET 16
 #define WB_CONFIGURE_OFFSET 17
 #define WB_SHARED_BUFFER_OFFSET 18
+
+static int tegra_ufshcd_query_attr(struct ufs_hba *hba,
+				   enum query_opcode opcode,
+				   enum attr_idn idn, u8 index, u8 selector,
+				   u32 *attr_val)
+{
+#if NV_IS_EXPORT_SYMBOL_PRESENT_ufshcd_query_attr
+	return ufshcd_query_attr(hba, opcode, idn, index, selector, attr_val);
+#else
+	return -EOPNOTSUPP;
+#endif
+}
 
 static void populate_desc_header(struct ufs_tegra_host *ufs_tegra)
 {
@@ -215,7 +227,9 @@ static ssize_t program_lun_debugfs_write(struct file *file,
 {
 	int err = 0;
 	int i;
+#if NV_IS_EXPORT_SYMBOL_PRESENT_ufshcd_query_descriptor_retry
 	u32 lun_desc_len = CONFIG_DESC_SIZE;
+#endif
 	ssize_t ret = 0;
 	char *kbuf = NULL;
 	u32 desc_lock;
@@ -270,7 +284,7 @@ static ssize_t program_lun_debugfs_write(struct file *file,
 		pm_runtime_get_sync(hba->dev);
 
 		/* Read bConfigDescLock */
-		if (ufshcd_query_attr(hba, UPIU_QUERY_OPCODE_READ_ATTR,
+		if (tegra_ufshcd_query_attr(hba, UPIU_QUERY_OPCODE_READ_ATTR,
 					QUERY_ATTR_IDN_CONF_DESC_LOCK, 0, 0, &desc_lock)) {
 			dev_err(hba->dev,
 				"%s: Read bConfigDescrLock failed\n", __func__);
@@ -307,9 +321,13 @@ static ssize_t program_lun_debugfs_write(struct file *file,
 		}
 
 		/* Program LUN */
+#if NV_IS_EXPORT_SYMBOL_PRESENT_ufshcd_query_descriptor_retry
 		err = ufshcd_query_descriptor_retry(hba, UPIU_QUERY_OPCODE_WRITE_DESC,
 				QUERY_DESC_IDN_CONFIGURATION, 0, 0, ufs_tegra->lun_desc_buf,
 				&lun_desc_len);
+#else
+		err = -EOPNOTSUPP;
+#endif
 		if (err) {
 			dev_err(hba->dev,
 				"%s: Failed to program LUNs\n", __func__);
@@ -394,7 +412,7 @@ static ssize_t program_refclk_debugfs_write(struct file *file,
 
 		pm_runtime_get_sync(hba->dev);
 		/* Write brefclkFreq value */
-		err = ufshcd_query_attr(hba, UPIU_QUERY_OPCODE_WRITE_ATTR,
+		err = tegra_ufshcd_query_attr(hba, UPIU_QUERY_OPCODE_WRITE_ATTR,
 				QUERY_ATTR_IDN_REF_CLK_FREQ, 0, 0, &(ufs_tegra->refclk_value));
 		if (err) {
 			dev_err(hba->dev,
@@ -405,7 +423,7 @@ static ssize_t program_refclk_debugfs_write(struct file *file,
 		}
 
 		/* Read brefclkFreq value */
-		err = ufshcd_query_attr(hba, UPIU_QUERY_OPCODE_READ_ATTR,
+		err = tegra_ufshcd_query_attr(hba, UPIU_QUERY_OPCODE_READ_ATTR,
 				QUERY_ATTR_IDN_REF_CLK_FREQ, 0, 0, &(ufs_tegra->refclk_value));
 		if (err) {
 			dev_err(hba->dev,
@@ -498,7 +516,7 @@ static ssize_t program_bootlun_en_id_debugfs_write(struct file *file,
 		}
 
 		/* Write bBootLunEn value */
-		if (ufshcd_query_attr(hba, UPIU_QUERY_OPCODE_WRITE_ATTR,
+		if (tegra_ufshcd_query_attr(hba, UPIU_QUERY_OPCODE_WRITE_ATTR,
 					QUERY_ATTR_IDN_BOOT_LU_EN, 0, 0,
 					&(ufs_tegra->bootlun_en_id))) {
 			dev_err(hba->dev,
@@ -506,7 +524,7 @@ static ssize_t program_bootlun_en_id_debugfs_write(struct file *file,
 		}
 
 		/* Read bBootLunEn value */
-		if (ufshcd_query_attr(hba, UPIU_QUERY_OPCODE_READ_ATTR,
+		if (tegra_ufshcd_query_attr(hba, UPIU_QUERY_OPCODE_READ_ATTR,
 					QUERY_ATTR_IDN_BOOT_LU_EN, 0, 0,
 					&(ufs_tegra->bootlun_en_id))) {
 			dev_err(hba->dev,

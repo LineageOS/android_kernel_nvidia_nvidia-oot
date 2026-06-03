@@ -7,8 +7,6 @@
 #undef OSI_BIT
 #define OSI_BIT(b)		(1U << (b))
 /** generates bit mask for 32 bit value */
-#undef OSI_GENMASK
-#define OSI_GENMASK(h, l)	(((~0U) << (l)) & (~0U >> (31U - (h))))
 
 /* Channel specific registers */
 #define DMA_CH_CONTROL1_OFF_WRCH		0x0

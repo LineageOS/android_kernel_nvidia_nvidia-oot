@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2022-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2022-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include <nvidia/conftest.h>
 
@@ -16,12 +16,15 @@
 #include <linux/nospec.h>
 #include <linux/kthread.h>
 #include <linux/sched.h>
-#include <linux/version.h>
+#include <linux/semaphore.h>
 #include <asm/barrier.h>
 
 #include <trace/events/tegra_capture.h>
 
 #include "capture-ivc-priv.h"
+
+/* Timeout for acquiring channel-id */
+#define TIMEOUT_ACQUIRE_CHANNEL_ID 120
 
 /**
  * @brief Transmit a message over IVC channel with mutex protection
@@ -348,6 +351,11 @@ int tegra_capture_ivc_notify_chan_id(uint32_t chan_id, uint32_t trans_id)
 
 	civc = __scivc_control;
 
+	if (down_timeout(&civc->cb_ctx[chan_id].sem_ch,
+				TIMEOUT_ACQUIRE_CHANNEL_ID)) {
+		return -EBUSY;
+	}
+
 	mutex_lock(&civc->cb_ctx_lock);
 
 	if (civc->cb_ctx[trans_id].cb_func == NULL) {
@@ -511,6 +519,7 @@ int tegra_capture_ivc_unregister_control_cb(uint32_t id)
 	civc->cb_ctx[id].priv_context = NULL;
 
 	mutex_unlock(&civc->cb_ctx_lock);
+	up(&civc->cb_ctx[id].sem_ch);
 
 	/*
 	 * If it's trans_id, client encountered an error before or during
@@ -798,6 +807,9 @@ static int tegra_capture_ivc_probe(struct tegra_ivc_channel *chan)
 
 	mutex_init(&civc->cb_ctx_lock);
 	mutex_init(&civc->ivc_wr_lock);
+
+	for (i = 0; i < TOTAL_CHANNELS; i++)
+		sema_init(&civc->cb_ctx[i].sem_ch, 1);
 
 	/* Initialize kworker */
 	kthread_init_work(&civc->work, tegra_capture_ivc_worker);

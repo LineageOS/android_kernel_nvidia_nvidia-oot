@@ -363,6 +363,32 @@ int32_t nvdla_pm_get_lpwr_config(struct platform_device *pdev,
 	struct dla_lpwr_config *config);
 
 /**
+ * @brief Sets DVFS config
+ *
+ * @param[in] pdev platform device.
+ * @param[in] config DVFS configuration that is to be set.
+ *
+ * @return
+ * - zero, with successful operation.
+ * - non-zero, otherwise
+ **/
+int32_t nvdla_pm_set_dvfs_config(struct platform_device *pdev,
+	struct dla_dvfs_config *config);
+
+/**
+ * @brief Gets DVFS config
+ *
+ * @param[in] pdev platform device.
+ * @param[out] config Location where the config is outputted.
+ *
+ * @return
+ * - zero, with successful operation.
+ * - non-zero, otherwise
+ **/
+int32_t nvdla_pm_get_dvfs_config(struct platform_device *pdev,
+	struct dla_dvfs_config *config);
+
+/**
  * @brief Reset configurations upon poweron
  *
  * @param[in] pdev platform device to reset PM.

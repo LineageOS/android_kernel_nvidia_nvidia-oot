@@ -222,29 +222,6 @@ extern const char * const tegra186_arad_mux_text[];
 extern const char * const tegra186_asrc_ratio_source_text[];
 extern const char * const tegra210_mvc_curve_type_text[];
 
-static inline int tegra_register_component(struct device *dev,
-			const struct snd_soc_component_driver *component_driver,
-			struct snd_soc_dai_driver *dai_drv,
-			int num_dai, const char *debugfs_prefix)
-{
-	struct snd_soc_component *component;
-	int ret;
-
-	component = devm_kzalloc(dev, sizeof(*component), GFP_KERNEL);
-	if (!component)
-		return -ENOMEM;
-
-	ret = snd_soc_component_initialize(component, component_driver, dev);
-	if (ret < 0)
-		return ret;
-
-#ifdef CONFIG_DEBUG_FS
-	component->debugfs_prefix = debugfs_prefix;
-#endif
-
-	return snd_soc_add_component(component, dai_drv, num_dai);
-}
-
 int tegra_virt_t210mixer_get_gain(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol);
 int tegra_virt_t210mixer_set_gain(struct snd_kcontrol *kcontrol,

@@ -11,7 +11,6 @@
 #include <linux/of.h>
 #include <linux/of_device.h>
 #include <linux/nvmap.h>
-#include <linux/version.h>
 #include <linux/kmemleak.h>
 #include <linux/io.h>
 #include <linux/nvmap_t19x.h>
@@ -242,9 +241,8 @@ static int __init nvmap_populate_ivm_carveout(struct device *dev)
 					co->is_ivm    = true;
 					sprintf(name, "ivm%02u%02u%02d", co->vmid, co->peer,
 						co->can_alloc);
-					pr_info("IVM carveout IPA:%p, size=%zu, peer vmid=%u,"
-						"name=%s\n", (void *)(uintptr_t)co->base, co->size,
-						co->peer, name);
+					pr_info("IVM carveout size=%zu, peer vmid=%u,"
+						"name=%s\n",  co->size, co->peer, name);
 					co->name      = name;
 				}
 
@@ -340,13 +338,13 @@ static int __init nvmap_co_device_init(struct reserved_mem *rmem,
 				co->base, co->size,
 				DMA_MEMORY_NOMAP);
 		if (!err) {
-			pr_info("%s :dma coherent mem declare %pa,%zu\n",
-				 co->name, &co->base, co->size);
+			pr_info("%s :dma coherent mem declared,%zu\n",
+				 co->name, co->size);
 			co->init_done = true;
 			err = 0;
 		} else
-			pr_err("%s :dma coherent mem declare fail %pa,%zu,err:%d\n",
-				co->name, &co->base, co->size, err);
+			pr_err("%s :dma coherent mem declare fail,%zu,err:%d\n",
+				co->name, co->size, err);
 	} else {
 			co->init_done = true;
 	}
@@ -453,6 +451,10 @@ int __init nvmap_init(struct platform_device *pdev)
 	}
 
 	err = nvmap_populate_ivm_carveout(&pdev->dev);
+	if (err)
+		goto end;
+
+	err = nvmap_init_ivc_queue(&pdev->dev);
 
 end:
 	return err;
@@ -524,6 +526,7 @@ static void __exit nvmap_exit_driver(void)
 		platform_device_unregister(pdev);
 	platform_driver_unregister(&nvmap_driver);
 	nvmap_heap_deinit();
+	nvmap_deinit_ivc_queue();
 	nvmap_dev = NULL;
 }
 module_exit(nvmap_exit_driver);

@@ -13,6 +13,8 @@
 #include "poll.h"
 #include "syncpt.h"
 
+#define SYNCPT_FENCE_BMAP_BITS (sizeof(unsigned long)*8)
+
 struct output;
 struct dentry;
 struct host1x_syncpt;
@@ -69,11 +71,17 @@ struct host1x {
     u64 syncpt_phy_apt;  /* syncpoint page size */
     unsigned int syncpt_page_size; /* syncpoint page size */
 
+	/* syncpoint-fence bitmap*/
+	unsigned long *sync_bmap;
+	unsigned int  sync_bmap_cnt;
+
     /* Restricted syncpoint pools */
     unsigned int num_pools;
     unsigned int ro_pool_id;
     struct host1x_syncpt_pool *pools;
-
+#if defined(HOST1X_EMU_KTHREAD_FENCE_SCAN) && defined(HOST1X_EMU_KTHREAD_HIGHPRI_WQ)
+    struct workqueue_struct *host1x_wq;
+#endif
     /* Resource Ops */
     const struct host1x_syncpt_ops *syncpt_op;
 

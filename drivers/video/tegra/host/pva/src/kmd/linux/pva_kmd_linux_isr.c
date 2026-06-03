@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include "pva_kmd_device.h"
 #include "pva_kmd_linux_device.h"
@@ -13,7 +13,7 @@ static struct pva_kmd_isr_data *get_isr(struct pva_kmd_device *pva,
 	struct pva_kmd_isr_data *isr_data;
 
 	ASSERT(intr_line < PVA_KMD_INTR_LINE_COUNT);
-	isr_data = &pdata->isr[intr_line];
+	isr_data = &pdata->isr_handlers[intr_line];
 	if (!isr_data->binded) {
 		return NULL;
 	}
@@ -36,12 +36,12 @@ enum pva_error pva_kmd_bind_intr_handler(struct pva_kmd_device *pva,
 {
 	int err = 0;
 	struct nvpva_device_data *pdata = pva_kmd_linux_device_get_data(pva);
-	struct pva_kmd_isr_data *isr_data = &pdata->isr[intr_line];
+	struct pva_kmd_isr_data *isr_data = &pdata->isr_handlers[intr_line];
 	enum pva_error pva_err = PVA_SUCCESS;
 	int irq;
 
 	ASSERT(isr_data->binded == false);
-	irq = platform_get_irq(pdata->pdev, intr_line);
+	irq = platform_get_irq(pdata->pdev, (unsigned int)intr_line);
 	if (irq < 0) {
 		pva_kmd_log_err("Failed to get irq number");
 		pva_err = kernel_err2pva_err(irq);

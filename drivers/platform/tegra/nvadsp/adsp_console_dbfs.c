@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/**
- * Copyright (c) 2014-2024, NVIDIA CORPORATION. All rights reserved.
- */
+// SPDX-FileCopyrightText: Copyright (c) 2014-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include <linux/module.h>
 #include <linux/kernel.h>
-#include <linux/version.h>
 #include <linux/debugfs.h>
 #include <linux/fs.h>
 #include <linux/cdev.h>

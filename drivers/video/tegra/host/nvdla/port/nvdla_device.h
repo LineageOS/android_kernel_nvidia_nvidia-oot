@@ -7,6 +7,7 @@
 #ifndef __NVDLA_DEVICE_H__
 #define __NVDLA_DEVICE_H__
 
+#include <linux/compiler_types.h>
 #include <linux/platform_device.h>
 
 /*
@@ -26,28 +27,62 @@
  *  pdata->version
  */
 
+enum nvdla_aperture_type {
+	NVDLA_APERTURE_TYPE_DLA		= 0,
+	NVDLA_APERTURE_TYPE_HFRP	= 1,
+	NVDLA_APERTURE_TYPE_MNOCRX	= 2,
+	NVDLA_APERTURE_TYPE_MNOCTX	= 3,
+};
+
 /**
  * @brief Reads a 32-bit register.
  *
  * @param[in] pdev Platform device.
+ * @param[in] aperture_type Type of aperture for the register base.
  * @param[in] reg Register to be read.
  *
  * @return
  * - value of the register read.
  **/
 uint32_t nvdla_device_register_read(struct platform_device *pdev,
+	enum nvdla_aperture_type aperture_type,
 	uint32_t reg);
 
 /**
  * @brief Writes a 32-bit register.
  *
  * @param[in] pdev Platform device.
+ * @param[in] aperture_type Type of aperture for the register base.
  * @param[in] reg Register to be written.
  * @param[in] value 32-bit value to be written.
  **/
 void nvdla_device_register_write(struct platform_device *pdev,
+	enum nvdla_aperture_type aperture_type,
 	uint32_t reg,
 	uint32_t value);
+
+/**
+ * @brief Gets the aperture corresponding to the type.
+ *
+ * @param[in] pdev Platform device.
+ * @param[in] aperture_type Type of aperture for the register base.
+ * @param[in] addr, Base address corresponding to the aperture type.
+ **/
+void nvdla_device_register_set_aperture(struct platform_device *pdev,
+	enum nvdla_aperture_type aperture_type,
+	void __iomem *addr);
+
+/**
+ * @brief Gets the aperture corresponding to the type.
+ *
+ * @param[in] pdev Platform device.
+ * @param[in] aperture_type Type of aperture for the register base.
+ *
+ * @return
+ * - Base address corresponding to the aperture type.
+ **/
+void __iomem *nvdla_device_register_get_aperture(struct platform_device *pdev,
+	enum nvdla_aperture_type aperture_type);
 
 /**
  * @brief Initializes dla device
@@ -74,6 +109,32 @@ int32_t nvdla_module_init(struct platform_device *pdev);
  * @param[in] pdev Platform device.
  **/
 void nvdla_module_deinit(struct platform_device *pdev);
+
+/**
+ * @brief Registers new context device
+ *
+ * The functionality is triggered for every context probe.
+ *
+ * @param[in] pdev Platform device
+ * @param[in] context Data corresponding to the context device.
+ *
+ * @return
+ * - zero upon successful operation.
+ * - non-zero otherwise
+ **/
+int32_t nvdla_module_context_register(struct platform_device *pdev,
+	void *context);
+
+/**
+ * @brief Unregisters context device
+ *
+ * The functionality is triggered for every context remove.
+ *
+ * @param[in] pdev Platform device
+ * @param[in] context Data corresponding to the context device.
+ **/
+void nvdla_module_context_unregister(struct platform_device *pdev,
+	void *context);
 
 /**
  * @brief Registers new client.
@@ -198,21 +259,17 @@ int32_t nvdla_module_prepare_suspend(struct device *dev);
 void nvdla_module_complete_resume(struct device *dev);
 
 /**
- * @brief Registers the platform driver.
- *
- * @param[in] pdriver Platform driver that is to be registered.
+ * @brief Registers the platform drivers for the DLA.
  *
  * @return
  * - zero upon successful completion.
  * - non-zero otherwise
  **/
-int32_t nvdla_driver_register(struct platform_driver *pdriver);
+int32_t nvdla_driver_register(void);
 
 /**
- * @brief Unregisters the platform driver.
- *
- * @param[in] pdriver Platform driver that is to be unregistered.
+ * @brief Unregisters the platform drivers for the DLA.
  **/
-void nvdla_driver_unregister(struct platform_driver *pdriver);
+void nvdla_driver_unregister(void);
 
 #endif /*__NVDLA_DEVICE_H__ */

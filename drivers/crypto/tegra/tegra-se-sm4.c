@@ -18,6 +18,7 @@
 #include <crypto/engine.h>
 #include <crypto/gcm.h>
 #include <crypto/scatterwalk.h>
+#include <crypto/xts.h>
 #include <crypto/internal/aead.h>
 #include <crypto/internal/hash.h>
 #include <crypto/internal/skcipher.h>
@@ -40,10 +41,11 @@ struct tegra_sm4_ctx {
 
 struct tegra_sm4_reqctx {
 	struct tegra_se_datbuf datbuf;
-	struct tegra_se *se;
 	bool encrypt;
-	u32 cfg;
-	u32 crypto_cfg;
+	u32 config;
+	u32 crypto_config;
+	u32 len;
+	u32 *iv;
 	u32 key1_id;
 	u32 key2_id;
 };
@@ -121,58 +123,69 @@ static void ctr_iv_inc(__u8 *counter, __u8 bits, __u32 nums)
 static void tegra_cbc_iv_copyback(struct skcipher_request *req, struct tegra_sm4_ctx *ctx)
 {
 	struct tegra_sm4_reqctx *rctx = skcipher_request_ctx(req);
-	unsigned int off;
+	unsigned int offset;
 
-	off = req->cryptlen - ctx->ivsize;
+	offset = req->cryptlen - ctx->ivsize;
 
 	if (rctx->encrypt)
-		memcpy(req->iv, rctx->datbuf.buf + off, ctx->ivsize);
+		memcpy(req->iv, rctx->datbuf.buf + offset, ctx->ivsize);
 	else
-		sg_pcopy_to_buffer(req->src, sg_nents(req->src),
-				   req->iv, ctx->ivsize, off);
+		scatterwalk_map_and_copy(req->iv, req->src, offset, ctx->ivsize, 0);
 }
 
 static void tegra_sm4_update_iv(struct skcipher_request *req, struct tegra_sm4_ctx *ctx)
 {
-	int sz;
+	int num;
 
 	if (ctx->alg == SE_ALG_SM4_CBC) {
 		tegra_cbc_iv_copyback(req, ctx);
 	} else if (ctx->alg == SE_ALG_SM4_CTR) {
-		sz = req->cryptlen / ctx->ivsize;
+		num = req->cryptlen / ctx->ivsize;
 		if (req->cryptlen % ctx->ivsize)
-			sz++;
+			num++;
 
-		ctr_iv_inc(req->iv, ctx->ivsize, sz);
+		ctr_iv_inc(req->iv, ctx->ivsize, num);
 	}
 }
 
-static int tegra_sm4_prep_cmd(struct tegra_se *se, u32 *cpuvaddr, u32 *iv,
-				     int len, dma_addr_t addr, int cfg, int cryp_cfg)
+static unsigned int tegra_sm4_prep_cmd(struct tegra_se *se, struct tegra_sm4_reqctx *rctx)
 {
-	int i = 0, j;
+	unsigned int data_count, res_bits, i = 0, j;
+	u32 *cpuvaddr = se->cmdbuf->addr;
+	dma_addr_t addr = rctx->datbuf.addr;
 
-	if (iv) {
+	data_count = rctx->len / AES_BLOCK_SIZE;
+	res_bits = (rctx->len % AES_BLOCK_SIZE) * 8;
+
+	/*
+	 * Hardware processes data_count + 1 blocks.
+	 * Reduce 1 block if there is no residue
+	 */
+	if (!res_bits)
+		data_count--;
+
+	if (rctx->iv) {
 		cpuvaddr[i++] = host1x_opcode_setpayload(SE_CRYPTO_CTR_REG_COUNT);
 		cpuvaddr[i++] = se_host1x_opcode_incr_w(se->hw->regs->linear_ctr);
 		for (j = 0; j < SE_CRYPTO_CTR_REG_COUNT; j++)
-			cpuvaddr[i++] = iv[j];
+			cpuvaddr[i++] = rctx->iv[j];
 	}
 
 	cpuvaddr[i++] = se_host1x_opcode_nonincr(se->hw->regs->last_blk, 1);
-	cpuvaddr[i++] = (len / AES_BLOCK_SIZE) - 1;
+	cpuvaddr[i++] = SE_LAST_BLOCK_VAL(data_count) |
+			SE_LAST_BLOCK_RES_BITS(res_bits);
 	cpuvaddr[i++] = se_host1x_opcode_incr(se->hw->regs->config, 6);
-	cpuvaddr[i++] = cfg;
-	cpuvaddr[i++] = cryp_cfg;
+	cpuvaddr[i++] = rctx->config;
+	cpuvaddr[i++] = rctx->crypto_config;
 
 	/* Source address setting */
 	cpuvaddr[i++] = lower_32_bits(addr);
-	cpuvaddr[i++] = SE_ADDR_HI_MSB(upper_32_bits(addr)) | SE_ADDR_HI_SZ(len);
+	cpuvaddr[i++] = SE_ADDR_HI_MSB(upper_32_bits(addr)) | SE_ADDR_HI_SZ(rctx->len);
 
 	/* Destination address setting */
 	cpuvaddr[i++] = lower_32_bits(addr);
 	cpuvaddr[i++] = SE_ADDR_HI_MSB(upper_32_bits(addr)) |
-			SE_ADDR_HI_SZ(len);
+			SE_ADDR_HI_SZ(rctx->len);
 
 	cpuvaddr[i++] = se_host1x_opcode_nonincr(se->hw->regs->op, 1);
 	cpuvaddr[i++] = SE_AES_OP_WRSTALL | SE_AES_OP_LASTBUF |
@@ -182,26 +195,19 @@ static int tegra_sm4_prep_cmd(struct tegra_se *se, u32 *cpuvaddr, u32 *iv,
 	cpuvaddr[i++] = host1x_uclass_incr_syncpt_cond_f(1) |
 			host1x_uclass_incr_syncpt_indx_f(se->syncpt_id);
 
-	dev_dbg(se->dev, "cfg %#x crypto cfg %#x\n", cfg, cryp_cfg);
+	dev_dbg(se->dev, "cfg %#x crypto cfg %#x\n", rctx->config, rctx->crypto_config);
 
 	return i;
 }
 
 static int tegra_sm4_do_one_req(struct crypto_engine *engine, void *areq)
 {
-	unsigned int len, src_nents, dst_nents, size;
-	u32 *cpuvaddr, *iv, config, crypto_config;
-	struct tegra_sm4_reqctx *rctx;
-	struct skcipher_request *req;
-	struct tegra_sm4_ctx *ctx;
-	struct tegra_se *se;
+	struct skcipher_request *req = container_of(areq, struct skcipher_request, base);
+	struct tegra_sm4_ctx *ctx = crypto_skcipher_ctx(crypto_skcipher_reqtfm(req));
+	struct tegra_sm4_reqctx *rctx = skcipher_request_ctx(req);
+	struct tegra_se *se = ctx->se;
+	unsigned int cmdlen;
 	int ret;
-
-	req = container_of(areq, struct skcipher_request, base);
-	rctx = skcipher_request_ctx(req);
-	ctx = crypto_skcipher_ctx(crypto_skcipher_reqtfm(req));
-	se = ctx->se;
-	iv = (u32 *)req->iv;
 
 	/* Keys in ctx might be stored in KDS. Copy it to request ctx */
 	if (ctx->key1_id)
@@ -220,52 +226,50 @@ static int tegra_sm4_do_one_req(struct crypto_engine *engine, void *areq)
 	/* If there are 2 keys stored (for XTS), retrieve them both */
 	if (ctx->alg == SE_ALG_SM4_XTS) {
 		if (ctx->key2_id)
-			rctx->key1_id = tegra_key_get_idx(ctx->se, ctx->key1_id);
+			rctx->key2_id = tegra_key_get_idx(ctx->se, ctx->key2_id);
 
-		/* Use reserved keyslots if keyslots are unavailable */
 		if (!ctx->key2_id || !rctx->key2_id) {
-			ret = tegra_key_submit_reserved_aes(ctx->se, ctx->key2,
+			ret = tegra_key_submit_reserved_xts(ctx->se, ctx->key2,
 						ctx->keylen, ctx->alg, &rctx->key2_id);
 			if (ret)
 				goto key1_free;
 		}
 	}
 
-	rctx->datbuf.size = req->cryptlen;
-	rctx->datbuf.buf = dma_alloc_coherent(ctx->se->dev, rctx->datbuf.size,
-					     &rctx->datbuf.addr, GFP_KERNEL);
+	/* Set buffer size as a multiple of AES_BLOCK_SIZE*/
+	rctx->datbuf.size = ((req->cryptlen / AES_BLOCK_SIZE) + 1) * AES_BLOCK_SIZE;
+	rctx->datbuf.buf = dma_alloc_coherent(se->dev, rctx->datbuf.size,
+					      &rctx->datbuf.addr, GFP_KERNEL);
 	if (!rctx->datbuf.buf) {
 		ret = -ENOMEM;
 		goto key2_free;
 	}
 
-	cpuvaddr = se->cmdbuf->addr;
-	len = req->cryptlen;
+	rctx->iv = (ctx->alg == SE_ALG_SM4_ECB) ? NULL : (u32 *)req->iv;
+	rctx->len = req->cryptlen;
 
-	/* Pad input to AES block size */
-	if (len % AES_BLOCK_SIZE)
-		len += AES_BLOCK_SIZE - (len % AES_BLOCK_SIZE);
+	/* Pad input to AES Block size */
+	if (ctx->alg != SE_ALG_SM4_XTS) {
+		if (rctx->len % AES_BLOCK_SIZE)
+			rctx->len += AES_BLOCK_SIZE - (rctx->len % AES_BLOCK_SIZE);
+	}
 
-	src_nents = sg_nents(req->src);
-	sg_copy_to_buffer(req->src, src_nents, rctx->datbuf.buf, req->cryptlen);
+	scatterwalk_map_and_copy(rctx->datbuf.buf, req->src, 0, req->cryptlen, 0);
 
-	config = se->regcfg->cfg(ctx->alg, rctx->encrypt);
-	crypto_config = se->regcfg->crypto_cfg(ctx->alg, rctx->encrypt);
-	crypto_config |= SE_AES_KEY_INDEX(rctx->key1_id);
+	/* Update crypto_config with Local KSLT IDs */
+	rctx->crypto_config |= SE_AES_KEY_INDEX(rctx->key1_id);
 	if (rctx->key2_id)
-		crypto_config |= SE_AES_KEY2_INDEX(rctx->key2_id);
+		rctx->crypto_config |= SE_AES_KEY2_INDEX(rctx->key2_id);
 
-	/* Prepare the command and submit */
-	size = tegra_sm4_prep_cmd(se, cpuvaddr, iv, len, rctx->datbuf.addr,
-					 config, crypto_config);
-
-	ret = tegra_se_host1x_submit(se, se->cmdbuf, size);
+	/* Prepare the command and submit for execution */
+	cmdlen = tegra_sm4_prep_cmd(se, rctx);
+	ret = tegra_se_host1x_submit(se, se->cmdbuf, cmdlen);
 
 	/* Copy the result */
-	dst_nents = sg_nents(req->dst);
 	tegra_sm4_update_iv(req, ctx);
-	sg_copy_from_buffer(req->dst, dst_nents, rctx->datbuf.buf, req->cryptlen);
+	scatterwalk_map_and_copy(rctx->datbuf.buf, req->dst, 0, req->cryptlen, 1);
 
+	/* Free the buffer */
 	dma_free_coherent(ctx->se->dev, rctx->datbuf.size,
 			  rctx->datbuf.buf, rctx->datbuf.addr);
 
@@ -282,7 +286,7 @@ key1_free:
 out:
 	crypto_finalize_skcipher_request(se->engine, req, ret);
 
-	return ret;
+	return 0;
 }
 
 static int tegra_sm4_cra_init(struct crypto_skcipher *tfm)
@@ -358,24 +362,24 @@ static int tegra_sm4_xts_setkey(struct crypto_skcipher *tfm,
 			       const u8 *key, u32 keylen)
 {
 	struct tegra_sm4_ctx *ctx = crypto_skcipher_ctx(tfm);
+	u32 len = keylen / 2;
 	int ret;
-	u32 len;
 
-	len = keylen / 2;
-	if (aes_check_keylen(len)) {
-		dev_err(ctx->se->dev, "key length validation failed\n");
+	ret = xts_verify_key(tfm, key, keylen);
+	if (ret || aes_check_keylen(len)) {
+		dev_dbg(ctx->se->dev, "invalid key length (%d)\n", keylen);
 		return -EINVAL;
 	}
 
 	ret = tegra_key_submit(ctx->se, key, len,
-			ctx->alg, &ctx->key1_id);
+			       ctx->alg, &ctx->key1_id);
 	if (ret) {
 		ctx->keylen = len;
 		memcpy(ctx->key1, key, len);
 	}
 
 	ret = tegra_key_submit(ctx->se, key + len, len,
-			ctx->alg, &ctx->key2_id);
+			       ctx->alg, &ctx->key2_id);
 	if (ret) {
 		ctx->keylen = len;
 		memcpy(ctx->key2, key + len, len);
@@ -447,8 +451,6 @@ static inline int tegra264_sm4_crypto_cfg(u32 alg, bool encrypt)
 	case SE_ALG_SM4_XTS:
 		cfg |= SE_AES_IV_SEL_REG;
 		break;
-	default:
-		return -EINVAL;
 	case SE_ALG_SM4_CMAC:
 	case SE_ALG_SM4_GMAC:
 		break;
@@ -457,6 +459,8 @@ static inline int tegra264_sm4_crypto_cfg(u32 alg, bool encrypt)
 	case SE_ALG_SM4_GCM_VERIFY:
 		cfg |= SE_AES_IV_SEL_REG;
 		break;
+	default:
+		return -EINVAL;
 	}
 
 	return cfg;
@@ -521,28 +525,41 @@ static int tegra264_sm4_cfg(u32 alg, bool encrypt)
 	return -EINVAL;
 }
 
-static int tegra_sm4_encrypt(struct skcipher_request *req)
+static int tegra_sm4_crypt(struct skcipher_request *req, bool encrypt)
 {
-	struct tegra_sm4_ctx *ctx;
-	struct tegra_sm4_reqctx *rctx;
+	struct crypto_skcipher *tfm = crypto_skcipher_reqtfm(req);
+	struct tegra_sm4_ctx *ctx  = crypto_skcipher_ctx(tfm);
+	struct tegra_sm4_reqctx *rctx = skcipher_request_ctx(req);
+	struct tegra_se *se = ctx->se;
 
-	ctx  = crypto_skcipher_ctx(crypto_skcipher_reqtfm(req));
-	rctx = skcipher_request_ctx(req);
-	rctx->encrypt = true;
+	if (ctx->alg != SE_ALG_SM4_XTS) {
+		if (!IS_ALIGNED(req->cryptlen, crypto_skcipher_blocksize(tfm))) {
+			dev_dbg(ctx->se->dev, "invalid length (%d)", req->cryptlen);
+			return -EINVAL;
+		}
+	} else if (req->cryptlen < XTS_BLOCK_SIZE) {
+		dev_dbg(ctx->se->dev, "invalid length (%d)", req->cryptlen);
+		return -EINVAL;
+	}
+
+	if (!req->cryptlen)
+		return 0;
+
+	rctx->encrypt = encrypt;
+	rctx->config = se->regcfg->cfg(ctx->alg, encrypt);
+	rctx->crypto_config = se->regcfg->crypto_cfg(ctx->alg, encrypt);
 
 	return crypto_transfer_skcipher_request_to_engine(ctx->se->engine, req);
 }
 
+static int tegra_sm4_encrypt(struct skcipher_request *req)
+{
+	return tegra_sm4_crypt(req, true);
+}
+
 static int tegra_sm4_decrypt(struct skcipher_request *req)
 {
-	struct tegra_sm4_ctx *ctx;
-	struct tegra_sm4_reqctx *rctx;
-
-	ctx  = crypto_skcipher_ctx(crypto_skcipher_reqtfm(req));
-	rctx = skcipher_request_ctx(req);
-	rctx->encrypt = false;
-
-	return crypto_transfer_skcipher_request_to_engine(ctx->se->engine, req);
+	return tegra_sm4_crypt(req, false);
 }
 
 static struct tegra_se_alg tegra_sm4_algs[] = {
@@ -797,7 +814,7 @@ static int tegra_sm4_gcm_crypt_prep_cmd(struct tegra_se *se, u32 *cpuvaddr,
 	cpuvaddr[i++] = host1x_uclass_incr_syncpt_cond_f(1) |
 			host1x_uclass_incr_syncpt_indx_f(se->syncpt_id);
 
-	dev_dbg(se->dev, "cfg %#x crypto cfg %#x\n", rctx->config, rctx->crypto_config);
+	dev_err(se->dev, "cfg %#x crypto cfg %#x\n", rctx->config, rctx->crypto_config);
 
 	return i;
 }
@@ -1199,8 +1216,6 @@ static int tegra_sm4_cmac_prep_cmd(struct tegra_se *se, u32 *cpuvaddr, struct te
 	cpuvaddr[i++] = se_host1x_opcode_nonincr(host1x_uclass_incr_syncpt_r(), 1);
 	cpuvaddr[i++] = host1x_uclass_incr_syncpt_cond_f(1) |
 			host1x_uclass_incr_syncpt_indx_f(se->syncpt_id);
-
-	dev_dbg(se->dev, "cfg %#x\n", rctx->config);
 
 	return i;
 }

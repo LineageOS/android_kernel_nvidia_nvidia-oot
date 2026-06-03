@@ -25,6 +25,13 @@ filegroup(
 )
 
 filegroup(
+    name = "virt.tegra.includes",
+    srcs = glob([
+        "drivers/virt/tegra/*.h",
+    ]),
+)
+
+filegroup(
     name = "nvmap.includes",
     srcs = glob([
         "drivers/video/tegra/nvmap/include/**/*.h",
@@ -50,10 +57,11 @@ kernel_module(
         ],
     ) + [
         "//hwpm:hwpm_headers",
-        "//nvidia-oot/scripts/conftest:conftest_headers",
+        "//ootm/nvidia-public/scripts/conftest:conftest_headers",
     ],
     outs = [
         # keep sorted
+        "drivers/block/tegra_oops_nvlog/tegra_oops_nvlog.ko",
         "drivers/block/tegra_oops_virt_storage/tegra_hv_vblk_oops.ko",
         "drivers/block/tegra_virt_storage/tegra_vblk.ko",
         "drivers/bluetooth/realtek/rtk_btusb.ko",
@@ -62,6 +70,9 @@ kernel_module(
         "drivers/cpuidle/cpuidle-tegra-auto.ko",
         "drivers/crypto/tegra-hv-vse-safety.ko",
         "drivers/crypto/tegra-nvvse-cryptodev.ko",
+        "drivers/crypto/nvvse/nvvse.ko",
+        "drivers/crypto/nvvse/nvvse-soc-plugin-t26x.ko",
+        "drivers/crypto/nvvse/nvvse-soc-plugin-t23x.ko",
         "drivers/crypto/tegra-se-nvrng.ko",
         "drivers/crypto/tegra/tegra-se-kds.ko",
         "drivers/crypto/tegra/tegra-se.ko",
@@ -76,6 +87,7 @@ kernel_module(
         "drivers/gpu/host1x/host1x.ko",
         "drivers/gpu/host1x-nvhost/host1x-nvhost.ko",
         "drivers/gpu/power/tegra/nv-gpu-static-pg.ko",
+        "drivers/hid/hid-jarvis-remote.ko",
         "drivers/hwmon/f75308.ko",
         "drivers/hwmon/ina232.ko",
         "drivers/i2c/busses/i2c-nvvrs11.ko",
@@ -114,16 +126,18 @@ kernel_module(
         "drivers/net/ethernet/realtek/r8125/r8125.ko",
         "drivers/net/ethernet/realtek/r8126/r8126.ko",
         "drivers/net/ethernet/realtek/r8168/r8168.ko",
+        "drivers/net/nv_vsock_transport.ko",
+        "drivers/net/tegra_hv_net.ko",
         "drivers/nv-p2p/nvidia-p2p.ko",
         "drivers/nvpmodel/nvpmodel-clk-cap.ko",
         "drivers/nvpps/nvpps.ko",
         "drivers/nvtzvault/nvtzvault.ko",
+        "drivers/nvtzvault/nvtzvault-soc-comms.ko",
         "drivers/nv-virtio/nv-virtio-console-poc.ko",
         "drivers/pci/controller/pcie-tegra-vf.ko",
         "drivers/pci/controller/pcie-tegra264.ko",
         "drivers/pci/controller/pcie-tegra264-ep.ko",
         "drivers/pci/controller/tegra-pcie-dma-lib.ko",
-        "drivers/pci/controller/tegra-pcie-edma.ko",
         "drivers/pci/endpoint/functions/pci-epf-dma-test.ko",
         "drivers/pci/endpoint/functions/pci-epf-tegra-vnet.ko",
         "drivers/pinctrl/pinctrl-max77851.ko",
@@ -137,7 +151,7 @@ kernel_module(
         "drivers/platform/tegra/mc-utils/mc-utils.ko",
         "drivers/platform/tegra/nvadsp/nvadsp.ko",
         "drivers/platform/tegra/psc/tegra23x_psc.ko",
-        "drivers/platform/tegra/tegra-bootloader-debug.ko",
+        "drivers/platform/tegra/tegra-bootloader-debug/tegra-bootloader-debug.ko",
         "drivers/platform/tegra/tegra-bpmp-bwmgr.ko",
         "drivers/platform/tegra/tegra-cactmon-mc-all.ko",
         "drivers/platform/tegra/tegra-fsicom.ko",
@@ -177,6 +191,7 @@ kernel_module(
         "drivers/virt/tegra/tegra_hv_pm_ctl.ko",
         "drivers/virt/tegra/tegra_hv_vcpu_yield.ko",
         "drivers/virt/tegra/userspace_ivc_mempool.ko",
+        "drivers/ivc_sample_server/tegra_hv_sysfs_sample_server.ko",
         "drivers/watchdog/max77851_wdt.ko",
         "drivers/watchdog/softdog-platform.ko",
         "drivers/watchdog/watchdog-tegra-t18x.ko",

@@ -11,6 +11,11 @@
 #include "tsec_linux.h"
 
 /*
+ * Initialize TSEC T264 module private data
+ */
+int tsec_module_init_t26x(struct platform_device *dev);
+
+/*
  * Initialize TSEC T264 initialization sequence
  */
 int tsec_t264_init(struct platform_device *dev);

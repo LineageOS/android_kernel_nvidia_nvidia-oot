@@ -13,7 +13,8 @@
 
 #define KEYSLOT_SIZE_BYTES				16
 #define TEGRA_NVVSE_IOC_MAGIC				0x98
-#define MAX_NUMBER_MISC_DEVICES				70U
+#define MAX_NUMBER_MISC_DEVICES				75U
+#define MAX_NUMBER_SOC_PARAMS				10U
 
 /* Command ID for various IO Control */
 #define TEGRA_NVVSE_CMDID_AES_SET_KEY			1
@@ -518,26 +519,56 @@ struct tegra_nvvse_unmap_membuf_ctl {
 					TEGRA_NVVSE_CMDID_UNMAP_MEMBUF, \
 					struct tegra_nvvse_unmap_membuf_ctl)
 
+struct tegra_nvvse_get_ivc_entry_t {
+	/** Holds ivc queue number
+	 *  This is extracted by reading (IVCNumber) property field from DT.
+	 */
+	uint32_t  se_comm_id;
+	/** Holds engine domain number*/
+	uint32_t se_engine_domain;
+	/** Domain Instance ID of the selected virtual SE engine*/
+	uint32_t se_engine_domain_instanceId;
+	/** Port number of the selected virtual SE engine*/
+	uint32_t se_port;
+	/** Virtualized Instance ID of the selected virtual SE engine*/
+	uint32_t virtualized_instanceId;
+	/** Phandle for SMMU instance - used for cases of Zero copy by Client App */
+	/** Holds stream id
+	 *  This is extracted by reading <<DT_VSE_ENGINE_ID,DT_VSE_ENGINE_ID>> property field from DT.
+	 *  The allowed range for stream ID is 0x00 to 0x7Eu
+	 */
+	uint32_t stream_id;
+	/** Field to provide whether its low or high priority channel - To be consumed by PKCS11 Lib */
+	uint32_t  priority;
+	/** Refers to map buffer size that driver allocates buffers for non-zero copy.
+	 * This also serves as identifier for Zero copy channels if the value is 0 for this field.
+	 */
+	uint32_t  mapped_buffer_size;
+	/** Holds group id
+	 *  This is extracted by reading <<DT_VSE_GID,DT_VSE_GID>> property field from DT.
+	 *  The valid value is any value
+	 */
+	uint32_t  gid;
+	/** Holds the pointer to the mmu handle */
+	uint32_t phandle;
+	/** Holds GCM dec Support flag */
+	uint32_t gcm_dec_supported;
+	/** Holds the size of the soc_params array */
+	uint32_t soc_params_size;
+	/** Holds the array of soc_params */
+	uint32_t soc_params[MAX_NUMBER_SOC_PARAMS];
+};
+
 /**
  * brief Holds IVC databse
  */
 struct tegra_nvvse_get_ivc_db {
-	/** HoldsIVC Queue Id */
-	uint32_t ivc_id[MAX_NUMBER_MISC_DEVICES];
-	/** Holds SE Engine Type */
-	uint32_t se_engine[MAX_NUMBER_MISC_DEVICES];
-	/** Holds Crypto Dev Node Id */
-	uint32_t node_id[MAX_NUMBER_MISC_DEVICES];
-	/** Holds Priority */
-	uint32_t priority[MAX_NUMBER_MISC_DEVICES];
-	/** Holds Max Buffer Size */
-	uint32_t max_buffer_size[MAX_NUMBER_MISC_DEVICES];
-	/** Holds Channel Group Id */
-	uint32_t channel_grp_id[MAX_NUMBER_MISC_DEVICES];
-	/** Holds GCM dec Support flag */
-	uint32_t gcm_dec_supported[MAX_NUMBER_MISC_DEVICES];
-	/** Holds GCM dec buffer */
-	uint32_t gcm_dec_buffer_size[MAX_NUMBER_MISC_DEVICES];
+	/* Holds max number of entries present in DT IVC CFG.
+	 * This number can never be more than  MAX_IVC_SUPPORTED.
+	 */
+	uint32_t max_num_ivc;
+	/** Holds array of IVC entries that refer to IVC CFG entries in DT */
+	struct tegra_nvvse_get_ivc_entry_t ivc_entry[MAX_NUMBER_MISC_DEVICES];
 };
 #define NVVSE_IOCTL_CMDID_GET_IVC_DB _IOW(TEGRA_NVVSE_IOC_MAGIC, TEGRA_NVVSE_CMDID_GET_IVC_DB, \
 						struct tegra_nvvse_get_ivc_db)

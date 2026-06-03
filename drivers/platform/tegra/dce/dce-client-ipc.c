@@ -25,7 +25,6 @@
 #include <dce-ipc.h>
 #include <dce-os-utils.h>
 #include <dce-client-ipc-internal.h>
-
 #define DCE_IPC_HANDLES_MAX 6U
 #define DCE_CLIENT_IPC_HANDLE_INVALID 0U
 #define DCE_CLIENT_IPC_HANDLE_VALID ((u32)BIT(31))
@@ -161,7 +160,7 @@ static inline int dce_client_ipc_wait_bootstrap_complete(struct tegra_dce *d)
 	ret = DCE_OS_COND_WAIT_INTERRUPTIBLE_TIMEOUT(&d->dce_bootstrap_done,
 						  dce_is_bootstrap_done(d),
 						  DCE_IPC_REGISTER_BOOT_WAIT);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(d, "dce boot wait failed (%d)\n", ret);
 		goto out;
 	}
@@ -202,7 +201,7 @@ int tegra_dce_register_ipc_client(u32 type,
 	}
 
 	ret = dce_client_ipc_handle_alloc(&handle);
-	if (ret)
+	if (ret != 0)
 		goto out;
 
 	index = client_handle_to_index(handle);
@@ -222,7 +221,7 @@ int tegra_dce_register_ipc_client(u32 type,
 	cl->callback_fn = callback_fn;
 
 	ret = dce_wait_cond_init(d, &cl->recv_wait);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(d, "dce condition initialization failed for int_type: [%u]",
 			int_type);
 		goto out;
@@ -298,7 +297,7 @@ int dce_client_init(struct tegra_dce *d)
 	struct tegra_dce_async_ipc_info *d_aipc = &d->d_async_ipc;
 
 	ret = dce_os_wq_create(d, &d_aipc->async_event_wq, "dce-async-ipc-wq");
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(d, "Failed to create async ipc wq. err [%d]", ret);
 		goto fail_wq_create;
 	}
@@ -308,7 +307,7 @@ int dce_client_init(struct tegra_dce *d)
 
 		ret = dce_os_wq_work_init(d, &d_work->async_event_work,
 				dce_client_async_event_work, (void *)d_work);
-		if (ret) {
+		if (ret != 0) {
 			dce_os_err(d, "Failed to init async work [%u] err [%d]", i, ret);
 			goto fail_work_init;
 		}
@@ -318,11 +317,11 @@ int dce_client_init(struct tegra_dce *d)
 	}
 
 fail_work_init:
-	if (ret && (i > 0)) {
+	if ((ret != 0) && (i > 0)) {
 		uint8_t j = 0;
 
-		for (j = i - 1; j >= 0; j--)  {
-			struct dce_async_work *d_work = &d_aipc->work[j];
+		for (j = i; j > 0; j--)  {
+			struct dce_async_work *d_work = &d_aipc->work[j-1];
 
 			dce_os_wq_work_deinit(d, d_work->async_event_work);
 		}
@@ -370,7 +369,7 @@ int dce_client_ipc_wait(struct tegra_dce *d, u32 int_type)
 
 retry_wait:
 	ret = dce_wait_cond_wait_interruptible(d, &cl->recv_wait, true, DCE_IPC_TIMEOUT_MS_MAX);
-	if (ret) {
+	if (ret != 0) {
 		if (ret == -ERESTARTSYS) { /* Interrupt. */
 			dce_os_debug(d, "Client [%u] wait interrupted: retrying.", type);
 			goto retry_wait;
@@ -410,7 +409,7 @@ static void dce_client_process_event_ipc(struct tegra_dce *d,
 
 	while (dce_ipc_is_data_available(d, cl->int_type)) {
 		ret = dce_ipc_read_message(d, cl->int_type, msg_data, msg_length);
-		if (ret) {
+		if (ret != 0) {
 			dce_os_info(d, "Error in reading DCE msg for ch_type [%d]",
 				cl->int_type);
 			goto done;
@@ -420,10 +419,11 @@ static void dce_client_process_event_ipc(struct tegra_dce *d,
 	}
 
 done:
-	if (msg_data)
+	if (msg_data != NULL)
 		dce_os_kfree(d, msg_data);
 }
 
+#ifdef NV_DCE_CORE_ENABLE_ASYNC_RM_EVENT
 static void dce_client_schedule_event_work(struct tegra_dce *d)
 {
 	struct tegra_dce_async_ipc_info *async_work_info = &d->d_async_ipc;
@@ -436,7 +436,7 @@ static void dce_client_schedule_event_work(struct tegra_dce *d)
 		if (dce_os_atomic_add_unless(&d_work->in_use, 1, 1) > 0) {
 			ret = dce_os_wq_work_schedule(d, async_work_info->async_event_wq,
 					d_work->async_event_work);
-			if (ret) {
+			if (ret != 0) {
 				dce_os_err(d, "Failed to schedule Async work. id [%u] err [%d]", i, ret);
 				goto fail;
 			}
@@ -450,6 +450,7 @@ static void dce_client_schedule_event_work(struct tegra_dce *d)
 fail:
 	return;
 }
+#endif
 
 void dce_client_ipc_wakeup(struct tegra_dce *d, u32 ch_type)
 {
@@ -470,8 +471,10 @@ void dce_client_ipc_wakeup(struct tegra_dce *d, u32 ch_type)
 		return;
 	}
 
+#ifdef NV_DCE_CORE_ENABLE_ASYNC_RM_EVENT
 	if (type == DCE_CLIENT_IPC_TYPE_RM_EVENT)
 		return dce_client_schedule_event_work(d);
+#endif
 
 	dce_wait_cond_signal_interruptible(d, &cl->recv_wait);
 }

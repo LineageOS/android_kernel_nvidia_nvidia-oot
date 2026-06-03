@@ -16,6 +16,9 @@
 #include <linux/device.h>
 #include <dce-hsp-t234.h>
 #include <dce-hsp-t264.h>
+#include <linux/reset.h>
+#include <dce-psc-client.h>
+#include <dce-os-utils.h>
 
 /**
  * The following platform info is needed for backdoor
@@ -44,6 +47,7 @@ static const struct dce_platform_data t256_dce_platform_data = {
 static const struct dce_platform_data t264_dce_platform_data = {
 	.stream_id = 0x0,
 	.hsp_id = 0x0,
+	.fw_name = "display-t264-dce.bin",
 	.fw_info_valid = false,
 	.use_physical_id = false,
 };
@@ -91,6 +95,14 @@ static inline struct tegra_dce *dce_get_tegra_dce_from_dev(struct device *dev)
 	return (&((struct dce_linux_device *)dev_get_drvdata(dev))->d);
 }
 
+static inline bool is_dce_load_by_psc(struct platform_device *pdev)
+{
+	struct dce_linux_device *d_dev = NULL;
+
+	d_dev = dev_get_drvdata(&pdev->dev);
+	return d_dev->dce_fw_load_by_psc;
+}
+
 /**
  * dce_init_dev_data - Function to initialize the dce device data structure.
  *
@@ -105,6 +117,7 @@ static int dce_init_dev_data(struct platform_device *pdev, struct dce_platform_d
 {
 	struct device *dev = &pdev->dev;
 	struct dce_linux_device *d_dev = NULL;
+	u32 fw_load_by_psc = 0U;
 
 	d_dev = devm_kzalloc(dev, sizeof(*d_dev), GFP_KERNEL);
 	if (!d_dev)
@@ -118,7 +131,23 @@ static int dce_init_dev_data(struct platform_device *pdev, struct dce_platform_d
 		return -EINVAL;
 	}
 
+	d_dev->rst = devm_reset_control_get(dev, "dce-reset");
+	if (IS_ERR(d_dev->rst))
+		dev_info(dev, "dce-reset not supported in dce kmd\n");
+
+	/* Check if DCE firmware should be loaded by PSC */
+	if (of_property_read_u32(dev->of_node, "nvidia,dce-fw-load-by-psc",
+					&fw_load_by_psc) == 0U) {
+		/* Check if DCE firmware will be loaded by PSC or not */
+		if (fw_load_by_psc == 1U)
+			dev_info(dev, "DCE firmware will be loaded by PSC\n");
+		else
+			dev_info(dev, "DCE firmware will NOT be loaded by PSC\n");
+	}
+	d_dev->dce_fw_load_by_psc = fw_load_by_psc;
+
 	dev_set_drvdata(dev, d_dev);
+
 	return 0;
 }
 
@@ -238,7 +267,7 @@ static int dce_init_hsp_hal_fn(struct platform_device *pdev,
 		dev_info(&pdev->dev, "Setting DCE HSP functions for tegra256-dce");
 		DCE_HSP_INIT_T264(d->hsp);
 	} else if (of_device_is_compatible(node, "nvidia,tegra264-dce")) {
-		dev_info(&pdev->dev, "Setting DCE HSP functions for tegra234-dce");
+		dev_info(&pdev->dev, "Setting DCE HSP functions for tegra264-dce");
 		DCE_HSP_INIT_T264(d->hsp);
 	} else {
 		ret = -1;
@@ -285,6 +314,27 @@ static int tegra_dce_probe(struct platform_device *pdev)
 		goto os_init_err;
 	}
 
+	d = dce_get_pdata_dce(pdev);
+
+	/* Reset dce module if dce fw is loaded by psc,
+	 * as mb2 may not reset the dce module when loaded by psc
+	 */
+	dce_reset_dce_module(d);
+
+	/* Load the dce fw through psc mailbox commands
+	 * Make sure the pce mailbox driver is loaded prior to
+	 * dce kmd probe through steps to defer the dce probe
+	 * call or module load order
+	 */
+	err = dce_psc_load_fw(pdev, d);
+	if (err) {
+		if (err == -EPROBE_DEFER)
+			dev_info(dev, "PSC mailbox not ready, deferring probe\n");
+		else
+			dev_err(dev, "failed to initialize PSC client with err = %d\n", err);
+		goto os_init_err;
+	}
+
 	/*
 	 * Initialize SOC HSP HAL Functions
 	 */
@@ -300,8 +350,6 @@ static int tegra_dce_probe(struct platform_device *pdev)
 			err);
 		goto req_intr_err;
 	}
-
-	d = dce_get_pdata_dce(pdev);
 
 	err = dce_driver_init(d);
 	if (err) {
@@ -330,10 +378,13 @@ static int tegra_dce_probe(struct platform_device *pdev)
 
 	/**
 	 * FIXME: Allow tegra_dce.ko unloading.
+	 * Currently allow unloading if dce fw is loaded by psc
 	 */
-	if (!try_module_get(THIS_MODULE)) {
-		dce_os_info(d, "Failed to get lock of DCE Module.\n");
-		dce_os_info(d, "modprobe --remove of kernel modules depending on tegra_dce.ko will fail.\n");
+	if (is_dce_load_by_psc(pdev) == false) {
+		if (!try_module_get(THIS_MODULE)) {
+			dce_os_info(d, "Failed to get lock of DCE Module.\n");
+			dce_os_info(d, "modprobe --remove of kernel modules depending on tegra_dce.ko will fail.\n");
+		}
 	}
 
 	return 0;
@@ -351,13 +402,15 @@ static int tegra_dce_remove(struct platform_device *pdev)
 	struct tegra_dce *d =
 			dce_get_pdata_dce(pdev);
 
+	dce_deinit(d);
+	dce_reset_dce_module(d);
 #ifdef CONFIG_DEBUG_FS
 	dce_remove_debug(d);
 #endif
-
 	dce_set_irqs(pdev, false);
 	dce_driver_stop(d);
 	dce_driver_deinit(d);
+	dce_psc_client_deinit(pdev);
 	return 0;
 }
 
@@ -372,6 +425,14 @@ static int dce_pm_suspend(struct device *dev)
 static int dce_pm_resume(struct device *dev)
 {
 	struct tegra_dce *d = dce_get_tegra_dce_from_dev(dev);
+	int err = 0;
+
+	/* Steps to resume the dce fw through psc mailbox commands */
+	err = dce_psc_resume_fw(dev, d);
+	if (err) {
+		dev_err(dev, "failed to resume dce fw by psc = %d\n", err);
+		return err;
+	}
 
 	return dce_pm_exit_sc7(d);
 }

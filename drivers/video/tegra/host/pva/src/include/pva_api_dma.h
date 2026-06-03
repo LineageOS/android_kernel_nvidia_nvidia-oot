@@ -49,8 +49,6 @@ enum pva_dma_trigger {
 	PVA_DMA_TRIG_WRITE5,
 	PVA_DMA_TRIG_READ6,
 	PVA_DMA_TRIG_WRITE6,
-	PVA_DMA_TRIG_HWSEQ_RD,
-	PVA_DMA_TRIG_HWSEQ_WR,
 };
 
 enum pva_dma_trigger_mode {
@@ -82,8 +80,8 @@ struct pva_dma_transfer_attr {
 	/** When dynamic slot flag is set, it means the memory location will be
 	* relocated by commands.
 	*/
-#define PVA_DMA_DYNAMIC_SLOT (1U << 15)
-#define PVA_DMA_STATIC_SLOT (1U << 14)
+#define PVA_DMA_DYNAMIC_SLOT ((uint16_t)1U << 15)
+#define PVA_DMA_STATIC_SLOT ((uint16_t)1U << 14)
 #define PVA_DMA_SLOT_INVALID 0
 #define PVA_DMA_SLOT_ID_MASK 0xFFU
 #define PVA_DMA_MAX_NUM_SLOTS 256
@@ -92,9 +90,9 @@ struct pva_dma_transfer_attr {
 	uint16_t line_pitch;
 	uint32_t cb_start;
 	uint32_t cb_size;
-	uint32_t adv1;
-	uint32_t adv2;
-	uint32_t adv3;
+	int32_t adv1;
+	int32_t adv2;
+	int32_t adv3;
 	uint64_t offset;
 };
 

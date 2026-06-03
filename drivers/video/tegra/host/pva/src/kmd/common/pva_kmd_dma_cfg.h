@@ -35,6 +35,15 @@
 #define MAX_DESC_ID 0x3FU
 
 /**
+ * @brief Number of DMA channels per engine
+ *
+ * @details DMA channels per engine (matches PVA_NUM_DMA_CHANNELS in pva_fw_constants.h)
+ * Used for channel validation and shift amount masking.
+ * Value: 16
+ */
+#define PVA_KMD_DMA_CHANNELS_PER_ENGINE 16U
+
+/**
  * @brief Enumeration of DMA frame replication modes
  *
  * @details Defines the different frame replication modes supported by the DMA engine.
@@ -180,7 +189,7 @@ struct pva_kmd_dma_scratch_buffer {
  * Any invalid parameters or unsupported configurations will result in
  * appropriate error codes.
  *
- * @param[in] dma_cfg_hdr    Pointer to user DMA configuration header
+ * @param[in] ops_hdr    Pointer to user DMA configuration header
  *                           Valid value: non-null
  * @param[in] dma_config_size Size of the DMA configuration data in bytes
  *                           Valid range: [sizeof(header) .. UINT32_MAX]
@@ -197,7 +206,7 @@ struct pva_kmd_dma_scratch_buffer {
  * @retval PVA_INVAL                    Invalid input parameters
  */
 enum pva_error pva_kmd_parse_dma_config(
-	const struct pva_ops_dma_config_register *dma_cfg_hdr,
+	const struct pva_ops_dma_config_register *ops_hdr,
 	uint32_t dma_config_size, struct pva_dma_config *out_cfg,
 	struct pva_kmd_hw_constants const *hw_consts, bool skip_validation);
 
@@ -356,7 +365,7 @@ void pva_kmd_collect_relocs(struct pva_dma_config const *dma_cfg,
  * to embed actual memory addresses, enabling efficient firmware execution
  * without runtime address resolution for static resources.
  *
- * @param[in, out] fw_dma_cfg     Pointer to firmware DMA configuration to update
+ * @param[in, out] fw_dma_cfg_hdr     Pointer to firmware DMA configuration to update
  *                                Valid value: non-null
  * @param[in] dma_aux             Pointer to DMA auxiliary resource information
  *                                Valid value: non-null
@@ -377,7 +386,7 @@ void pva_kmd_collect_relocs(struct pva_dma_config const *dma_cfg,
  * @retval PVA_INVALID_RESOURCE         Resource in invalid state for binding
  */
 enum pva_error pva_kmd_bind_static_buffers(
-	struct pva_dma_config_resource *fw_dma_cfg,
+	struct pva_dma_config_resource *fw_dma_cfg_hdr,
 	struct pva_kmd_dma_resource_aux *dma_aux,
 	struct pva_fw_dma_slot const *static_slots, uint16_t num_static_slots,
 	struct pva_fw_dma_reloc const *static_relocs,
@@ -452,7 +461,7 @@ enum pva_error pva_kmd_load_dma_config(
 	struct pva_kmd_resource_table *resource_table,
 	const struct pva_ops_dma_config_register *dma_cfg_hdr,
 	uint32_t dma_config_size, struct pva_kmd_dma_resource_aux *dma_aux,
-	void *fw_dma_cfg, uint32_t *out_fw_fetch_size, bool priv);
+	void *fw_dma_cfg, uint32_t *out_fw_fetch_size, bool skip_validation);
 
 /**
  * @brief Unload DMA configuration and release associated resources (unsafe version)

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 /*
  *
  *  Realtek Bluetooth USB driver
@@ -45,6 +47,10 @@
 #include <linux/semaphore.h>
 #include <net/bluetooth/hci_core.h>
 static DEFINE_SEMAPHORE(switch_sem);
+#endif
+
+#ifdef TEGRA_SYSTEM_TYPE_ACK
+MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);
 #endif
 
 #if HCI_VERSION_CODE >= KERNEL_VERSION(3, 7, 1)

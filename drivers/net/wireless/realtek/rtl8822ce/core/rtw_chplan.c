@@ -3227,6 +3227,16 @@ void dump_chplan_test(void *sel)
 {
 	int i, j;
 
+	if (!rtw_channel_def_2g->len_ch_attr)
+		return;
+#if CONFIG_IEEE80211_BAND_5GHZ
+	if (!rtw_channel_def_5g->len_ch_attr)
+		return;
+#endif
+#if CONFIG_IEEE80211_BAND_6GHZ
+	if (!rtw_channel_def_6g->len_ch_attr)
+		return;
+#endif
 	/* check 2G CHD redundent */
 	for (i = 1; i < RTW_CHD_2G_MAX; i++) {
 		for (j = 1; j < i; j++) {

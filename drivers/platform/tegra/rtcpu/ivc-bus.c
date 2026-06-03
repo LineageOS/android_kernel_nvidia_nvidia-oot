@@ -9,14 +9,10 @@
 #include <linux/of_device.h>
 #include <linux/pm_runtime.h>
 #include <linux/slab.h>
-#if defined(NV_TEGRA_IVC_USE_IVC_EXT_DRIVER)
-#include <soc/tegra/ivc_ext.h>
-#else
 #include <soc/tegra/ivc-priv.h>
-#endif
+#include <soc/tegra/ivc_ext.h>
 #include <linux/tegra-ivc-bus.h>
 #include <linux/bitops.h>
-#include <linux/version.h>
 #include "soc/tegra/camrtc-channels.h"
 
 #if defined(NV_TEGRA_IVC_STRUCT_HAS_IOSYS_MAP)
@@ -323,11 +319,7 @@ static struct tegra_ivc_channel *tegra_ivc_channel_create(
 
 	chan->group = channel_group;
 
-#if defined(NV_TEGRA_IVC_USE_IVC_EXT_DRIVER)
-	tegra_ivc_channel_reset(&chan->ivc);
-#else
 	tegra_ivc_reset(&chan->ivc);
-#endif
 
 	/* Fill channel descriptor */
 	tlv = (struct camrtc_tlv_ivc_setup *)
@@ -395,11 +387,7 @@ static void tegra_ivc_channel_notify(struct tegra_ivc_channel *chan)
 {
 	const struct tegra_ivc_channel_ops *ops;
 
-#if defined(NV_TEGRA_IVC_USE_IVC_EXT_DRIVER)
-	if (tegra_ivc_channel_notified(&chan->ivc) != 0)
-#else
 	if (tegra_ivc_notified(&chan->ivc) != 0)
-#endif
 		return;
 
 	if (!chan->is_ready)
@@ -672,6 +660,22 @@ static int tegra_ivc_bus_probe(struct device *dev)
 		}
 
 		rcu_assign_pointer(chan->ops, ops);
+
+		/* Call late_init after ops pointer is set and notifications work */
+		if (ops->late_init != NULL) {
+			ret = ops->late_init(chan);
+			if (ret) {
+				/* Clean rollback on late_init failure */
+				RCU_INIT_POINTER(chan->ops, NULL);
+				synchronize_rcu();
+
+				if (ops->remove != NULL)
+					ops->remove(chan);
+
+				return ret;
+			}
+		}
+
 		ret = 0;
 
 	}

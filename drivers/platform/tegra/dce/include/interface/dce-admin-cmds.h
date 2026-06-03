@@ -76,7 +76,13 @@
 #define DCE_ADMIN_CMD_PERF_CLEAR_EVENTS	0x18U   // clear perf events
 #define DCE_ADMIN_CMD_RM_BOOTSTRAP2     0x19U   // tell RM to "bootstrap" display-server
 
-#define DCE_ADMIN_CMD_NEXT		0x1AU   // must be last command ID + 1
+// RM power management commands
+#define DCE_ADMIN_CMD_RM_SUSPEND_TMP        0x1AU   // suspend RM
+#define DCE_ADMIN_CMD_RM_DEINIT_TMP         0x1BU   // deinit RM
+#define DCE_ADMIN_CMD_DEINIT                0x1CU   // deinit DCE
+#define DCE_ADMIN_CMD_RM_VM_DEINIT_TMP      0x1DU   // deinit VM
+
+#define DCE_ADMIN_CMD_NEXT		0x1EU   // must be last command ID + 1
 
 struct dce_admin_version_info {
 	uint32_t	version;
@@ -95,6 +101,10 @@ struct dce_admin_fw_version_info {
 
 struct dce_admin_echo {
 	uint32_t	data;
+};
+
+struct dce_admin_rm_vm_deinit_tmp {
+	uint32_t	vmid;
 };
 
 #define	DCE_ADMIN_EXT_TEST_ALU	 0U
@@ -202,6 +212,7 @@ struct dce_admin_ipc_cmd {
 		struct dce_admin_mem_args		mem_map;
 		struct dce_admin_ipc_create_args	ipc_create;
 		struct dce_admin_perf_args		perf;
+		struct dce_admin_rm_vm_deinit_tmp   vm_deinit;
 	} args;
 };
 

@@ -19,11 +19,15 @@ void pva_kmd_submitter_init(struct pva_kmd_submitter *submitter,
 	submitter->submit_lock = submit_lock;
 	submitter->post_fence_va = post_fence_va;
 	submitter->post_fence = *post_fence;
-	submitter->fence_future_value = 0;
 	submitter->chunk_pool = chunk_pool;
 	submitter->chunk_pool_lock = chunk_pool_lock;
 
+	/* Initialize fence_future_value with lock held for consistency
+	 * with other accesses (MISSING_LOCK fix) */
+	pva_kmd_mutex_lock(submitter->submit_lock);
+	submitter->fence_future_value = 0;
 	*submitter->post_fence_va = submitter->fence_future_value;
+	pva_kmd_mutex_unlock(submitter->submit_lock);
 }
 
 enum pva_error pva_kmd_submitter_prepare(struct pva_kmd_submitter *submitter,

@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2019-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2019-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  */
 
 #include <dce.h>
 #include <dce-os-log.h>
 #include <dce-os-utils.h>
 #include <dce-linux-device.h>
+#include <linux/reset.h>
 
 enum pm_controls {
 	FW_LOAD_HALTED,
@@ -69,6 +70,45 @@ int dce_reset_dce(struct tegra_dce *d)
 	dce_evp_set_reset_addr(d, fw_dce_addr);
 
 	dce_pm_set_pm_ctrl(d, FW_LOAD_DONE);
+
+	return 0;
+}
+
+/**
+ * dce_reset_dce_module - Reset DCE module using reset command
+ *
+ * @d : Pointer to tegra_dce struct.
+ *
+ * This function sends a reset command to BPMP to reset the DCE module.
+ * which performs a module reset.
+ *
+ * Return : 0 if success, negative error code on failure
+ *          -ENODEV if BPMP is not available
+ *          -EINVAL if reset command failed
+ */
+int dce_reset_dce_module(struct tegra_dce *d)
+{
+	struct dce_linux_device *d_dev;
+	int err;
+
+	if (!d)
+		return -EINVAL;
+
+	d_dev = dce_linux_device_from_dce(d);
+	if (!d_dev)
+		return -ENODEV;
+
+	/* Reset the DCE
+	 * Current code support reset only if load_dce_fw_by_psc is enabled
+	 * TODO: Enable this feature on all SOCs which bpmp allows the reset
+	 */
+	if (d_dev->rst && d_dev->dce_fw_load_by_psc) {
+		err = reset_control_reset(d_dev->rst);
+		if (err) {
+			dce_os_err(d, "failed to reset DCE with err = %d\n", err);
+			return err;
+		}
+	}
 
 	return 0;
 }

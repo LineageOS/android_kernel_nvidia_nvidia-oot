@@ -2482,8 +2482,9 @@ enum rtw_phl_status rtw_phl_interrupt_handler(void *phl)
 
 	PHL_DBG("%s : 0x%x\n", __func__, int_hdler_msk);
 	/* beacon interrupt */
-	if (int_hdler_msk & BIT0)
-		;/* todo */
+	if (int_hdler_msk & BIT0) {
+		/* TODO: handle beacon interrupt */
+	}
 
 	/* rx interrupt */
 	if (int_hdler_msk & BIT1) {
@@ -2502,12 +2503,14 @@ enum rtw_phl_status rtw_phl_interrupt_handler(void *phl)
 	}
 
 	/* tx interrupt */
-	if (int_hdler_msk & BIT2)
-		;
+	if (int_hdler_msk & BIT2) {
+		/* TODO: handle tx interrupt */
+	}
 
 	/* cmd interrupt */
-	if (int_hdler_msk & BIT3)
-		;/* todo */
+	if (int_hdler_msk & BIT3) {
+		/* TODO: handle cmd interrupt */
+	}
 
 	/* halt c2h interrupt */
 	if (int_hdler_msk & BIT4)

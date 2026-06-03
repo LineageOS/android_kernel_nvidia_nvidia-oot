@@ -11,6 +11,10 @@
 #define FIRMWARE_T25X_VERSION_MINOR		((uint32_t)0x0U)
 #define FIRMWARE_T25X_VERSION_SUBMINOR		((uint32_t)0x0U)
 
+#define FIRMWARE_T25X_V2_VERSION_MAJOR		((uint32_t)0x3U)
+#define FIRMWARE_T25X_V2_VERSION_MINOR		((uint32_t)0x1U)
+#define FIRMWARE_T25X_V2_VERSION_SUBMINOR	((uint32_t)0x0U)
+
 static inline uint32_t dla_t25x_fw_version(void)
 {
 	return (((FIRMWARE_T25X_VERSION_MAJOR & 0xffU) << 16) |

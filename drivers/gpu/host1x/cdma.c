@@ -690,5 +690,7 @@ void host1x_cdma_end(struct host1x_cdma *cdma,
  */
 void host1x_cdma_update(struct host1x_cdma *cdma)
 {
-	schedule_work(&cdma->update_work);
+	struct host1x *host = cdma_to_host1x(cdma);
+
+	queue_work(host->cdma_wq, &cdma->update_work);
 }

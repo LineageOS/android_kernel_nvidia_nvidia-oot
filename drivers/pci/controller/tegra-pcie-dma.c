@@ -55,7 +55,7 @@ tegra_pcie_dma_status_t tegra_pcie_dma_initialize(struct tegra_pcie_dma_init_inf
 	struct tegra_pcie_dma_priv *prv;
 
 	if (!info || !cookie) {
-		pr_err("%s: NULL info or cookie param\n", __func__);
+		pr_err("Cannot Initialize DMA with NULL info or cookie param\n");
 		return TEGRA_PCIE_DMA_FAIL_INVAL_INPUTS;
 	}
 
@@ -83,7 +83,7 @@ tegra_pcie_dma_status_t tegra_pcie_dma_initialize(struct tegra_pcie_dma_init_inf
 		*cookie = prv;
 		return TEGRA_PCIE_DMA_SUCCESS;
 	} else {
-		pr_err("%s: invalid soc id: %d\n", __func__, info->soc);
+		pr_err("Cannot Initialize DMA as soc id is invalid: %d\n", info->soc);
 		kfree(prv);
 		return TEGRA_PCIE_DMA_FAIL_INVAL_INPUTS;
 	}
@@ -94,7 +94,7 @@ tegra_pcie_dma_status_t tegra_pcie_dma_set_msi(void *cookie, u64 msi_addr, u32 m
 	struct tegra_pcie_dma_priv *prv = (struct tegra_pcie_dma_priv *)cookie;
 
 	if (!cookie) {
-		pr_err("%s: cookie is null\n", __func__);
+		pr_err("Cannot set MSI for DMA as cookie is null\n");
 		return TEGRA_PCIE_DMA_FAIL_INVAL_INPUTS;
 	}
 
@@ -104,7 +104,7 @@ tegra_pcie_dma_status_t tegra_pcie_dma_set_msi(void *cookie, u64 msi_addr, u32 m
 	} else if (prv->soc == NVPCIE_DMA_SOC_T264) {
 		return tegra264_pcie_xdma_set_msi(prv->soc_cookie, msi_addr, msi_data);
 	} else {
-		pr_err("%s: invalid soc id: %d\n", __func__, prv->soc);
+		pr_err("Cannot set MSI for DMA as soc id is invalid: %d\n", prv->soc);
 		return TEGRA_PCIE_DMA_FAIL_INVAL_INPUTS;
 	}
 }
@@ -116,7 +116,7 @@ tegra_pcie_dma_status_t tegra_pcie_dma_submit_xfer(void *cookie,
 	struct tegra_pcie_dma_priv *prv = (struct tegra_pcie_dma_priv *)cookie;
 
 	if (!cookie) {
-		pr_err("%s: cookie is null\n", __func__);
+		pr_err("Cannot submit DMA transfer as cookie is null\n");
 		return TEGRA_PCIE_DMA_FAIL_INVAL_INPUTS;
 	}
 
@@ -125,7 +125,7 @@ tegra_pcie_dma_status_t tegra_pcie_dma_submit_xfer(void *cookie,
 	} else if (prv->soc == NVPCIE_DMA_SOC_T264) {
 		return tegra264_pcie_xdma_submit_xfer(prv->soc_cookie, tx_info);
 	} else {
-		pr_err("%s: invalid soc id: %d\n", __func__, prv->soc);
+		pr_err("Cannot submit DMA transfer as soc id is invalid: %d\n", prv->soc);
 		return TEGRA_PCIE_DMA_FAIL_INVAL_INPUTS;
 	}
 }
@@ -137,7 +137,7 @@ bool tegra_pcie_dma_stop(void *cookie)
 	bool st = false;
 
 	if (!cookie) {
-		pr_err("%s: cookie is null\n", __func__);
+		pr_err("Cannot stop DMA as cookie is null\n");
 		goto end;
 	}
 
@@ -146,7 +146,7 @@ bool tegra_pcie_dma_stop(void *cookie)
 	} else if (prv->soc == NVPCIE_DMA_SOC_T264) {
 		st = tegra264_pcie_xdma_stop(prv->soc_cookie);
 	} else {
-		pr_err("%s: invalid soc id: %d\n", __func__, prv->soc);
+		pr_err("Cannot stop DMA as soc id is invalid: %d\n", prv->soc);
 	}
 
 end:
@@ -159,13 +159,13 @@ tegra_pcie_dma_status_t tegra_pcie_dma_deinit(void **cookie)
 	struct tegra_pcie_dma_priv *prv;
 
 	if (!cookie) {
-		pr_err("%s: cookie is null\n", __func__);
+		pr_err("Cannot deinit DMA as cookie is null\n");
 		return TEGRA_PCIE_DMA_FAIL_INVAL_INPUTS;
 	}
 
 	prv = (struct tegra_pcie_dma_priv *)(*cookie);
 	if (!prv) {
-		pr_err("%s: prv pointer is null\n", __func__);
+		pr_err("Cannot deinit DMA as prv pointer is null\n");
 		return TEGRA_PCIE_DMA_FAIL_INVAL_INPUTS;
 	}
 	*cookie = NULL;
@@ -178,7 +178,7 @@ tegra_pcie_dma_status_t tegra_pcie_dma_deinit(void **cookie)
 		kfree(prv);
 		return TEGRA_PCIE_DMA_SUCCESS;
 	} else {
-		pr_err("%s: invalid soc id: %d\n", __func__, prv->soc);
+		pr_err("Cannot deinit DMA as soc id is invalid: %d\n", prv->soc);
 		return TEGRA_PCIE_DMA_FAIL_INVAL_INPUTS;
 	}
 }

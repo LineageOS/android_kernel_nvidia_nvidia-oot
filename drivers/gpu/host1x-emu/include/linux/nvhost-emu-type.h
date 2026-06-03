@@ -1,6 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- * SPDX-License-Identifier: GPL-2.0-only
+ * SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  */
 #ifndef __LINUX_NVHOST_EMU_TYPE_H
 #define __LINUX_NVHOST_EMU_TYPE_H
@@ -9,20 +9,6 @@
 #include <linux/device.h>
 #include <linux/types.h>
 #include <linux/platform_device.h>
-
-/**
- * TODO: Remove header after pre-silicon verification
- * This header is required till emulation driver verification is done on Tho-r
- * VDK platform. Since we are exporting new kernel symbol, header with declarion
- * of modified symbols is required
- *
- * Changed cannot be added in orignal Host1x driver header files ("linux/nvhost.h"
- * and "host1x-next.h") due to Host1x driver and other dependent drivers. Note in
- * Tho-r verification config both the driver will co-exist.
- *
- * Some data structure are also re-delacred in this header for case where client
- * driver wants to verify over emulation driver.
- */
 
 struct nvhost_ctrl_sync_fence_info;
 struct nvhost_fence;

@@ -1,5 +1,16 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* SPDX-FileCopyrightText: Copyright (c) 2017-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
+/* SPDX-FileCopyrightText: Copyright (c) 2017-2026 NVIDIA CORPORATION & AFFILIATES.
+ * All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms and conditions of the GNU General Public License,
+ * version 2, as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ */
 /**
  * @file include/media/fusa-capture/capture-vi-channel.h
  *
@@ -15,7 +26,7 @@
 struct vi_channel_drv;
 
 /**
- * @brief VI fops for Host1x syncpt/gos allocations
+ * @brief VI fops for Host1x syncpt allocations
  *
  * This fops is a HAL for chip/IP generations, see the respective VI platform
  * drivers for the implementations.
@@ -58,33 +69,18 @@ struct vi_channel_drv_ops {
 		uint32_t threshold);
 
 	/**
-	 * Retrieve the GoS table allocated in the VI-THI carveout.
-	 *
-	 * @param[in]	pdev	VI platform_device
-	 * @param[out]	count	No. of carveout devices
-	 * @param[out]	table	GoS table pointer
-	 */
-	void (*get_gos_table)(
-		struct platform_device *pdev,
-		int *count,
-		const dma_addr_t **table);
-
-	/**
-	 * Get a syncpt's GoS backing in the VI-THI carveout.
+	 * Get a syncpt's shim address.
 	 *
 	 * @param[in]	pdev		VI platform_device
 	 * @param[in]	id		syncpt id
-	 * @param[out]	gos_index	GoS id
-	 * @param[out]	gos_offset	Offset of syncpt within GoS [dword]
+	 * @param[out]	syncpt_addr	syncpt shim address
 	 *
 	 * @returns	0 (success), neg. errno (failure)
 	 */
-	int (*get_syncpt_gos_backing)(
+	int (*get_syncpt_addr)(
 		struct platform_device *pdev,
 		uint32_t id,
-		dma_addr_t *syncpt_addr,
-		uint32_t *gos_index,
-		uint32_t *gos_offset);
+		dma_addr_t *syncpt_addr);
 };
 
 /**
@@ -98,7 +94,7 @@ struct vi_channel_drv {
 	struct mutex lock; /**< VI channel driver context lock */
 	u8 num_channels; /**< No. of VI channel character devices */
 	const struct vi_channel_drv_ops *ops;
-		/**< VI fops for Host1x syncpt/gos allocations */
+		/**< VI fops for Host1x syncpt allocations */
 	struct tegra_vi_channel __rcu *channels[];
 		/**< Allocated VI channel contexts */
 };
@@ -114,9 +110,10 @@ struct tegra_vi_channel {
 	struct vi_channel_drv *drv; /**< VI channel driver context */
 	struct rcu_head rcu; /**< VI channel rcu */
 	struct vi_capture *capture_data; /**< VI channel capture context */
-	const struct vi_channel_drv_ops *ops; /**< VI syncpt/gos fops */
+	const struct vi_channel_drv_ops *ops; /**< VI syncpt fops */
 	struct device *rtcpu_dev; /**< rtcpu device */
 	bool is_stream_opened; /**< Whether the NVCSI stream is opened */
+	uint32_t pipeline_id; /**< Pipeline ID for logging */
 };
 
 /**
@@ -145,7 +142,7 @@ void vi_channel_drv_unregister(
 	struct device *dev);
 
 /**
- * @brief Register the chip specific syncpt/gos related function table
+ * @brief Register the chip specific syncpt related function table
  *
  * @param[in]	ops	vi_channel_drv_ops fops
  * @returns	0 (success), neg. errno (failure)

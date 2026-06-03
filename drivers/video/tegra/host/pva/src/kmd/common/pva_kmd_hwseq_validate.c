@@ -73,12 +73,12 @@ static inline uint8_t get_head_desc_did(struct pva_hwseq_priv const *hwseq)
 	return hwseq->dma_descs[0].did;
 }
 
-static inline enum pva_error check_adv_params(uint32_t adv1, uint32_t adv2,
-					      uint32_t adv3, uint8_t rpt1,
+static inline enum pva_error check_adv_params(int32_t adv1, int32_t adv2,
+					      int32_t adv3, uint8_t rpt1,
 					      uint8_t rpt2, uint8_t rpt3,
 					      bool has_dim3)
 {
-	if (!has_dim3 && ((adv1 != 0U) || (adv2 != 0U) || (adv3 != 0U) ||
+	if (!has_dim3 && ((adv1 != 0) || (adv2 != 0) || (adv3 != 0) ||
 			  ((rpt1 + rpt2 + rpt3) != 0U))) {
 		return PVA_INVAL;
 	}
@@ -116,8 +116,8 @@ validate_adv_params(struct pva_dma_transfer_attr const *attr, bool has_dim3)
 	}
 
 	/* Use 64-bit arithmetic to avoid overflow in multiplication */
-	if (((uint64_t)attr->adv1 * ((uint64_t)attr->rpt1 + 1ULL)) !=
-	    (uint64_t)attr->adv2) {
+	if (((int64_t)attr->adv1 * ((int64_t)attr->rpt1 + 1LL)) !=
+	    (int64_t)attr->adv2) {
 		pva_kmd_log_err(
 			"Invalid source advance amount on dim1 or dim2");
 		return PVA_INVAL;
@@ -257,7 +257,7 @@ check_vmem_setup(struct pva_dma_transfer_attr const *attr,
 		 uint32_t vmem_tile_count, bool has_dim3)
 {
 	if ((!has_dim3) && (vmem_tile_count > 1U) &&
-	    ((attr->adv1 != 0U) || (attr->adv2 != 0U) || (attr->adv3 != 0U))) {
+	    ((attr->adv1 != 0) || (attr->adv2 != 0) || (attr->adv3 != 0))) {
 		return PVA_INVAL;
 	}
 	return PVA_SUCCESS;
@@ -976,23 +976,19 @@ validate_frame_buffer_addr(struct pva_hwseq_priv *hwseq,
 	int64_t frame_buffer_start = 0;
 	int64_t frame_buffer_end = 0;
 	uint32_t num_bytes = 0;
-	int64_t frame_plane_size = 0LL;
 	uint8_t head_desc_id = get_head_desc_did(hwseq);
 	const struct pva_dma_descriptor *head_desc = hwseq->head_desc;
 	pva_math_error math_err = MATH_OP_SUCCESS;
-	uint32_t adv_value =
+	int32_t adv_value =
 		sequencing_to_vmem ? head_desc->src.adv1 : head_desc->dst.adv1;
 
-	/* adv1 is uint32_t but limited to 24-bit range (max 0xFFFFFF < INT32_MAX) */
-	ASSERT(adv_value <= 0x7FFFFFFFU);
-	frame_plane_size = (int32_t)adv_value;
 	frame_buffer_start =
 		adds64(muls64(frame_info->start_y, (int64_t)frame_line_pitch,
 			      &math_err),
 		       frame_info->start_x, &math_err);
 
 	frame_buffer_end = muls64(subs64(frame_info->end_z, 1, &math_err),
-				  frame_plane_size, &math_err);
+				  (int64_t)adv_value, &math_err);
 
 	frame_buffer_end =
 		adds64(muls64(subs64(frame_info->end_y, 1, &math_err),
@@ -1058,12 +1054,12 @@ static void get_sequencing_and_dim3(struct pva_hwseq_priv *hwseq,
 	*has_dim3 = ((head_desc->src.rpt1 == head_desc->dst.rpt1) &&
 		     (head_desc->src.rpt2 == head_desc->dst.rpt2));
 	*has_dim3 = *has_dim3 &&
-		    ((*sequencing_to_vmem) ? ((head_desc->src.adv1 > 0U) &&
-					      (head_desc->src.adv2 > 0U) &&
-					      (head_desc->dst.adv1 > 0U)) :
-						   ((head_desc->dst.adv1 > 0U) &&
-					      (head_desc->dst.adv2 > 0U) &&
-					      (head_desc->src.adv1 > 0U)));
+		    ((*sequencing_to_vmem) ? ((head_desc->src.adv1 > 0) &&
+					      (head_desc->src.adv2 > 0) &&
+					      (head_desc->dst.adv1 > 0)) :
+						   ((head_desc->dst.adv1 > 0) &&
+					      (head_desc->dst.adv2 > 0) &&
+					      (head_desc->src.adv1 > 0)));
 }
 
 /**
@@ -1302,7 +1298,7 @@ out:
 static enum pva_error validate_rra_mode(struct pva_hwseq_priv *hwseq_info,
 					uint64_t *hw_dma_descs_mask)
 {
-	const uint8_t *column = 0U;
+	const uint8_t *column = NULL;
 	uint32_t i = 0U;
 	uint32_t num_columns = 0U;
 	uint32_t end = hwseq_info->entry.ch->hwseq_end;

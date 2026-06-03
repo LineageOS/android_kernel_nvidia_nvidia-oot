@@ -1,7 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/*
- * Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- */
+/* SPDX-FileCopyrightText: Copyright (c) 2022-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
 
 #include <linux/module.h>
 #include <linux/moduleparam.h>
@@ -225,6 +223,7 @@ int vblk_complete_sg_io(struct vblk_dev *vblkdev,
 	void *sbp;
 	void *data_buf;
 	int err = 0;
+	uint32_t safe_sb_len;
 
 	if (ioctl_req->status) {
 		err = ioctl_req->status;
@@ -251,12 +250,16 @@ int vblk_complete_sg_io(struct vblk_dev *vblkdev,
 	}
 
 	vblk_hp = (struct vblk_sg_io_hdr *)(ioctl_req->ioctl_buf);
+	/* Validate sense buffer length */
+	safe_sb_len = min_t(uint32_t, hp->mx_sb_len, UFS_REQUEST_SENS_DATA_LEN);
+
 	hp->status = 0xff & vblk_hp->status;
 	hp->masked_status = status_byte(vblk_hp->status);
 	hp->host_status = host_byte(vblk_hp->status);
 	hp->driver_status = driver_byte(vblk_hp->status);
+
 	if (hp->mx_sb_len != 0U)
-		hp->sb_len_wr = vblk_hp->sb_len_wr;
+		hp->sb_len_wr = min_t(uint32_t, vblk_hp->sb_len_wr, safe_sb_len);
 	else
 		hp->sb_len_wr = 0U;
 
@@ -264,7 +267,13 @@ int vblk_complete_sg_io(struct vblk_dev *vblkdev,
 	hp->resid = 0;
 
 	sbp = (ioctl_req->ioctl_buf + vblk_hp->sbp_arg_offset);
+
+	/* Validate sense buffer parameters before copying */
 	if ((hp->sb_len_wr != 0) && (hp->sbp != NULL)) {
+		if (hp->sb_len_wr > safe_sb_len) {
+			err = -EINVAL;
+			goto free_hp;
+		}
 		if (copy_to_user(hp->sbp, sbp, hp->sb_len_wr)) {
 			err = -EFAULT;
 			goto free_hp;
@@ -273,8 +282,13 @@ int vblk_complete_sg_io(struct vblk_dev *vblkdev,
 
 	data_buf = (ioctl_req->ioctl_buf + vblk_hp->xfer_arg_offset);
 
+	/* Validate data transfer */
 	if ((vblk_hp->data_direction == SCSI_FROM_DEVICE) ||
 		(vblk_hp->data_direction == SCSI_BIDIRECTIONAL)) {
+		if (vblk_hp->dxfer_len > ioctl_req->ioctl_len) {
+			err = -EINVAL;
+			goto free_hp;
+		}
 		if (copy_to_user(hp->dxferp, data_buf, vblk_hp->dxfer_len)) {
 			err = -EFAULT;
 			goto free_hp;

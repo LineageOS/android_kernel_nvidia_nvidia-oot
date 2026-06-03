@@ -1,13 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/*
- * Copyright (c) 2021-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- */
+// SPDX-FileCopyrightText: Copyright (c) 2021-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include <nvidia/conftest.h>
 
 #include <linux/dma-mapping.h>
 #include <linux/module.h>
-#include <linux/version.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
@@ -15,6 +12,16 @@
 
 #include "tegra_pcm_alt.h"
 #include "tegra_asoc_util_virt_alt.h"
+
+/* For 32 channels, 32 bit playback the frame size is 128 bytes */
+#define MAX_FRAME_SIZE_BYTES 128
+#define MAX_FRAMES_PER_PERIOD 1024
+#define MAX_PERIODS_PER_BUFFER 4
+
+/* It is also needed to align to Linux PAGE_SIZE boundary. */
+#define MAX_PERIOD_SIZE_BYTES \
+	ALIGN((MAX_FRAME_SIZE_BYTES * MAX_FRAMES_PER_PERIOD), PAGE_SIZE)
+#define MAX_BUFFER_SIZE_BYTES (MAX_PERIOD_SIZE_BYTES * MAX_PERIODS_PER_BUFFER)
 
 static const struct snd_pcm_hardware tegra_alt_pcm_hardware = {
 	.info			= SNDRV_PCM_INFO_MMAP |
@@ -26,10 +33,10 @@ static const struct snd_pcm_hardware tegra_alt_pcm_hardware = {
 				  SNDRV_PCM_FMTBIT_S16_LE |
 				  SNDRV_PCM_FMTBIT_S32_LE,
 	.period_bytes_min	= 128,
-	.period_bytes_max	= PAGE_SIZE * 4,
-	.periods_min		= 1,
-	.periods_max		= 8,
-	.buffer_bytes_max	= PAGE_SIZE * 8,
+	.period_bytes_max	= MAX_PERIOD_SIZE_BYTES,
+	.periods_min		= 2,
+	.periods_max		= MAX_PERIODS_PER_BUFFER,
+	.buffer_bytes_max	= MAX_BUFFER_SIZE_BYTES,
 	.fifo_size		= 4,
 };
 
@@ -328,8 +335,18 @@ static int tegra_alt_pcm_ioctl(struct snd_soc_component *component,
 
 static int tegra_alt_pcm_probe(struct snd_soc_component *component)
 {
+#if defined(NV_SND_SOC_COMPONENT_TO_DAPM) /* Linux v7.0 */
+	struct snd_soc_dapm_context *dapm = snd_soc_component_to_dapm(component);
+#else
 	struct snd_soc_dapm_context *dapm = snd_soc_component_get_dapm(component);
+#endif
+
+#if defined(NV_SND_SOC_DAPM_SET_IDLE_BIAS) /* Linux v6.18 */
+	snd_soc_dapm_set_idle_bias(dapm, false);
+#else
 	dapm->idle_bias_off = 1;
+#endif
+
 	return 0;
 }
 
@@ -344,19 +361,16 @@ static struct snd_soc_component_driver tegra_alt_pcm_platform = {
 	.pcm_construct	= tegra_alt_pcm_new,
 	.pcm_destruct	= tegra_alt_pcm_free,
 	.probe		= tegra_alt_pcm_probe,
+#ifdef CONFIG_DEBUG_FS
+	.debugfs_prefix = "pcm",
+#endif
 };
 
 int tegra_alt_pcm_platform_register(struct device *dev)
 {
-	return tegra_register_component(dev, &tegra_alt_pcm_platform, NULL, 0, "pcm");
+	return devm_snd_soc_register_component(dev, &tegra_alt_pcm_platform, NULL, 0);
 }
 EXPORT_SYMBOL_GPL(tegra_alt_pcm_platform_register);
-
-void tegra_alt_pcm_platform_unregister(struct device *dev)
-{
-	snd_soc_unregister_component(dev);
-}
-EXPORT_SYMBOL_GPL(tegra_alt_pcm_platform_unregister);
 
 MODULE_AUTHOR("Stephen Warren <swarren@nvidia.com>");
 MODULE_DESCRIPTION("Tegra Alt PCM ASoC driver");

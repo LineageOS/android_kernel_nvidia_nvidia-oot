@@ -293,7 +293,6 @@ static enum pva_error pva_kmd_op_executable_register_async(
 		}
 	}
 
-	/* CERT INT31-C: exec_size validated to fit in uint32_t, safe to cast */
 	err = add_vpu_resource_and_get_symbols(ctx, exec_data,
 					       (uint32_t)args->exec_size,
 					       &resource_id, &num_symbols,
@@ -491,10 +490,8 @@ static enum pva_error wait_for_queue_space(struct pva_kmd_context *ctx)
 {
 	enum pva_error err = PVA_SUCCESS;
 	uint32_t wait_time = 0;
-	const uint32_t poll_interval_us =
-		(uint32_t)((uint32_t)PVA_KMD_WAIT_FW_POLL_INTERVAL_US);
-	const uint32_t timeout_us =
-		(uint32_t)((uint32_t)PVA_KMD_WAIT_FW_TIMEOUT_US);
+	const uint32_t poll_interval_us = PVA_KMD_WAIT_FW_POLL_INTERVAL_US;
+	const uint32_t timeout_us = PVA_KMD_WAIT_FW_TIMEOUT_US;
 
 	//first check if we have space in queue
 	while (pva_kmd_queue_space(&ctx->ctx_queue) == 0U) {
@@ -617,19 +614,11 @@ pva_kmd_async_ops_handler(struct pva_kmd_context *ctx,
 			err = PVA_INVAL;
 			goto exit_loop;
 		}
-		/* Validate that opcode fits in uint32_t before casting */
-		if (header->opcode > U32_MAX) {
-			pva_kmd_log_err(
-				"pva_kmd_async_ops_handler: Opcode exceeds U32_MAX");
-			err = PVA_INVAL;
-			goto exit_loop;
-		}
 		/*
-	 * Check if the operation is allowed by the DVMS.
-	 * If not, return an error.
-	 */
-		/* CERT INT31-C: opcode validated to fit in uint32_t, safe to cast */
-		if (!pva_kmd_is_ops_allowed(ctx, (uint32_t)header->opcode)) {
+		 * Check if the operation is allowed by the DVMS.
+		 * If not, return an error.
+		 */
+		if (!pva_kmd_is_ops_allowed(ctx, header->opcode)) {
 			err = PVA_NO_PERM;
 			goto exit_loop;
 		}
@@ -689,7 +678,7 @@ pva_kmd_op_context_init(struct pva_kmd_context *ctx, const void *input_buffer,
 	ctx_init_out.max_cmdbuf_chunk_size =
 		pva_kmd_get_max_cmdbuf_chunk_size(ctx->pva);
 
-	produce_data(out_buffer, &ctx_init_out, sizeof(ctx_init_out));
+	produce_data(out_buffer, &ctx_init_out, (uint32_t)sizeof(ctx_init_out));
 
 	return PVA_SUCCESS;
 }
@@ -733,7 +722,7 @@ pva_kmd_op_queue_create(struct pva_kmd_context *ctx, const void *input_buffer,
 
 	/* CERT INT31-C: queue_id validated to fit in uint8_t, safe to cast */
 	syncpt_info = pva_kmd_queue_get_rw_syncpt_info(ctx->pva, ctx->ccq_id,
-						       queue_id);
+						       (uint8_t)queue_id);
 	queue_out_args.error = err;
 	queue_out_args.queue_id = queue_id;
 	queue_out_args.syncpt_id = syncpt_info->syncpt_id;
@@ -742,7 +731,7 @@ pva_kmd_op_queue_create(struct pva_kmd_context *ctx, const void *input_buffer,
 
 out:
 	produce_data(out_buffer, &queue_out_args,
-		     (uint64_t)sizeof(struct pva_ops_response_queue_create));
+		     (uint32_t)sizeof(struct pva_ops_response_queue_create));
 	return PVA_SUCCESS;
 }
 
@@ -762,7 +751,7 @@ pva_kmd_op_queue_destroy(struct pva_kmd_context *ctx, const void *input_buffer,
 
 	if (!access_ok(
 		    out_buffer,
-		    (uint64_t)sizeof(struct pva_ops_response_queue_destroy))) {
+		    (uint32_t)sizeof(struct pva_ops_response_queue_destroy))) {
 		return PVA_INVAL;
 	}
 
@@ -771,7 +760,7 @@ pva_kmd_op_queue_destroy(struct pva_kmd_context *ctx, const void *input_buffer,
 		pva_kmd_queue_destroy(ctx, queue_destroy_args->queue_id);
 
 	produce_data(out_buffer, &queue_out_args,
-		     (uint64_t)sizeof(struct pva_ops_response_queue_destroy));
+		     (uint32_t)sizeof(struct pva_ops_response_queue_destroy));
 
 	return PVA_SUCCESS;
 }
@@ -829,7 +818,7 @@ static enum pva_error pva_kmd_op_executable_get_symbols(
 
 	sym_out_args.error = PVA_SUCCESS;
 	sym_out_args.num_symbols = rec->vpu_bin.symbol_table.n_symbols;
-	produce_data(out_buffer, &sym_out_args, sizeof(sym_out_args));
+	produce_data(out_buffer, &sym_out_args, (uint32_t)sizeof(sym_out_args));
 	produce_data(out_buffer, rec->vpu_bin.symbol_table.symbols, table_size);
 	pva_kmd_drop_resource(&ctx->ctx_resource_table,
 			      sym_in_args->exec_resource_id);
@@ -842,7 +831,7 @@ err_drop:
 err_response:
 	sym_out_args.error = err;
 	sym_out_args.num_symbols = 0;
-	produce_data(out_buffer, &sym_out_args, sizeof(sym_out_args));
+	produce_data(out_buffer, &sym_out_args, (uint32_t)sizeof(sym_out_args));
 	return PVA_SUCCESS;
 }
 
@@ -910,11 +899,6 @@ pva_kmd_sync_ops_handler(struct pva_kmd_context *ctx,
 
 	header = peek_data(in_arg);
 
-	if (!access_ok(in_arg, header->size)) {
-		err = PVA_INVAL;
-		goto out;
-	}
-
 	/* Validate that size fits in uint32_t before casting for consume_data */
 	if (header->size > U32_MAX) {
 		pva_kmd_log_err("Operation size exceeds U32_MAX");
@@ -922,8 +906,13 @@ pva_kmd_sync_ops_handler(struct pva_kmd_context *ctx,
 		goto out;
 	}
 
+	if (!access_ok(in_arg, (uint32_t)header->size)) {
+		err = PVA_INVAL;
+		goto out;
+	}
+
 	input_buffer = consume_data(in_arg, (uint32_t)header->size);
-	input_buffer_size = (uint64_t)header->size;
+	input_buffer_size = (uint32_t)header->size;
 
 	if (input_buffer_size % (uint64_t)sizeof(uint64_t) != 0UL) {
 		pva_kmd_log_err("PVA operation size is not a multiple of 8");
@@ -931,18 +920,11 @@ pva_kmd_sync_ops_handler(struct pva_kmd_context *ctx,
 		goto out;
 	}
 
-	/* Validate that opcode fits in uint32_t before casting */
-	if (header->opcode > U32_MAX) {
-		pva_kmd_log_err("Opcode exceeds U32_MAX");
-		err = PVA_INVAL;
-		goto out;
-	}
 	/*
 	 * Check if the operation is allowed by the DVMS.
 	 * If not, return an error.
 	 */
-	/* CERT INT31-C: opcode validated to fit in uint32_t, safe to cast */
-	if (!pva_kmd_is_ops_allowed(ctx, (uint32_t)header->opcode)) {
+	if (!pva_kmd_is_ops_allowed(ctx, header->opcode)) {
 		err = PVA_NO_PERM;
 		goto out;
 	}

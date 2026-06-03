@@ -22,6 +22,9 @@ typedef struct mutex pva_kmd_mutex_t;
 #else /* For user space code, including QNX KMD */
 
 #include <pthread.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include "pva_plat_faults.h"
 /**
  * @brief Mutex type alias for user space (QNX and other platforms)
  *
@@ -76,8 +79,16 @@ enum pva_error pva_kmd_mutex_init(pva_kmd_mutex_t *m);
  * @param[in, out] m  Pointer to @ref pva_kmd_mutex_t structure to lock
  *                    Valid value: non-null, must be initialized
  */
+#if defined(__KERNEL__) /* Linux: function declarations */
 void pva_kmd_mutex_lock(pva_kmd_mutex_t *m);
-
+#else /* QNX/Userspace: macros for MISRA C-2023 Rule 22.16 compliance */
+#define pva_kmd_mutex_lock(m)                                                  \
+	do {                                                                   \
+		int32_t pva_kmd_mtx_lock_ret_ =                                \
+			(int32_t)pthread_mutex_lock(m);                        \
+		ASSERT(pva_kmd_mtx_lock_ret_ == 0);                            \
+	} while (0 != 0) /* MISRA C-2023 Rule 14.4: use boolean expression */
+#endif
 /**
  * @brief Release a lock on the PVA KMD mutex
  *
@@ -96,7 +107,16 @@ void pva_kmd_mutex_lock(pva_kmd_mutex_t *m);
  * @param[in, out] m  Pointer to @ref pva_kmd_mutex_t structure to unlock
  *                    Valid value: non-null, must be currently locked by calling thread
  */
+#if defined(__KERNEL__) /* Linux: function declarations */
 void pva_kmd_mutex_unlock(pva_kmd_mutex_t *m);
+#else /* QNX/Userspace: macros for MISRA C-2023 Rule 22.16 compliance */
+#define pva_kmd_mutex_unlock(m)                                                \
+	do {                                                                   \
+		int32_t pva_kmd_mtx_unlock_ret_ =                              \
+			(int32_t)pthread_mutex_unlock(m);                      \
+		ASSERT(pva_kmd_mtx_unlock_ret_ == 0);                          \
+	} while (0 != 0) /* MISRA C-2023 Rule 14.4: use boolean expression */
+#endif
 
 /**
  * @brief Deinitialize a PVA KMD mutex and free resources

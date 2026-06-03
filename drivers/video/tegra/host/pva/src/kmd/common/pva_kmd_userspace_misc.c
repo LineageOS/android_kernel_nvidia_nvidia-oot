@@ -20,17 +20,8 @@ enum pva_error pva_kmd_mutex_init(pva_kmd_mutex_t *m)
 	return PVA_SUCCESS;
 }
 
-void pva_kmd_mutex_lock(pva_kmd_mutex_t *m)
-{
-	int ret = pthread_mutex_lock(m);
-	ASSERT(ret == 0);
-}
-
-void pva_kmd_mutex_unlock(pva_kmd_mutex_t *m)
-{
-	int ret = pthread_mutex_unlock(m);
-	ASSERT(ret == 0);
-}
+/* pva_kmd_mutex_lock and pva_kmd_mutex_unlock are macros defined in
+ * pva_kmd_mutex.h for MISRA C-2023 Rule 22.16 compliance (QNX/userspace) */
 
 void pva_kmd_mutex_deinit(pva_kmd_mutex_t *m)
 {
@@ -86,18 +77,24 @@ enum pva_error pva_kmd_sema_wait_timeout(pva_kmd_sema_t *sem,
 		ts.tv_sec += 1;
 	}
 
-wait_again:
-	ret = sem_timedwait(sem, &ts);
-	if (ret == -1) {
-		int saved_errno = errno;
-		if (saved_errno == ETIMEDOUT) {
-			pva_kmd_log_err("pva_kmd_sema_wait_timeout Timed out");
-			return PVA_TIMEDOUT;
-		} else if (saved_errno == EINTR) {
-			goto wait_again;
-		} else {
-			FAULT("Unexpected sem_timedwait error");
+	/* Loop to handle EINTR (signal interruption) without backward goto */
+	bool waiting = true;
+	while (waiting) {
+		ret = sem_timedwait(sem, &ts);
+		if (ret == -1) {
+			int saved_errno = errno;
+			if (saved_errno == ETIMEDOUT) {
+				pva_kmd_log_err(
+					"pva_kmd_sema_wait_timeout Timed out");
+				return PVA_TIMEDOUT;
+			} else if (saved_errno == EINTR) {
+				/* Interrupted by signal, retry */
+				continue;
+			} else {
+				FAULT("Unexpected sem_timedwait error");
+			}
 		}
+		waiting = false;
 	}
 
 	return PVA_SUCCESS;

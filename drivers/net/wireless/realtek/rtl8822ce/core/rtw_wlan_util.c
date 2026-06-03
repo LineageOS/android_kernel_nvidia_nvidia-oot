@@ -2890,10 +2890,10 @@ void process_csa_ie(_adapter *padapter, u8 *ies, uint ies_len)
 			/* change to ieee offset */
 			switch (csa_ch_offset) {
 			case HAL_PRIME_CHNL_OFFSET_LOWER:
-				csa_ch_offset = IEEE80211_HT_IE_CHA_SEC_BELOW;
+				csa_ch_offset = IEEE80211_HT_IE_CHA_SEC_ABOVE;
 				break;
 			case HAL_PRIME_CHNL_OFFSET_UPPER:
-				csa_ch_offset = IEEE80211_HT_IE_CHA_SEC_ABOVE;
+				csa_ch_offset = IEEE80211_HT_IE_CHA_SEC_BELOW;
 				break;
 			default:
 				csa_ch_offset = IEEE80211_HT_IE_CHA_SEC_NONE;

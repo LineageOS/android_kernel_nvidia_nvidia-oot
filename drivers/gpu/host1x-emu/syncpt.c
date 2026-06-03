@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+
 #include <linux/module.h>
 #include <linux/delay.h>
 #include <linux/device.h>
@@ -12,7 +13,7 @@
 #include "dev.h"
 #include "syncpt.h"
 
-#ifdef HOST1X_EMU_SYNC_INC_TASKLET
+#ifdef HOST1X_EMU_SYNC_INC_FENCE_SCAN_TASKLET
 static void tasklet_fn(struct tasklet_struct *unused);
 static DEFINE_PER_CPU(struct host1x_syncpt *, tasklet_sp);
 
@@ -33,38 +34,49 @@ static void syncpt_release(struct kref *ref)
     struct host1x_syncpt *sp = container_of(ref, struct host1x_syncpt, ref);
 
     atomic_set(&sp->max_val, HOST1X_EMU_EXPORT_CALL(host1x_syncpt_read(sp)));
-    sp->locked = false;
-
-    mutex_lock(&sp->host->syncpt_mutex);
-    kfree(sp->name);
-    sp->name = NULL;
-    sp->client_managed = false;
-    mutex_unlock(&sp->host->syncpt_mutex);
+	kfree(sp->name);
+	sp->name = NULL;
+	sp->locked = false;
+	sp->client_managed = false;
+	mutex_unlock(&sp->host->syncpt_mutex);
 }
 
+#ifdef HOST1X_EMU_PM_SYNCPT_SAVE_RESTORE
 void host1x_syncpt_restore(struct host1x *host)
 {
-    struct host1x_syncpt *sp_base = host->syncpt;
-    unsigned int i;
+	struct host1x_syncpt *sp_base = host->syncpt;
+	unsigned int i;
 
-    for (i = host->syncpt_base; i < host->syncpt_end; i++) {
-        host1x_hw_syncpt_restore(host, sp_base + i);
-    }
-    wmb();
+	for (i = host->syncpt_base; i < host1x_syncpt_nb_pts(host); i++) {
+		/* Skip syncpoint if in read only pool */
+		if ((sp_base + i)->pool == &host->pools[host->ro_pool_id])
+			continue;
+
+		host1x_hw_syncpt_restore(host, sp_base + i);
+	}
+    /* Make sure all syncpoint write transaction completes*/
+	wmb();
 }
+#endif
 
+#ifdef HOST1X_EMU_PM_SYNCPT_SAVE_RESTORE
 void host1x_syncpt_save(struct host1x *host)
 {
-    struct host1x_syncpt *sp_base = host->syncpt;
-    unsigned int i;
+	struct host1x_syncpt *sp_base = host->syncpt;
+	unsigned int i;
 
-    for (i = 0; i < host1x_syncpt_nb_pts(host); i++) {
-        if (host1x_syncpt_client_managed(sp_base + i))
-            host1x_hw_syncpt_load(host, sp_base + i);
-        else
-            WARN_ON(!host1x_syncpt_idle(sp_base + i));
-    }
+	for (i = host->syncpt_base; i < host1x_syncpt_nb_pts(host); i++) {
+		/* Skip syncpoint if in read only pool */
+		if ((sp_base + i)->pool == &host->pools[host->ro_pool_id])
+			continue;
+
+		if (host1x_syncpt_client_managed(sp_base + i))
+			host1x_hw_syncpt_load(host, sp_base + i);
+		else
+			WARN_ON(!host1x_syncpt_idle(sp_base + i));
+	}
 }
+#endif
 
 /**
  * Updates the cached syncpoint value by reading a new value
@@ -99,7 +111,7 @@ int host1x_syncpt_init(struct host1x *host)
     syncpt = devm_kcalloc(host->dev, host->syncpt_count, sizeof(*syncpt),
                   GFP_KERNEL);
     if (!syncpt) {
-        pr_info("Host1x-EMU: Memory allocation for syncpoint structure failed\n");
+		pr_crit("Host1x-EMU: Memory allocation for syncpoint structure failed\n");
         return -ENOMEM;
     }
 
@@ -114,9 +126,22 @@ int host1x_syncpt_init(struct host1x *host)
     for (i = 0; i < host->num_pools; i++) {
         struct host1x_syncpt_pool *pool = &host->pools[i];
         unsigned int j;
+#ifdef HOST1X_EMU_KTHREAD_FENCE_SCAN
+		unsigned int bitmap_bit;
+		unsigned int bitmap_indx;
+#endif
 
-        for (j = pool->sp_base; j < pool->sp_end; j++)
-            syncpt[j].pool = pool;
+		for (j = pool->sp_base; j < pool->sp_end; j++) {
+			syncpt[j].pool = pool;
+
+#ifdef HOST1X_EMU_KTHREAD_FENCE_SCAN
+			/* Setting up Pool-Mask */
+			bitmap_indx = j / SYNCPT_FENCE_BMAP_BITS;
+			bitmap_bit  = j % SYNCPT_FENCE_BMAP_BITS;
+			set_bit(bitmap_bit, &pool->sync_bmap[bitmap_indx]);
+			clear_bit(bitmap_bit, &host->pools[host->ro_pool_id].sync_bmap[bitmap_indx]);
+#endif
+		}
     }
 
     mutex_init(&host->syncpt_mutex);
@@ -260,13 +285,15 @@ HOST1X_EMU_EXPORT_DECL(int, host1x_syncpt_incr(struct host1x_syncpt *sp))
 	int err;
 
 	err = host1x_hw_syncpt_cpu_incr(sp->host, sp);
-#ifdef HOST1X_EMU_SYNC_INC_TASKLET
+#ifdef HOST1X_EMU_SYNC_INC_FENCE_SCAN
+#ifdef HOST1X_EMU_SYNC_INC_FENCE_SCAN_TASKLET
 	/*Improve Signaling performance*/
 	this_cpu_write(tasklet_sp, sp);
 	tasklet_schedule(&syncpt_tasklet);
 #else
 	host1x_poll_irq_check_syncpt_fence(sp);
 #endif
+#endif /*HOST1X_EMU_SYNC_INC_FENCE_SCAN*/
 	return err;
 }
 HOST1X_EMU_EXPORT_SYMBOL(host1x_syncpt_incr);
@@ -317,9 +344,6 @@ HOST1X_EMU_EXPORT_DECL(struct host1x_syncpt*, host1x_syncpt_alloc(struct host1x 
         return NULL;
     }
 
-    /**
-     * TODO: Update this based on new pools logic
-     */
     if (flags & HOST1X_SYNCPT_GPU) {
         for (i = 0; i < host->num_pools; i++) {
             if (!strcmp(host->pools[i].name, "gpu")) {
@@ -329,16 +353,8 @@ HOST1X_EMU_EXPORT_DECL(struct host1x_syncpt*, host1x_syncpt_alloc(struct host1x 
         }
     }
 
-    /**
-     * TODO: syncpt_mutex is for entire synpoint list
-     *       maybe, update this to syncpoint-pool level lock
-     */
     mutex_lock(&host->syncpt_mutex);
 
-    /**
-     * TODO: Optimize syncpoint allocation, serial allocation
-     * dosen't effectively utilize per pool polling thread.
-     */
 	/* FIXME: WAR to allocate syncpoint from index 1, As at client level synpt-id 0 is invalid*/
 	for (i = host->syncpt_base + 1, sp = sp + 1; i < host->syncpt_end; i++, sp++) {
 
@@ -395,7 +411,7 @@ HOST1X_EMU_EXPORT_DECL(void, host1x_syncpt_put(struct host1x_syncpt *sp))
     if (!sp)
         return;
 
-    kref_put(&sp->ref, syncpt_release);
+    kref_put_mutex(&sp->ref, syncpt_release, &sp->host->syncpt_mutex);
 }
 HOST1X_EMU_EXPORT_SYMBOL(host1x_syncpt_put);
 

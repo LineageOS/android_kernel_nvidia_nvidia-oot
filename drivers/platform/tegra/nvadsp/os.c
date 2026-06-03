@@ -12,7 +12,6 @@
 #include <linux/dma-mapping.h>
 #include <linux/firmware.h>
 #include <linux/tegra_nvadsp.h>
-#include <linux/version.h>
 #include <soc/tegra/fuse-helper.h>
 #include <soc/tegra/virt/hv-ivc.h>
 #include <linux/elf.h>

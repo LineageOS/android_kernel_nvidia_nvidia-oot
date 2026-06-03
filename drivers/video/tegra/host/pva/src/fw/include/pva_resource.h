@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
+/* SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
 
 #ifndef PVA_RESOURCE_H
 #define PVA_RESOURCE_H
@@ -82,14 +82,14 @@ struct pva_fw_dma_slot {
 
 static inline uint32_t get_slot_size(struct pva_fw_dma_slot const *slot)
 {
-	uint32_t size = UINT32_MAX;
+	uint32_t size = PVA_UINT32_MAX;
 	int64_t tmp_size = 0;
 	if (slot->end_addr < slot->start_addr) {
 		return size;
 	}
 	tmp_size = slot->end_addr - slot->start_addr;
 	/* Check for both negative (overflow) and too large values */
-	if ((tmp_size < 0) || (tmp_size > (int64_t)UINT32_MAX)) {
+	if ((tmp_size < 0) || (tmp_size > (int64_t)PVA_UINT32_MAX)) {
 		return size;
 	}
 	size = (uint32_t)tmp_size;

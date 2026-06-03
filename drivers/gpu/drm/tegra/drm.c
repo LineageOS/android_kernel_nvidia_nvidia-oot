@@ -34,6 +34,7 @@
 #include <drm/drm_framebuffer.h>
 #include <drm/drm_ioctl.h>
 #include <drm/drm_prime.h>
+#include <drm/drm_print.h>
 #include <drm/drm_vblank.h>
 #include <drm/tegra_drm-next.h>
 
@@ -370,7 +371,7 @@ put:
 	return err;
 }
 
-
+#ifndef CONFIG_TEGRA_DRM_DISABLE_LEGACY_IOCTL
 static int tegra_gem_create(struct drm_device *drm, void *data,
 			    struct drm_file *file)
 {
@@ -384,6 +385,7 @@ static int tegra_gem_create(struct drm_device *drm, void *data,
 
 	return 0;
 }
+#endif
 
 static int tegra_gem_mmap(struct drm_device *drm, void *data,
 			  struct drm_file *file)
@@ -463,6 +465,7 @@ unlock:
 }
 #endif
 
+#ifndef CONFIG_TEGRA_DRM_DISABLE_LEGACY_IOCTL
 static int tegra_gem_set_tiling(struct drm_device *drm, void *data,
 				struct drm_file *file)
 {
@@ -602,6 +605,7 @@ static int tegra_gem_get_flags(struct drm_device *drm, void *data,
 
 	return 0;
 }
+#endif
 
 static const struct drm_ioctl_desc tegra_drm_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(TEGRA_CHANNEL_OPEN, tegra_drm_ioctl_channel_open,
@@ -620,12 +624,16 @@ static const struct drm_ioctl_desc tegra_drm_ioctls[] = {
 			  DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(TEGRA_SYNCPOINT_WAIT, tegra_drm_ioctl_syncpoint_wait,
 			  DRM_RENDER_ALLOW),
+#ifndef CONFIG_TEGRA_DRM_DISABLE_LEGACY_IOCTL
 	DRM_IOCTL_DEF_DRV(TEGRA_SYNCPOINT_EXPORT_MEMORY, tegra_drm_ioctl_syncpoint_export_memory,
 			  DRM_RENDER_ALLOW),
+#endif
 	DRM_IOCTL_DEF_DRV(TEGRA_SYNCPOINT_INCREMENT, tegra_drm_ioctl_syncpoint_increment,
 			  DRM_RENDER_ALLOW),
 
+#ifndef CONFIG_TEGRA_DRM_DISABLE_LEGACY_IOCTL
 	DRM_IOCTL_DEF_DRV(TEGRA_GEM_CREATE, tegra_gem_create, DRM_RENDER_ALLOW),
+#endif
 	DRM_IOCTL_DEF_DRV(TEGRA_GEM_MMAP, tegra_gem_mmap, DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(TEGRA_SYNCPT_INCR, tegra_syncpt_incr,
 			  DRM_RENDER_ALLOW),
@@ -633,6 +641,8 @@ static const struct drm_ioctl_desc tegra_drm_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(TEGRA_GET_SYNCPT_BASE, tegra_get_syncpt_base,
 			  DRM_RENDER_ALLOW),
 #endif
+
+#ifndef CONFIG_TEGRA_DRM_DISABLE_LEGACY_IOCTL
 	DRM_IOCTL_DEF_DRV(TEGRA_GEM_SET_TILING, tegra_gem_set_tiling,
 			  DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(TEGRA_GEM_GET_TILING, tegra_gem_get_tiling,
@@ -641,6 +651,7 @@ static const struct drm_ioctl_desc tegra_drm_ioctls[] = {
 			  DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(TEGRA_GEM_GET_FLAGS, tegra_gem_get_flags,
 			  DRM_RENDER_ALLOW),
+#endif
 };
 
 static const struct file_operations tegra_drm_fops = {
@@ -749,8 +760,10 @@ static const struct drm_driver tegra_drm_driver = {
 	.prime_fd_to_handle = drm_gem_prime_fd_to_handle,
 #endif
 	.gem_prime_import = tegra_gem_prime_import,
+#ifndef CONFIG_TEGRA_DRM_DISABLE_LEGACY_INTERFACE
 
 	.dumb_create = tegra_bo_dumb_create,
+#endif
 
 #if defined(NV_DRM_DRIVER_HAS_FBDEV_PROBE) /* Linux v6.13 */
 	TEGRA_FBDEV_DRIVER_OPS,
@@ -873,6 +886,7 @@ void host1x_client_iommu_detach(struct host1x_client *client)
 	}
 }
 
+#ifndef CONFIG_TEGRA_DRM_DISABLE_LEGACY_INTERFACE
 void *tegra_drm_alloc(struct tegra_drm *tegra, size_t size, dma_addr_t *dma)
 {
 	struct iova *alloc;
@@ -953,6 +967,7 @@ void tegra_drm_free(struct tegra_drm *tegra, size_t size, void *virt,
 
 	free_pages((unsigned long)virt, get_order(size));
 }
+#endif
 
 struct host1x_syncpt *tegra_drm_get_syncpt(int fd, u32 syncpt_id)
 {
@@ -1213,7 +1228,8 @@ static int host1x_drm_probe(struct host1x_device *dev)
 		goto hub;
 
 #if defined(NV_DRM_DRIVER_HAS_FBDEV_PROBE) /* Linux v6.13 */
-	drm_client_setup(drm, NULL);
+	if (drm->driver_features & DRIVER_MODESET)
+		drm_client_setup(drm, NULL);
 #else
 	tegra_fbdev_setup(drm);
 #endif

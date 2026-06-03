@@ -22,8 +22,9 @@ struct tegra_drm_submit_data {
 	} timestamps;
 };
 
+#ifdef CONFIG_DRM_TEGRA_LEGACY_FIREWALL
 int tegra_drm_fw_validate(struct tegra_drm_client *client, u32 *data, u32 start,
 			  u32 words, struct tegra_drm_submit_data *submit,
 			  u32 *job_class);
-
+#endif
 #endif

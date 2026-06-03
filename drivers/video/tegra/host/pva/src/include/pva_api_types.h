@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
+/* SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
 #ifndef PVA_API_TYPES_H
 #define PVA_API_TYPES_H
 #ifdef __cplusplus
@@ -14,13 +14,15 @@ extern "C" {
 /* Use offsetof to avoid INT36-C violation from NULL pointer arithmetic */
 #define container_of(ptr, type, member)                                        \
 	((type *)((char *)(ptr)-offsetof(type, member)))
+#define PVA_UINT64_MAX UINT64_MAX
+#define PVA_UINT32_MAX UINT32_MAX
 #else
 #include <linux/ioctl.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
 #include <linux/string.h>
-#define UINT64_MAX U64_MAX
-#define UINT32_MAX U32_MAX
+#define PVA_UINT64_MAX U64_MAX
+#define PVA_UINT32_MAX U32_MAX
 #endif
 
 #define FOREACH_ERR(ACT)                                                       \
@@ -295,13 +297,18 @@ struct pva_symbol_info {
 /** \brief Specifies the memory is GPU CACHED. */
 #define PVA_GPU_CACHED_MEMORY (1u << 1u)
 
-#define PVA_ACCESS_RO (1U << 0) /**< Read only access */
-#define PVA_ACCESS_WO (1U << 1) /**< Write only access */
+/**
+ * Access flags for memory resources.
+ * MISRA C-2023 Rule 10.8: Use literal values instead of shift expressions
+ * to avoid casting composite expressions to wider types in macros like PVA_INSERT16.
+ */
+#define PVA_ACCESS_RO 1U /**< Read only access (1U << 0) */
+#define PVA_ACCESS_WO 2U /**< Write only access (1U << 1) */
 #define PVA_ACCESS_RW                                                          \
 	(PVA_ACCESS_RO | PVA_ACCESS_WO) /**< Read and write access */
 
 // unify timeout to uint64_t, in microseconds
-#define PVA_SUBMIT_TIMEOUT_INF UINT64_MAX /**< Infinite timeout */
+#define PVA_SUBMIT_TIMEOUT_INF PVA_UINT64_MAX /**< Infinite timeout */
 
 #define PVA_MAX_NUM_INPUT_STATUS 2U /**< Maximum number of input statuses */
 #define PVA_MAX_NUM_OUTPUT_STATUS 2U /**< Maximum number of output statuses */
@@ -331,8 +338,8 @@ struct pva_cmdbuf_submit_info {
 	/** Offset of the first chunk within the resource */
 	uint64_t first_chunk_offset;
 /** Execution timeout is in ms */
-#define PVA_EXEC_TIMEOUT_INF UINT32_MAX
-#define PVA_EXEC_TIMEOUT_REUSE (UINT32_MAX - 1U)
+#define PVA_EXEC_TIMEOUT_INF PVA_UINT32_MAX
+#define PVA_EXEC_TIMEOUT_REUSE (PVA_UINT32_MAX - 1U)
 	/** Execution Timeout */
 	uint32_t execution_timeout_ms;
 	struct pva_fence prefences[PVA_MAX_NUM_PREFENCES];

@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/*
- * SPDX-FileCopyrightText: Copyright (c) 2021-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- */
+// SPDX-FileCopyrightText: Copyright (c) 2021-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include <nvidia/conftest.h>
 
 #include <linux/module.h>
-#include <linux/version.h>
 #include <linux/of_device.h>
 #include <linux/platform_device.h>
 #include <sound/pcm.h>
@@ -83,23 +80,29 @@ static int tegra_virt_machine_driver_probe(struct platform_device *pdev)
 		card = &tegra_virt_t210ref_card;
 		match = of_match_device(tegra_virt_machine_of_match,
 						&pdev->dev);
-		if (!match)
-			return -ENODEV;
+		if (!match) {
+			ret = -ENODEV;
+			goto exit;
+		}
 		soc_data = (struct tegra_virt_admaif_soc_data *)match->data;
 	} else if (of_device_is_compatible(pdev->dev.of_node,
 		"nvidia,tegra264-virt-pcm")) {
 		card = &tegra_virt_t186ref_card;
 		match = of_match_device(tegra_virt_machine_of_match,
 						&pdev->dev);
-		if (!match)
-			return -ENODEV;
+		if (!match) {
+			ret = -ENODEV;
+			goto exit;
+		}
 		soc_data = (struct tegra_virt_admaif_soc_data *)match->data;
 	} else {
 		card = &tegra_virt_t186ref_card;
 		match = of_match_device(tegra_virt_machine_of_match,
 						&pdev->dev);
-		if (!match)
-			return -ENODEV;
+		if (!match) {
+			ret = -ENODEV;
+			goto exit;
+		}
 		soc_data = (struct tegra_virt_admaif_soc_data *)match->data;
 	}
 
@@ -115,14 +118,18 @@ static int tegra_virt_machine_driver_probe(struct platform_device *pdev)
 
 		/* Get ADSP ADMAIF default param info */
 		for (i = 0; i < MAX_ADMAIF_IDS; i++) {
-			if ((sprintf(buffer, "adsp-admaif%d-channels", i + 1)) < 0)
-				return -EINVAL;
+			if ((sprintf(buffer, "adsp-admaif%d-channels", i + 1)) < 0) {
+				ret = -EINVAL;
+				goto exit;
+			}
 			if (of_property_read_u32(pdev->dev.of_node,
 					buffer, &adsp_admaif_channels))
 				adsp_admaif_channels = 2;
 
-			if ((sprintf(buffer, "adsp-admaif%d-bits", i + 1) < 0))
-				return -EINVAL;
+			if ((sprintf(buffer, "adsp-admaif%d-bits", i + 1) < 0)) {
+				ret = -EINVAL;
+				goto exit;
+			}
 			if (of_property_read_u32(pdev->dev.of_node,
 					buffer, &adsp_admaif_bits))
 				adsp_admaif_bits = 16;
@@ -169,7 +176,8 @@ static int tegra_virt_machine_driver_probe(struct platform_device *pdev)
 
 	if (tegra210_virt_admaif_register_component(pdev, soc_data)) {
 		dev_err(&pdev->dev, "Failed register admaif component\n");
-		return -EINVAL;
+		ret = -EINVAL;
+		goto exit;
 	}
 
 	if (tegra_virt_xbar_register_codec(pdev)) {
@@ -182,7 +190,7 @@ static int tegra_virt_machine_driver_probe(struct platform_device *pdev)
 				"admaif_ch_num", &admaif_ch_num)) {
 		dev_err(&pdev->dev, "number of admaif channels is not set\n");
 		ret = -EINVAL;
-		goto undo_register_codec;
+		goto undo_register_component;
 	}
 
 	if (of_property_read_string(pdev->dev.of_node, "cardname", &card->name))
@@ -198,7 +206,7 @@ static int tegra_virt_machine_driver_probe(struct platform_device *pdev)
 						admaif_ch_num)) {
 			dev_err(&pdev->dev, "admaif_ch_list os not populated\n");
 			ret = -EINVAL;
-			goto undo_register_codec;
+			goto undo_register_component;
 		}
 		for (i = 0; i < admaif_ch_num; i++) {
 			tegra_virt_set_dai_params(
@@ -208,12 +216,12 @@ static int tegra_virt_machine_driver_probe(struct platform_device *pdev)
 		}
 	}
 
-	ret = snd_soc_register_card(card);
+	ret = devm_snd_soc_register_card(&pdev->dev, card);
 	if (ret) {
 		dev_err(&pdev->dev, "snd_soc_register_card failed (%d)\n",
 			ret);
 		ret = -EPROBE_DEFER;
-		goto undo_register_codec;
+		goto undo_register_component;
 	}
 
 	list_for_each_entry(rtd, &card->rtd_list, list) {
@@ -246,22 +254,15 @@ static int tegra_virt_machine_driver_probe(struct platform_device *pdev)
 
 	return 0;
 
-undo_register_codec:
-	snd_soc_unregister_component(&pdev->dev);
 undo_register_component:
 	tegra210_virt_admaif_unregister_component(pdev);
-
-	nvaudio_ivc_free_ctxt(&pdev->dev);
-
+exit:
 	return ret;
 }
 
 static int tegra_virt_machine_driver_remove(struct platform_device *pdev)
 {
-	struct snd_soc_card *card = platform_get_drvdata(pdev);
-
-	snd_soc_unregister_card(card);
-
+	tegra210_virt_admaif_unregister_component(pdev);
 	return 0;
 }
 
@@ -295,4 +296,3 @@ MODULE_DESCRIPTION("Tegra virt machine driver");
 MODULE_LICENSE("GPL");
 MODULE_DEVICE_TABLE(of, tegra_virt_machine_of_match);
 MODULE_ALIAS("platform:" DRV_NAME);
-MODULE_SOFTDEP("pre: snd_soc_tegra210_virt_alt_adsp");

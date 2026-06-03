@@ -8,5 +8,6 @@ tegra_vblk-y += tegra_hv_vblk.o
 tegra_vblk-y += tegra_hv_ioctl.o
 tegra_vblk-y += tegra_hv_mmc.o
 tegra_vblk-y += tegra_hv_scsi.o
+tegra_vblk-y += tegra_hv_rpmb.o
 tegra_vblk-y += tegra_hv_ufs.o
 obj-m += tegra_vblk.o

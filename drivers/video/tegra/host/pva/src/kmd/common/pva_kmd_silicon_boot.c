@@ -83,9 +83,11 @@ void pva_kmd_config_evp_seg_regs(struct pva_kmd_device *pva)
 		seg_reg_value =
 			pva->load_from_gsc ?
 				      pva->fw_carveout.base_va -
-					FW_CODE_DATA_START_ADDR : /* Load from GSC in L4T case */
+					(uint64_t)
+						FW_CODE_DATA_START_ADDR : /* Load from GSC in L4T case */
 				      pva->fw_bin_mem->iova -
-					FW_CODE_DATA_START_ADDR; /* Boot from File case */
+					(uint64_t)
+						FW_CODE_DATA_START_ADDR; /* Boot from File case */
 
 		pva_kmd_write(pva, pva->regspec.cfg_priv_ar1_lsegreg,
 			      iova_lo(seg_reg_value));
@@ -121,9 +123,10 @@ void pva_kmd_config_sid(struct pva_kmd_device *pva)
 	uint32_t offset;
 	uint8_t priv1_sid;
 	uint8_t priv_sid;
-	priv_sid = pva->stream_ids[PVA_R5_SMMU_CONTEXT_ID] & (uint8_t)0xFFU;
-	priv1_sid =
-		pva->stream_ids[pva->r5_image_smmu_context_id] & (uint8_t)0xFFU;
+	priv_sid = (uint8_t)(pva->stream_ids[PVA_R5_SMMU_CONTEXT_ID] &
+			     (uint8_t)U8_MAX);
+	priv1_sid = (uint8_t)(pva->stream_ids[pva->r5_image_smmu_context_id] &
+			      (uint8_t)U8_MAX);
 
 	/* Priv SIDs */
 	if (pva->load_from_gsc) {

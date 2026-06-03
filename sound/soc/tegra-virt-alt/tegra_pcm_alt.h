@@ -1,6 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
-/*
- * Copyright (c) 2021-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+/* SPDX-License-Identifier: GPL-2.0-only
+ * SPDX-FileCopyrightText: Copyright (c) 2021-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  */
 
 #ifndef __TEGRA_PCM_ALT_H__
@@ -17,6 +16,5 @@ struct tegra_alt_pcm_dma_params {
 };
 
 int tegra_alt_pcm_platform_register(struct device *dev);
-void tegra_alt_pcm_platform_unregister(struct device *dev);
 
 #endif

@@ -56,13 +56,13 @@ static void dce_resume_work_fn(void *data)
 	}
 
 	ret = dce_fsm_post_event(d, EVENT_ID_DCE_BOOT_COMPLETE_REQUESTED, NULL);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(d, "Error while posting DCE_BOOT_COMPLETE_REQUESTED event");
 		return;
 	}
 
 	ret = dce_start_boot_flow(d);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(d, "DCE bootstrapping failed\n");
 		return;
 	}
@@ -86,13 +86,14 @@ int dce_pm_handle_sc7_enter_requested_event(struct tegra_dce *d, void *params)
 
 	msg = dce_admin_channel_client_buffer_get(d, DCE_ADMIN_CH_CL_PM_BUFF,
 		0 /* reserved flags */);
-	if (!msg) {
+	if (msg == NULL) {
 		dce_os_err(d, "IPC msg allocation failed");
+		ret = -1;
 		goto out;
 	}
 
 	ret = dce_admin_send_enter_sc7(d, msg);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(d, "Enter SC7 failed [%d]", ret);
 		goto out;
 	}
@@ -101,7 +102,7 @@ int dce_pm_handle_sc7_enter_requested_event(struct tegra_dce *d, void *params)
 	d->boot_status |= DCE_FW_SUSPENDED;
 
 out:
-	if (msg)
+	if (msg != NULL)
 		dce_admin_channel_client_buffer_put(d, msg);
 	return ret;
 }
@@ -140,7 +141,7 @@ int dce_pm_handle_sc7_exit_received_event(struct tegra_dce *d, void *params)
 
 	ret = dce_os_wq_work_schedule(d, NULL /* default WQ */,
 			d->dce_resume_work);
-	if (ret)
+	if (ret != 0)
 		dce_os_err(d, "Failed to schedule dce resume work");
 
 	return ret;
@@ -162,7 +163,7 @@ int dce_pm_enter_sc7(struct tegra_dce *d)
 
 	msg = dce_admin_channel_client_buffer_get(d, DCE_ADMIN_CH_CL_ADMIN_BUFF,
 		0 /* reserved flags */);
-	if (!msg) {
+	if (msg == NULL) {
 		dce_os_err(d, "IPC msg allocation failed");
 		ret = -1;
 		goto out;
@@ -171,21 +172,21 @@ int dce_pm_enter_sc7(struct tegra_dce *d)
 	dce_pm_save_state(d);
 
 	ret = dce_admin_send_prepare_sc7(d, msg);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(d, "Prepare SC7 failed [%d]", ret);
 		ret = -1;
 		goto out;
 	}
 
 	ret = dce_fsm_post_event(d, EVENT_ID_DCE_SC7_ENTER_REQUESTED, NULL);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(d, "Error while posting SC7_ENTER event [%d]", ret);
 		ret = -1;
 		goto out;
 	}
 
 out:
-	if (msg)
+	if (msg != NULL)
 		dce_admin_channel_client_buffer_put(d, msg);
 	return ret;
 }
@@ -197,7 +198,7 @@ int dce_pm_exit_sc7(struct tegra_dce *d)
 	dce_pm_restore_state(d);
 
 	ret = dce_fsm_post_event(d, EVENT_ID_DCE_SC7_EXIT_RECEIVED, NULL);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(d, "Error while posting SC7_EXIT event [%d]", ret);
 		goto out;
 	}
@@ -210,14 +211,14 @@ int dce_pm_init(struct tegra_dce *d)
 	int ret = 0;
 
 	ret = dce_admin_channel_client_buffers_init(d, DCE_ADMIN_CH_CL_PM_BUFF);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(d, "Admin channel client buffers init failed: PM");
 		goto done;
 	}
 
 	ret = dce_os_wq_work_init(d, &d->dce_resume_work,
 			dce_resume_work_fn, (void *)d);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(d, "resume work init failed");
 		goto done;
 	}

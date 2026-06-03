@@ -153,7 +153,9 @@
  *
  * @param val Base timeout value before scaling
  */
-#define PVA_KMD_TIMEOUT(val) ((val)*PVA_KMD_TIMEOUT_FACTOR)
+/* MISRA 10.8: Use unsigned literals to avoid signed composite expression */
+#define PVA_KMD_TIMEOUT(val)                                                   \
+	((uint32_t)(val) * (uint32_t)PVA_KMD_TIMEOUT_FACTOR)
 
 /**
  * @brief Timeout for resource semaphore operations in milliseconds

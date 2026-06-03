@@ -345,7 +345,7 @@ endpoint_fops_mmap(struct file *filp, struct vm_area_struct *vma)
 	}
 
 	vma->vm_pgoff  = 0;
-#if defined(NV_VM_AREA_STRUCT_HAS_CONST_VM_FLAGS) /* Linux v6.3 */
+#if defined(NV_VM_FLAGS_SET_PRESENT) /* Linux v6.3 */
 	vm_flags_set(vma, VM_DONTCOPY);
 #else
 	vma->vm_flags |= (VM_DONTCOPY); // fork() not supported.
@@ -732,6 +732,9 @@ allocate_syncpoint(struct endpoint_drv_ctx_t *eps_ctx,
 {
 	int ret = 0;
 	int prot = 0;
+	phys_addr_t base = 0;
+	uint32_t stride = 0U;
+	uint32_t num_syncpts = 0U;
 	struct host1x *host1x = NULL;
 	struct syncpt_t *syncpt = NULL;
 	size_t offsetof = 0x0;
@@ -759,8 +762,15 @@ allocate_syncpoint(struct endpoint_drv_ctx_t *eps_ctx,
 		return -ENOMEM;
 	syncpt->id = host1x_syncpt_id(syncpt->sp);
 	/* physical address of syncpoint shim. */
-	syncpt->phy_addr = get_syncpt_shim_offset(syncpt->id, endpoint->chip_id);
+	ret = host1x_syncpt_get_shim_info(host1x, &base, &stride, &num_syncpts);
+	if (ret < 0) {
+		pr_err("(%s): Failed to fetch shim info\n", endpoint->name);
+		goto err;
+	}
+
+	syncpt->phy_addr = (base + ((u64)syncpt->id * stride));
 	syncpt->size = SP_MAP_SIZE;
+	(void)num_syncpts;
 
 	/* reserve iova with the iova manager.*/
 	ret = pci_client_alloc_iova(endpoint->pci_client_h, syncpt->size,
@@ -905,8 +915,8 @@ allocate_memory(struct endpoint_drv_ctx_t *eps_ctx, struct endpoint_t *ep)
 				  ep->self_mem.phys_addr, ep->self_mem.size,
 				  prot);
 	if (ret) {
-		pr_err("(%s): Failed to map physical page to reserved iova\n",
-		       ep->name);
+		pr_err("(%s): Failed to map physical page to reserved iova, ret = (%d)\n",
+		       ep->name, ret);
 		goto err;
 	}
 	ep->mapped_iova = true;

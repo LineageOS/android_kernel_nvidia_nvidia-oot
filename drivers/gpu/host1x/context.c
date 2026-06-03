@@ -155,7 +155,7 @@ static struct host1x_hw_memory_context *host1x_memory_context_alloc_hw_locked(st
 			return cd;
 		} else if (!cd->owner && !free) {
 			free = cd;
-		} else if (!cd->active) {
+		} else if (refcount_read(&cd->active) == 0) {
 			can_steal = cd;
 		}
 	}
@@ -253,55 +253,59 @@ int host1x_memory_context_active(struct host1x_memory_context *ctx)
 	mutex_lock(&cdl->lock);
 
 retry:
-	if (!ctx->hw) {
-		hw = host1x_memory_context_alloc_hw_locked(ctx->host, ctx->dev, ctx->pid);
-		if (PTR_ERR(hw) == -EBUSY) {
-			/* All contexts busy. Wait for free context. */
-			if (static_context_alloc) {
-				dev_warn(ctx->dev, "%s: all memory contexts are busy\n", current->comm);
-				err = -EBUSY;
-				goto unlock;
-			}
-			if (!retrying)
-				dev_warn(ctx->dev, "%s: all memory contexts are busy, waiting\n",
-					current->comm);
+	if (ctx->hw)
+		goto have_hw;
 
-			init_completion(&waiter.wait);
-			waiter.dev = ctx->dev;
-			list_add(&waiter.entry, &cdl->waiters);
-
-			mutex_unlock(&cdl->lock);
-			err = wait_for_completion_interruptible(&waiter.wait);
-			mutex_lock(&cdl->lock);
-
-			list_del(&waiter.entry);
-			if (err)
-				goto unlock;
-
-			retrying = true;
-			goto retry;
-		}
-		if (IS_ERR(hw)) {
-			err = PTR_ERR(hw);
+	hw = host1x_memory_context_alloc_hw_locked(ctx->host, ctx->dev, ctx->pid);
+	if (PTR_ERR(hw) == -EBUSY) {
+		/* All contexts busy. Wait for free context. */
+		if (static_context_alloc) {
+			dev_warn(ctx->dev, "%s: all memory contexts are busy\n", current->comm);
+			err = -EBUSY;
 			goto unlock;
 		}
+		if (!retrying)
+			dev_warn(ctx->dev, "%s: all memory contexts are busy, waiting\n",
+				current->comm);
 
-		ctx->hw = hw;
-		ctx->context_dev = &hw->dev;
-		list_add(&ctx->entry, &hw->owners);
+		init_completion(&waiter.wait);
+		waiter.dev = ctx->dev;
+		list_add(&waiter.entry, &cdl->waiters);
 
-		list_for_each_entry(mapping, &ctx->mappings, entry) {
-			mapping->mapping = host1x_bo_pin(
-				&hw->dev, mapping->bo, mapping->direction, NULL);
-			if (IS_ERR(mapping->mapping)) {
-				err = PTR_ERR(mapping->mapping);
-				mapping->mapping = NULL;
-				goto unpin;
-			}
+		mutex_unlock(&cdl->lock);
+		err = wait_for_completion_interruptible(&waiter.wait);
+		mutex_lock(&cdl->lock);
+
+		list_del(&waiter.entry);
+		if (err)
+			goto unlock;
+
+		retrying = true;
+		goto retry;
+	}
+	if (IS_ERR(hw)) {
+		err = PTR_ERR(hw);
+		goto unlock;
+	}
+
+	ctx->hw = hw;
+	ctx->context_dev = &hw->dev;
+	list_add(&ctx->entry, &hw->owners);
+
+	list_for_each_entry(mapping, &ctx->mappings, entry) {
+		mapping->mapping = host1x_bo_pin(
+			&hw->dev, mapping->bo, mapping->direction, NULL);
+		if (IS_ERR(mapping->mapping)) {
+			err = PTR_ERR(mapping->mapping);
+			mapping->mapping = NULL;
+			goto unpin;
 		}
 	}
 
-	ctx->hw->active++;
+have_hw:
+	/* We're just counting active users. No need to do anything on 0->1 transition.*/
+	if (!refcount_inc_not_zero(&ctx->hw->active))
+		refcount_set(&ctx->hw->active, 1);
 
 	mutex_unlock(&cdl->lock);
 
@@ -381,7 +385,7 @@ static void host1x_memory_context_inactive_locked(struct host1x_memory_context *
 	struct host1x_memory_context_list *cdl = &ctx->host->context_list;
 	struct hw_alloc_waiter *waiter;
 
-	if (--ctx->hw->active == 0) {
+	if (refcount_dec_and_test(&ctx->hw->active)) {
 		/* Hardware context becomes eligible for stealing */
 		list_for_each_entry(waiter, &cdl->waiters, entry) {
 			if (!hw_usable_for_dev(ctx->hw, waiter->dev))

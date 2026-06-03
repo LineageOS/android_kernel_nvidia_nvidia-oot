@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (C) 2023-2025 NVIDIA CORPORATION.  All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2023-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include <nvidia/conftest.h>
 
@@ -11,7 +11,6 @@
 #include <linux/dma-mapping.h>
 #include <linux/dmapool.h>
 #include <linux/err.h>
-#include <linux/of_gpio.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
@@ -26,7 +25,6 @@
 #include <linux/spi/spi.h>
 #include <linux/spi/spi-tegra124-slave.h>
 #include <linux/clk/tegra.h>
-#include <linux/version.h>
 #include <linux/overflow.h>
 
 #define SPI_COMMAND1				0x000
@@ -163,7 +161,7 @@
 #define DELAY_MUL_FACTOR			1000
 
 #define PROFILE_SPI_SLAVE	/* profile spi sw overhead */
-#define VERBOSE_DUMP_REGS	/* register dumps */
+/* #define VERBOSE_DUMP_REGS	*/ /* register dumps */
 
 #ifdef VERBOSE_DUMP_REGS
 #define dump_regs(_log, _t, _f, ...)				\
@@ -234,12 +232,16 @@ do {								\
 	dev_##_log(&((_t)->controller->dev), _f, ##__VA_ARGS__)
 #endif
 
+#ifdef VERBOSE_DUMP_REGS
 #define print_fifo_word(_m, _t, _c, _x)					\
 	dev_dbg((_t)->dev,						\
 			"%s[%d] %02lx %02lx %02lx %02lx\n",		\
 			(_m), (_c),					\
 			(_x) & 0xff, ((_x) >> 8) & 0xff,		\
 			((_x) >> 16) & 0xff, ((_x) >> 24) & 0xff)
+#else
+#define print_fifo_word(_m, _t, _c, _x)
+#endif
 
 /* convert size in fifo bytes to number of packets */
 /* for unpacked, each packet occupies 4 bytes, i.e., a fifo word
@@ -936,6 +938,9 @@ static int tegra_spi_start_dma_based_transfer(struct
 	tspi->dma_control_reg = val;
 
 	if (tspi->cur_direction & DATA_DIR_TX) {
+		if (!t->tx_buf)
+			return -EINVAL;
+
 		dma_sconfig.dst_addr = tspi->phys + SPI_TX_FIFO;
 		dma_sconfig.dst_addr_width = DMA_SLAVE_BUSWIDTH_4_BYTES;
 		dma_sconfig.dst_maxburst = maxburst;
@@ -1159,6 +1164,13 @@ static void tegra_spi_deinit_dma_param(struct tegra_spi_data *tspi,
 	}
 	if (!dma_chan)
 		return;
+
+	/*
+	 * Clear contents of memory before releasing.
+	 *
+	 */
+	if (dma_buf)
+		memset(dma_buf, 0, tspi->dma_buf_size);
 
 	dma_free_coherent(tspi->dev, tspi->dma_buf_size, dma_buf, dma_phys);
 	dma_release_channel(dma_chan);
@@ -1426,9 +1438,6 @@ static int tegra_spi_start_transfer_one(struct spi_device *spi,
 	tegra_spi_writel(tspi, command1, SPI_COMMAND1);
 	tspi->command1_reg = command1;
 
-	dev_dbg(tspi->dev, "The def 0x%x and written 0x%lx\n",
-				tspi->def_command1_reg, command1);
-
 	if (total_fifo_words > SPI_FIFO_DEPTH)
 		ret = tegra_spi_start_dma_based_transfer(tspi, t);
 	else
@@ -1648,8 +1657,6 @@ static int tegra_spi_wait_on_message_xfer(struct tegra_spi_data *tspi)
 	/* cs inactive intr while it is masked, mark as error */
 	if (tspi->chip_data->mask_cs_inactive_intr &&
 			(tspi->status_reg & SPI_CS_INACTIVE)) {
-		dev_dbg(tspi->dev, "cs inactive intr, status_reg = 0x%x\n",
-				tspi->status_reg);
 		tspi->tx_status = SPI_TX_FIFO_UNF;
 		tspi->rx_status = SPI_RX_FIFO_OVF;
 	}

@@ -65,5 +65,5 @@ bool host1x_poll_remove_fence(struct host1x *host, struct host1x_syncpt_fence *f
 /**
  * Description: Check if syncpoint fence expired
  */
-void host1x_poll_irq_check_syncpt_fence(struct host1x_syncpt  *sp);
+bool host1x_poll_irq_check_syncpt_fence(struct host1x_syncpt  *sp);
 #endif

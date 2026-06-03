@@ -438,4 +438,92 @@ static inline uint32_t riscv_dmemd_r(uint32_t index)
 	return (0x000001c4U + ((index) * 8));
 #endif /* NVDLA_HAVE_CONFIG_FIREWALL */
 }
+
+// MNOC registers offsets are relative to Rx base address.
+
+static inline uint32_t riscv_mnoc_message_info_0_receivembox_r(void)
+{
+	/* NV_PNVDLA_MNOC_MESSAGE_INFO_0_RECEIVEMBOX */
+	return 0x00000004U;
+}
+
+static inline uint32_t riscv_mnoc_message_info_0_receivembox_message_size_f(uint32_t v)
+{
+	/* NV_PNVDLA_MNOC_MESSAGE_INFO_0_RECEIVEMBOX_MESSAGE_SIZE (19:0) */
+	return (v & 0xfffffU);
+}
+
+static inline uint32_t riscv_mnoc_message_info_0_receivembox_message_trigger_true_f(void)
+{
+	/* NV_PNVDLA_MNOC_MESSAGE_INFO_0_RECEIVEMBOX_MESSAGE_TRIGGER (20:20) */
+	return (0x1 << 20);
+}
+
+static inline uint32_t riscv_mnoc_message_info_0_receivembox_receive_ready_v(uint32_t r)
+{
+	/* NV_PNVDLA_MNOC_MESSAGE_INFO_0_RECEIVEMBOX_RECEIVE_READY (24:24) */
+	return ((r >> 24) & 0x1);
+}
+
+static inline uint32_t riscv_mnoc_message_info_0_receivembox_receive_ready_true_v(void)
+{
+	/* NV_PNVDLA_MNOC_MESSAGE_INFO_0_RECEIVEMBOX_RECEIVE_READY (24:24) */
+	return 0x1U;
+}
+
+static inline uint32_t riscv_mnoc_message_info_0_receivembox_err_v(uint32_t r)
+{
+	/* NV_PNVDLA_MNOC_MESSAGE_INFO_0_RECEIVEMBOX_ERR (25:25) */
+	return ((r >> 25) & 0x1);
+}
+
+static inline uint32_t riscv_mnoc_message_info_0_receivembox_err_true_v(void)
+{
+	/* NV_PNVDLA_MNOC_MESSAGE_INFO_0_RECEIVEMBOX_ERR (25:25) */
+	return 0x1U;
+}
+
+static inline uint32_t riscv_mnoc_message_info_0_receivembox_credit_available_v(uint32_t r)
+{
+	/* NV_PNVDLA_MNOC_MESSAGE_INFO_0_RECEIVEMBOX_CREDIT_AVAILABLE (26:26) */
+	return ((r >> 26) & 0x1);
+}
+
+static inline uint32_t riscv_mnoc_message_info_0_receivembox_credit_available_true_v(void)
+{
+	/* NV_PNVDLA_MNOC_MESSAGE_INFO_0_RECEIVEMBOX_CREDIT_AVAILABLE (26:26) */
+	return 0x1U;
+}
+
+static inline uint32_t riscv_mnoc_wdata_0_receivembox_r(void)
+{
+	/* NV_PNVDLA_MNOC_WDATA_0_RECEIVEMBOX */
+	return 0x00000008U;
+}
+
+// MNOC registers offsets are relative to Tx base address.
+static inline uint32_t riscv_mnoc_message_info_r(void)
+{
+	/*  NV_PNVDLA_MNOC_MESSAGE_INFO_0_SENDMBOX(i) */
+	return 0x00000004U;
+}
+
+static inline uint32_t riscv_mnoc_message_info_size_v(uint32_t r)
+{
+	/* NV_PNVDLA_MNOC_MESSAGE_INFO_0_SENDMBOX_MESSAGE_SIZE (19:0) */
+	return (r & 0xfffff);
+}
+
+static inline uint32_t riscv_mnoc_message_info_intr_status_w1clr_f(void)
+{
+	/* NV_PNVDLA_MNOC_MESSAGE_INFO_0_SENDMBOX_INTR_STATUS_W1CLR */
+	return (0x1 << 31);
+}
+
+static inline uint32_t riscv_mnoc_rdata_r(void)
+{
+	/* NV_PNVDLA_MNOC_RDATA_0_SENDMBOX(i) */
+	return 0x00000008U;
+}
+
 #endif /* End of __NVDLA_FW_RISCV_REG_H__ */

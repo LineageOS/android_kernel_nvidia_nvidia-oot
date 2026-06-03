@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2020-2023, NVIDIA CORPORATION & AFFILIATES. All Rights Reserved.
+ * Copyright (c) 2020-2025, NVIDIA CORPORATION & AFFILIATES. All Rights Reserved.
  */
 
 #include <linux/dma-fence-array.h>
@@ -234,7 +234,6 @@ static int submit_copy_gather_data(struct gather_bo **pbo, struct device *dev,
 static int submit_write_reloc(struct tegra_drm_context *context, struct gather_bo *bo,
 			      struct drm_tegra_submit_buf *buf, struct tegra_drm_mapping *mapping)
 {
-	/* TODO check that target_offset is within bounds */
 	dma_addr_t iova = buf->reloc.target_offset;
 	u32 written_ptr;
 	bool skip_bl_swizzling = false;
@@ -243,10 +242,23 @@ static int submit_write_reloc(struct tegra_drm_context *context, struct gather_b
 	    context->client->ops->skip_bl_swizzling(context->client, &skip_bl_swizzling))
 		skip_bl_swizzling = false;
 
-	if (mapping->bo_map)
-		iova += mapping->iova;
-	else
+	if (mapping->bo_map) {
+		if (check_add_overflow(iova, mapping->iova, &iova)) {
+			SUBMIT_ERR(context, "relocated address out of bounds");
+			return -EINVAL;
+		}
+
+		if (iova > mapping->iova_end) {
+			SUBMIT_ERR(context, "relocated address out of bounds");
+			return -EINVAL;
+		}
+	} else {
+		if (iova > mapping->ctx_map->mapping->size) {
+			SUBMIT_ERR(context, "relocated address out of bounds");
+			return -EINVAL;
+		}
 		iova += mapping->ctx_map->mapping->phys;
+	}
 
 #ifdef CONFIG_ARCH_DMA_ADDR_T_64BIT
 	if ((buf->flags & DRM_TEGRA_SUBMIT_RELOC_SECTOR_LAYOUT) && !skip_bl_swizzling)
@@ -402,11 +414,13 @@ static int submit_job_add_gather(struct host1x_job *job, struct tegra_drm_contex
 		return -EINVAL;
 	}
 
+#ifdef CONFIG_DRM_TEGRA_LEGACY_FIREWALL
 	if (tegra_drm_fw_validate(context->client, bo->gather_data, *offset,
 				  cmd->words, job_data, class)) {
 		SUBMIT_ERR(context, "job was rejected by firewall");
 		return -EINVAL;
 	}
+#endif
 
 	host1x_job_add_gather(job, &bo->base, cmd->words, *offset * 4);
 
@@ -426,7 +440,6 @@ submit_create_job(struct tegra_drm_context *context, struct gather_bo *bo,
 	u32 needed_cmds;
 	int err;
 
-	/* Set initial class for firewall. */
 	class = context->client->base.class;
 
 	needed_cmds = args->num_cmds;

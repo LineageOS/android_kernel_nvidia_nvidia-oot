@@ -48,6 +48,11 @@ done:
 	return sequence;
 }
 
+static int32_t is_hfrp_supported(struct platform_device* pdev)
+{
+	return (pdev->num_resources > 1);
+}
+
 static void s_hfrp_cmd_sequence_destroy(struct hfrp_cmd_sequence *sequence)
 {
 	struct hfrp *hfrp = sequence->hfrp;
@@ -669,10 +674,78 @@ static int32_t s_nvdla_pm_lpwr_config_init(struct platform_device *pdev)
 fail:
 	return err;
 }
+/* PM Implementation */
+static int32_t s_nvdla_pm_dvfs_config_reset(struct platform_device *pdev)
+{
+	int32_t err = 0;
+	struct nvdla_cmd_data cmd_data;
+	struct hfrp *hfrp;
+
+	if (pdev == NULL) {
+		err = -EFAULT;
+		goto fail;
+	}
+
+	hfrp = s_hfrp_get_by_pdev(pdev);
+	if (hfrp == NULL) {
+		err = -EINVAL;
+		nvdla_dbg_err(pdev, "Invalid hfrp handle");
+		goto fail;
+	}
+
+	/* prepare command data */
+	cmd_data.method_id = DLA_CMD_SET_DVFS_CONFIG;
+	cmd_data.method_data = ALIGNED_DMA(hfrp->dvfs_config_pa);
+	cmd_data.wait = true;
+
+	/* pass set debug command to falcon */
+	err = nvdla_fw_send_cmd(pdev, &cmd_data);
+	if (err != 0) {
+		nvdla_dbg_err(pdev, "failed to send set dvfs config command");
+		goto fail;
+	}
+
+fail:
+	return err;
+}
+
+static int32_t s_nvdla_pm_dvfs_config_init(struct platform_device *pdev)
+{
+	int32_t err = 0;
+	struct nvdla_cmd_data cmd_data;
+	struct hfrp *hfrp;
+
+	if (pdev == NULL) {
+		err = -EFAULT;
+		goto fail;
+	}
+
+	hfrp = s_hfrp_get_by_pdev(pdev);
+	if (hfrp == NULL) {
+		err = -EINVAL;
+		nvdla_dbg_err(pdev, "Invalid hfrp handle");
+		goto fail;
+	}
+
+	/* prepare command data */
+	cmd_data.method_id = DLA_CMD_GET_DVFS_CONFIG;
+	cmd_data.method_data = ALIGNED_DMA(hfrp->dvfs_config_pa);
+	cmd_data.wait = true;
+
+	/* pass set debug command to falcon */
+	err = nvdla_fw_send_cmd(pdev, &cmd_data);
+	if (err != 0) {
+		nvdla_dbg_err(pdev, "failed to send get dvfs config command");
+		goto fail;
+	}
+
+fail:
+	return err;
+}
 
 int32_t nvdla_pm_init(struct platform_device *pdev)
 {
-	int32_t err;
+	int32_t err = 0;
 	int32_t irq;
 	struct hfrp *hfrp;
 	struct nvhost_device_data *pdata;
@@ -682,9 +755,14 @@ int32_t nvdla_pm_init(struct platform_device *pdev)
 	uint64_t timestamp;
 	uint32_t ii;
 
+	if (!is_hfrp_supported(pdev)) {
+		return err;
+	}
+
 	pdata = platform_get_drvdata(pdev);
 	nvdladev = pdata->private_data;
-	regs = pdata->aperture[NVDLA_HFRP_APERTURE_IDX];
+	regs = nvdla_device_register_get_aperture(pdev,
+			NVDLA_APERTURE_TYPE_HFRP);
 
 	irq = platform_get_irq(pdev, NVDLA_HFRP_APERTURE_IDX);
 	if (irq < 0) {
@@ -729,6 +807,16 @@ int32_t nvdla_pm_init(struct platform_device *pdev)
 		nvdla_dbg_err(pdev, "lpwr_config dma alloc failed");
 		err = -ENOMEM;
 		goto free_hfrp_sequence_pool;
+	}
+
+	/* Device managed allocation - for dvfs config */
+	hfrp->dvfs_config_va =
+		dma_alloc_attrs(&pdev->dev, sizeof(struct dla_dvfs_config),
+			&hfrp->dvfs_config_pa, GFP_KERNEL, 0);
+	if (hfrp->dvfs_config_va == NULL) {
+		nvdla_dbg_err(pdev, "dvfs_config dma alloc failed");
+		err = -ENOMEM;
+		goto free_lpwr_config;
 	}
 
 	hfrp->pdev = pdev;
@@ -782,6 +870,9 @@ int32_t nvdla_pm_init(struct platform_device *pdev)
 
 	return 0;
 
+free_lpwr_config:
+	dma_free_attrs(&pdev->dev, sizeof(struct dla_lpwr_config),
+		hfrp->lpwr_config_va, hfrp->lpwr_config_pa, 0);
 free_hfrp_sequence_pool:
 	devm_kfree(&pdev->dev, seqpool);
 free_hfrp:
@@ -795,6 +886,9 @@ fail:
 void nvdla_pm_deinit(struct platform_device *pdev)
 {
 	struct hfrp *hfrp;
+	if (!is_hfrp_supported(pdev)) {
+		return;
+	}
 
 	hfrp = s_hfrp_get_by_pdev(pdev);
 	if (hfrp != NULL) {
@@ -818,6 +912,18 @@ void nvdla_pm_deinit(struct platform_device *pdev)
 			hfrp->lpwr_config_pa = 0;
 		}
 
+		if (hfrp->dvfs_config_pa) {
+			/* Free the dvfs_config memory. */
+			dma_free_attrs(&pdev->dev,
+				sizeof(struct dla_dvfs_config),
+				hfrp->dvfs_config_va,
+				hfrp->dvfs_config_pa,
+				0);
+
+			hfrp->dvfs_config_va = NULL;
+			hfrp->dvfs_config_pa = 0;
+		}
+
 		devm_kfree(&pdev->dev, hfrp->sequence_pool);
 		devm_kfree(&pdev->dev, hfrp);
 	}
@@ -826,11 +932,15 @@ void nvdla_pm_deinit(struct platform_device *pdev)
 int32_t nvdla_pm_rail_gate(struct platform_device *pdev,
 	bool blocking)
 {
-	int32_t err;
+	int32_t err = 0;
 
 	struct nvdla_hfrp_cmd_power_ctrl cmd;
 	struct hfrp *hfrp;
 	uint64_t timeout;
+
+	if (!is_hfrp_supported(pdev)) {
+		return err;
+	}
 
 	hfrp = s_hfrp_get_by_pdev(pdev);
 	if (hfrp == NULL) {
@@ -873,10 +983,13 @@ fail:
 
 int32_t nvdla_pm_rail_ungate(struct platform_device *pdev)
 {
-	int32_t err;
+	int32_t err = 0;
 
 	struct nvdla_hfrp_cmd_power_ctrl cmd;
 	struct hfrp *hfrp;
+	if (!is_hfrp_supported(pdev)) {
+		return err;
+	}
 
 	hfrp = s_hfrp_get_by_pdev(pdev);
 	if (hfrp == NULL) {
@@ -902,8 +1015,12 @@ fail:
 int32_t nvdla_pm_rail_is_gated(struct platform_device *pdev,
 	bool *gated)
 {
-	int32_t err;
+	int32_t err = 0;
 	struct hfrp *hfrp;
+
+	if (!is_hfrp_supported(pdev)) {
+		return err;
+	}
 
 	hfrp = s_hfrp_get_by_pdev(pdev);
 	if (hfrp == NULL) {
@@ -923,10 +1040,14 @@ fail:
 int32_t nvdla_pm_rail_gate_set_delay_us(struct platform_device *pdev,
 	uint32_t delay_us)
 {
-	int32_t err;
+	int32_t err = 0;
 
 	struct hfrp *hfrp;
 	struct nvdla_hfrp_cmd_config config_cmd;
+
+	if (!is_hfrp_supported(pdev)) {
+		return err;
+	}
 
 	hfrp = s_hfrp_get_by_pdev(pdev);
 	if (hfrp == NULL) {
@@ -958,8 +1079,12 @@ fail:
 int32_t nvdla_pm_rail_gate_get_delay_us(struct platform_device *pdev,
 	uint32_t *delay_us)
 {
-	int32_t err;
+	int32_t err = 0;
 	struct hfrp *hfrp;
+
+	if (!is_hfrp_supported(pdev)) {
+		return err;
+	}
 
 	hfrp = s_hfrp_get_by_pdev(pdev);
 	if (hfrp == NULL) {
@@ -978,11 +1103,15 @@ fail:
 int32_t nvdla_pm_power_gate(struct platform_device *pdev,
 	bool blocking)
 {
-	int32_t err;
+	int32_t err = 0;
 
 	struct nvdla_hfrp_cmd_power_ctrl cmd;
 	struct hfrp *hfrp;
 	uint64_t timeout;
+
+	if (!is_hfrp_supported(pdev)) {
+		return err;
+	}
 
 	hfrp = s_hfrp_get_by_pdev(pdev);
 	if (hfrp == NULL) {
@@ -1024,10 +1153,14 @@ fail:
 
 int32_t nvdla_pm_power_ungate(struct platform_device *pdev)
 {
-	int32_t err;
+	int32_t err = 0;
 
 	struct nvdla_hfrp_cmd_power_ctrl cmd;
 	struct hfrp *hfrp;
+
+	if (!is_hfrp_supported(pdev)) {
+		return err;
+	}
 
 	hfrp = s_hfrp_get_by_pdev(pdev);
 	if (hfrp == NULL) {
@@ -1053,8 +1186,12 @@ fail:
 int32_t nvdla_pm_power_is_gated(struct platform_device *pdev,
 	bool *gated)
 {
-	int32_t err;
+	int32_t err = 0;
 	struct hfrp *hfrp;
+
+	if (!is_hfrp_supported(pdev)) {
+		return err;
+	}
 
 	hfrp = s_hfrp_get_by_pdev(pdev);
 	if (hfrp == NULL) {
@@ -1074,10 +1211,14 @@ fail:
 int32_t nvdla_pm_power_gate_set_delay_us(struct platform_device *pdev,
 	uint32_t delay_us)
 {
-	int32_t err;
+	int32_t err = 0;
 
 	struct hfrp *hfrp;
 	struct nvdla_hfrp_cmd_config config_cmd;
+
+	if (!is_hfrp_supported(pdev)) {
+		return err;
+	}
 
 	hfrp = s_hfrp_get_by_pdev(pdev);
 	if (hfrp == NULL) {
@@ -1109,8 +1250,12 @@ fail:
 int32_t nvdla_pm_power_gate_get_delay_us(struct platform_device *pdev,
 	uint32_t *delay_us)
 {
-	int32_t err;
+	int32_t err = 0;
 	struct hfrp *hfrp;
+
+	if (!is_hfrp_supported(pdev)) {
+		return err;
+	}
 
 	hfrp = s_hfrp_get_by_pdev(pdev);
 	if (hfrp == NULL) {
@@ -1129,11 +1274,15 @@ fail:
 int32_t nvdla_pm_clock_gate(struct platform_device *pdev,
 	bool blocking)
 {
-	int32_t err;
+	int32_t err = 0;
 
 	struct nvdla_hfrp_cmd_power_ctrl cmd;
 	struct hfrp *hfrp;
 	uint64_t timeout;
+
+	if (!is_hfrp_supported(pdev)) {
+		return err;
+	}
 
 	hfrp = s_hfrp_get_by_pdev(pdev);
 	if (hfrp == NULL) {
@@ -1175,10 +1324,14 @@ fail:
 
 int32_t nvdla_pm_clock_ungate(struct platform_device *pdev)
 {
-	int32_t err;
+	int32_t err = 0;
 
 	struct nvdla_hfrp_cmd_power_ctrl cmd;
 	struct hfrp *hfrp;
+
+	if (!is_hfrp_supported(pdev)) {
+		return err;
+	}
 
 	hfrp = s_hfrp_get_by_pdev(pdev);
 	if (hfrp == NULL) {
@@ -1203,8 +1356,12 @@ fail:
 int32_t nvdla_pm_clock_is_gated(struct platform_device *pdev,
 	bool *gated)
 {
-	int32_t err;
+	int32_t err = 0;
 	struct hfrp *hfrp;
+
+	if (!is_hfrp_supported(pdev)) {
+		return err;
+	}
 
 	hfrp = s_hfrp_get_by_pdev(pdev);
 	if (hfrp == NULL) {
@@ -1224,10 +1381,14 @@ fail:
 int32_t nvdla_pm_clock_gate_set_delay_us(struct platform_device *pdev,
 	uint32_t delay_us)
 {
-	int32_t err;
+	int32_t err = 0;
 
 	struct hfrp *hfrp;
 	struct nvdla_hfrp_cmd_config config_cmd;
+
+	if (!is_hfrp_supported(pdev)) {
+		return err;
+	}
 
 	hfrp = s_hfrp_get_by_pdev(pdev);
 	if (hfrp == NULL) {
@@ -1259,8 +1420,12 @@ fail:
 int32_t nvdla_pm_clock_gate_get_delay_us(struct platform_device *pdev,
 	uint32_t *delay_us)
 {
-	int32_t err;
+	int32_t err = 0;
 	struct hfrp *hfrp;
+
+	if (!is_hfrp_supported(pdev)) {
+		return err;
+	}
 
 	hfrp = s_hfrp_get_by_pdev(pdev);
 	if (hfrp == NULL) {
@@ -1292,6 +1457,10 @@ int32_t nvdla_pm_clock_set_core_freq(struct platform_device *pdev,
 		goto fail_no_dev;
 	}
 
+	if (!is_hfrp_supported(pdev)) {
+		return 0;
+	}
+
 	/* make sure that device is powered on */
 	err = nvdla_module_busy(pdev);
 	if (err != 0) {
@@ -1316,7 +1485,11 @@ fail_no_dev:
 int32_t nvdla_pm_clock_get_mcu_freq(struct platform_device *pdev,
 	uint32_t *freq_khz)
 {
-	int32_t err;
+	int32_t err = 0;
+
+	if (!is_hfrp_supported(pdev)) {
+		return err;
+	}
 
 	err = nvdla_pm_clock_get_core_freq(pdev, freq_khz);
 	if (err < 0) {
@@ -1354,7 +1527,7 @@ fail:
 int32_t nvdla_pm_clock_get_core_freq(struct platform_device *pdev,
 	uint32_t *freq_khz)
 {
-	int32_t err;
+	int32_t err = 0;
 
 	struct hfrp *hfrp;
 
@@ -1362,6 +1535,10 @@ int32_t nvdla_pm_clock_get_core_freq(struct platform_device *pdev,
 	if (hfrp == NULL) {
 		err = -EINVAL;
 		goto fail;
+	}
+
+	if (!is_hfrp_supported(pdev)) {
+		return err;
 	}
 
 	err = nvdla_hfrp_send_cmd_get_current_freq(hfrp, true);
@@ -1381,10 +1558,14 @@ fail:
 int32_t nvdla_pm_get_stat(struct platform_device *pdev,
 	struct nvdla_pm_stat *stat)
 {
-	int32_t err;
+	int32_t err = 0;
 
 	struct hfrp *hfrp;
 	uint64_t timestamp;
+
+	if (!is_hfrp_supported(pdev)) {
+		return err;
+	}
 
 	hfrp = s_hfrp_get_by_pdev(pdev);
 	if (hfrp == NULL) {
@@ -1483,6 +1664,10 @@ int32_t nvdla_pm_set_lpwr_config(struct platform_device *pdev,
 		goto fail;
 	}
 
+	if (!is_hfrp_supported(pdev)) {
+		return err;
+	}
+
 	hfrp = s_hfrp_get_by_pdev(pdev);
 	if (hfrp == NULL) {
 		err = -EINVAL;
@@ -1534,13 +1719,17 @@ fail:
 int32_t nvdla_pm_get_lpwr_config(struct platform_device *pdev,
 	struct dla_lpwr_config *config)
 {
-	int32_t err;
+	int32_t err = 0;
 
 	struct hfrp *hfrp;
 
 	if (pdev == NULL) {
 		err = -EFAULT;
 		goto fail;
+	}
+
+	if (!is_hfrp_supported(pdev)) {
+		return err;
 	}
 
 	hfrp = s_hfrp_get_by_pdev(pdev);
@@ -1584,8 +1773,69 @@ int32_t nvdla_pm_get_lpwr_config(struct platform_device *pdev,
 fail:
 	return err;
 }
+int32_t nvdla_pm_set_dvfs_config(struct platform_device *pdev,
+	struct dla_dvfs_config *config)
+{
+	int32_t err = 0;
 
-int32_t nvdla_pm_reset(struct platform_device *pdev)
+	struct hfrp *hfrp;
+	struct dla_dvfs_config old_config;
+
+	if (pdev == NULL) {
+		err = -EFAULT;
+		goto fail;
+	}
+
+	hfrp = s_hfrp_get_by_pdev(pdev);
+	if (hfrp == NULL) {
+		err = -EINVAL;
+		nvdla_dbg_err(pdev, "Invalid hfrp handle");
+		goto fail;
+	}
+
+	if (config == NULL) {
+		err = -EINVAL;
+		nvdla_dbg_err(pdev, "Invalid dvfs configuration");
+		goto fail;
+	}
+
+	/* back up prior to sending command */
+	(void) memcpy(&old_config, hfrp->dvfs_config_va,
+			sizeof(struct dla_dvfs_config));
+
+	/* Copy the data to set prior to sending command */
+	(void) memcpy(hfrp->dvfs_config_va, config,
+			sizeof(struct dla_dvfs_config));
+
+	/* make sure that device is powered on */
+	err = nvdla_module_busy(pdev);
+	if (err != 0) {
+		nvdla_dbg_err(pdev, "failed to power on\n");
+		err = -ENODEV;
+		goto restore_config;
+	}
+
+	err = s_nvdla_pm_dvfs_config_reset(pdev);
+	if (err < 0) {
+		nvdla_dbg_err(pdev, "failed to set dvfs config");
+		goto module_idle;
+	}
+
+	nvdla_module_idle(pdev);
+
+	return 0;
+
+module_idle:
+	nvdla_module_idle(pdev);
+restore_config:
+	(void) memcpy(hfrp->dvfs_config_va, &old_config,
+			sizeof(struct dla_dvfs_config));
+fail:
+	return err;
+}
+
+int32_t nvdla_pm_get_dvfs_config(struct platform_device *pdev,
+	struct dla_dvfs_config *config)
 {
 	int32_t err;
 
@@ -1594,6 +1844,63 @@ int32_t nvdla_pm_reset(struct platform_device *pdev)
 	if (pdev == NULL) {
 		err = -EFAULT;
 		goto fail;
+	}
+
+	hfrp = s_hfrp_get_by_pdev(pdev);
+	if (hfrp == NULL) {
+		err = -EINVAL;
+		nvdla_dbg_err(pdev, "Invalid hfrp handle");
+		goto fail;
+	}
+
+	if (config == NULL) {
+		err = -EINVAL;
+		nvdla_dbg_err(pdev, "Invalid dvfs configuration");
+		goto fail;
+	}
+
+	/* If uninitialized, get the configuration from the firmware */
+	if (hfrp->dvfs_config_va->version == 0U) {
+		/* make sure that device is powered on */
+		err = nvdla_module_busy(pdev);
+		if (err != 0) {
+			nvdla_dbg_err(pdev, "failed to power on\n");
+			err = -ENODEV;
+			goto fail;
+		}
+
+		err = s_nvdla_pm_dvfs_config_init(pdev);
+		if (err < 0) {
+			nvdla_dbg_err(pdev, "failed to init dvfs config");
+			nvdla_module_idle(pdev);
+			goto fail;
+		}
+
+		nvdla_module_idle(pdev);
+	}
+
+	(void) memcpy(config, hfrp->dvfs_config_va,
+			sizeof(struct dla_dvfs_config));
+
+	return 0;
+
+fail:
+	return err;
+}
+
+int32_t nvdla_pm_reset(struct platform_device *pdev)
+{
+	int32_t err = 0;
+
+	struct hfrp *hfrp;
+
+	if (pdev == NULL) {
+		err = -EFAULT;
+		goto fail;
+	}
+
+	if (!is_hfrp_supported(pdev)) {
+		return err;
 	}
 
 	hfrp = s_hfrp_get_by_pdev(pdev);
@@ -1619,6 +1926,22 @@ int32_t nvdla_pm_reset(struct platform_device *pdev)
 		goto fail;
 	}
 
+	/* For the first time, fetch defaults from FW */
+	if (hfrp->dvfs_config_va->version == 0U) {
+		err = s_nvdla_pm_dvfs_config_init(pdev);
+		if (err < 0) {
+			nvdla_dbg_err(pdev, "failed to init dvfs config");
+			nvdla_module_idle(pdev);
+			goto fail;
+		}
+	}
+
+	err = s_nvdla_pm_dvfs_config_reset(pdev);
+	if (err < 0) {
+		nvdla_dbg_err(pdev, "failed to reset dvfs config");
+		goto fail;
+	}
+
 	return 0;
 
 fail:
@@ -1628,9 +1951,13 @@ fail:
 int32_t nvdla_pm_get_current_voltage(struct platform_device *pdev,
 	uint32_t *voltage_mV)
 {
-	int32_t err;
+	int32_t err = 0;
 
 	struct hfrp *hfrp;
+
+	if (!is_hfrp_supported(pdev)) {
+		return err;
+	}
 
 	hfrp = s_hfrp_get_by_pdev(pdev);
 	if (hfrp == NULL) {
@@ -1662,9 +1989,13 @@ fail:
 int32_t nvdla_pm_get_current_power_draw(struct platform_device *pdev,
 	uint32_t *power_draw_mW)
 {
-	int32_t err;
+	int32_t err = 0;
 
 	struct hfrp *hfrp;
+
+	if (!is_hfrp_supported(pdev)) {
+		return err;
+	}
 
 	hfrp = s_hfrp_get_by_pdev(pdev);
 	if (hfrp == NULL) {
@@ -1696,9 +2027,13 @@ fail:
 int32_t nvdla_pm_get_info(struct platform_device *pdev,
 	struct nvdla_pm_info *info)
 {
-	int32_t err;
+	int32_t err = 0;
 
 	struct hfrp *hfrp;
+
+	if (!is_hfrp_supported(pdev)) {
+		return err;
+	}
 
 	hfrp = s_hfrp_get_by_pdev(pdev);
 	if (hfrp == NULL) {

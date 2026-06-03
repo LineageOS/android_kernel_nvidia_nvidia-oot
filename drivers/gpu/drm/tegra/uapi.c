@@ -131,9 +131,12 @@ int tegra_drm_ioctl_channel_open(struct drm_device *drm, void *data, struct drm_
 		if (err)
 			goto put_channel;
 
-		if (supported)
+		if (supported) {
+			struct pid *pid = get_task_pid(current, PIDTYPE_TGID);
 			context->memory_context = host1x_memory_context_alloc(
-				host, client->base.dev, get_task_pid(current, PIDTYPE_TGID));
+				host, client->base.dev, pid);
+			put_pid(pid);
+		}
 
 		if (IS_ERR(context->memory_context)) {
 			if (PTR_ERR(context->memory_context) != -EOPNOTSUPP) {
@@ -392,6 +395,7 @@ int tegra_drm_ioctl_syncpoint_wait(struct drm_device *drm, void *data, struct dr
 	return 0;
 }
 
+#ifndef CONFIG_TEGRA_DRM_DISABLE_LEGACY_IOCTL
 struct tegra_drm_syncpoint_memory_data {
 	phys_addr_t base;
 	u32 start, length, stride;
@@ -574,6 +578,7 @@ put_syncpts:
 
 	return err;
 }
+#endif
 
 int tegra_drm_ioctl_syncpoint_increment(struct drm_device *drm, void *data,
 					struct drm_file *file)

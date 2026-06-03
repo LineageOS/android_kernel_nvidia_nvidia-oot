@@ -586,10 +586,10 @@ static int cam_fsync_program_group_generator_edges(struct fsync_generator_group 
 
 			extra.extra_ticks -= (extra_ticks > 0);
 
-			ret = compute_edge_regs(&edge_info, ticks_active, false);
+			ret = compute_edge_regs(&edge_info, tmp_ticks, false);
 			if (ret < 0)
 				return ret;
-			ret = compute_edge_regs(&edge_info, tmp_ticks,
+			ret = compute_edge_regs(&edge_info, ticks_active,
 						(i == extra.num_periods - 1));
 			if (ret < 0)
 				return ret;
@@ -774,7 +774,7 @@ static int cam_fsync_start_group_generators(struct fsync_generator_group *group)
 	/* Start the generators */
 	list_for_each_entry(generator, &group->generators, list) {
 		cam_fsync_generator_writel(generator, TSC_GENX_CTRL,
-			TSC_GENX_CTRL_INITIAL_VAL | TSC_GENX_CTRL_ENABLE);
+			TSC_GENX_CTRL_RST | TSC_GENX_CTRL_ENABLE);
 
 			if (cam_fsync_generator_is_idle(generator)) {
 				dev_err(group->dev, "Generator start failed %s\n",

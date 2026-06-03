@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #include "pva_constants.h"
 #include "pva_kmd.h"
 #include "pva_kmd_utils.h"
@@ -12,6 +12,7 @@
 #include "pva_kmd_device.h"
 #include "pva_kmd_constants.h"
 #include "pva_kmd_limits.h"
+#include "pva_kmd_shim_utils.h"
 
 void pva_kmd_queue_init(struct pva_kmd_queue *queue, struct pva_kmd_device *pva,
 			uint8_t ccq_id, uint8_t queue_id,
@@ -52,8 +53,9 @@ pva_kmd_queue_submit(struct pva_kmd_queue *queue,
 
 	/* Update tail  */
 	tail = wrap_add(tail, 1, size);
+	pva_kmd_shim_memory_barrier_order();
 	queue->queue_header->cb_tail = tail;
-	__sync_synchronize();
+	pva_kmd_shim_memory_barrier_order();
 	pva_kmd_ccq_push(queue->pva, queue->ccq_id, queue->queue_id);
 
 	return PVA_SUCCESS;

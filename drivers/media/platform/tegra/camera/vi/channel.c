@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* SPDX-FileCopyrightText: Copyright (c) 2015-2025 NVIDIA CORPORATION & AFFILIATES.
+/* SPDX-FileCopyrightText: Copyright (c) 2015-2026 NVIDIA CORPORATION & AFFILIATES.
  * All rights reserved.
  *
  *
@@ -524,6 +524,7 @@ void tegra_channel_init_ring_buffer(struct tegra_channel *chan)
 	chan->capture_descr_index = 0;
 	chan->capture_descr_sequence = 0;
 	chan->queue_error = false;
+	chan->capture_reqs_enqueued = 0;
 }
 EXPORT_SYMBOL(tegra_channel_init_ring_buffer);
 
@@ -1103,8 +1104,11 @@ static const struct vb2_ops tegra_channel_queue_qops = {
 	.queue_setup = tegra_channel_queue_setup,
 	.buf_prepare = tegra_channel_buffer_prepare,
 	.buf_queue = tegra_channel_buffer_queue,
+#if defined(NV_VB2_BUFFER_STRUCT_HAS_WAIT_PREPARE_AND_FINISH)
+	/* Removed in Linux v7.0 */
 	.wait_prepare = vb2_ops_wait_prepare,
 	.wait_finish = vb2_ops_wait_finish,
+#endif
 	.start_streaming = tegra_channel_start_streaming,
 	.stop_streaming = tegra_channel_stop_streaming,
 };

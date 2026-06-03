@@ -22,7 +22,6 @@
 #include <linux/seq_file.h>
 #include <linux/stringify.h>
 #include <linux/of.h>
-#include <linux/version.h>
 #include <linux/iommu.h>
 #if defined(NV_LINUX_IOSYS_MAP_H_PRESENT)
 #include <linux/iosys-map.h>
@@ -123,6 +122,8 @@ static int nvmap_dmabuf_stash_sgt_locked(struct dma_buf_attachment *attach,
 		return -ENOMEM;
 	}
 
+	/* coverity[cert_exp34_c_violation]; FP-BUG_4598544 */
+	/* coverity[NULL_RETURNS]; FP-BUG_4598544 */
 	nvmap_sgt->dir = dir;
 	nvmap_sgt->sgt = sgt;
 	nvmap_sgt->dev = attach->dev;
@@ -413,7 +414,7 @@ static int __nvmap_map(struct nvmap_handle *h, struct vm_area_struct *vma)
 	mutex_init(&priv->vma_lock);
 	priv->handle = h;
 
-#if defined(NV_VM_AREA_STRUCT_HAS_CONST_VM_FLAGS) /* Linux v6.3 */
+#if defined(NV_VM_FLAGS_SET_PRESENT) /* Linux v6.3 */
 	vm_flags_set(vma, VM_SHARED | VM_DONTEXPAND |
 			  VM_DONTDUMP | VM_DONTCOPY |
 			  (h->heap_pgalloc ? 0 : VM_PFNMAP));

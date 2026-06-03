@@ -31,7 +31,8 @@
  *    2Gbps is max speed for Gen 1 with 2.5GT/s at 8/10 encoding.
  *  Convert to milli seconds and add 1sec timeout
  */
-#define GET_SYNC_TIMEOUT(s)	((((s) * 8UL) / 2000000) + 1000)
+#define SAFE_BYTES_TO_BITS(s)	(((s) & 0xFFFFFFFFFFFFFFULL) * (8UL & 0xFULL))
+#define GET_SYNC_TIMEOUT(s)	((SAFE_BYTES_TO_BITS((s)) / 2000000) + 1000)
 
 #define INCR_DESC(idx, i) ((idx) = ((idx) + (i)) % (ch->desc_sz))
 
@@ -57,6 +58,7 @@ struct edma_chan {
 	bool db_pos;
 	/** This field is updated to abort or de-init to stop further xfer submits */
 	tegra_pcie_dma_status_t st;
+	u32 db_off;
 };
 
 struct edma_prv {
@@ -132,9 +134,10 @@ static inline void edma_hw_init(void *cookie, bool rw_type)
 	struct edma_prv *prv = (struct edma_prv *)cookie;
 	uint32_t msi_data;
 	u32 eng_off[2] = {DMA_WRITE_ENGINE_EN_OFF, DMA_READ_ENGINE_EN_OFF};
+	const uint8_t rw_safe = rw_type ? 0U : 1U;
 
-	if (prv->ch_init & OSI_BIT(rw_type))
-		dma_common_wr(prv->edma_base, WRITE_ENABLE, eng_off[rw_type]);
+	if (prv->ch_init & OSI_BIT(rw_safe))
+		dma_common_wr(prv->edma_base, WRITE_ENABLE, eng_off[rw_safe]);
 
 	/* Program MSI addr & data for remote DMA use case */
 	if (prv->is_remote_dma) {
@@ -214,14 +217,15 @@ static inline void edma_hw_deinit(void *cookie, bool rw_type)
 {
 	struct edma_prv *prv = (struct edma_prv *)cookie;
 	int i;
+	const uint8_t rw_safe = rw_type ? 0U : 1U;
 	u32 eng_off[2] = {DMA_WRITE_ENGINE_EN_OFF, DMA_READ_ENGINE_EN_OFF};
 	u32 ctrl_off[2] = {DMA_CH_CONTROL1_OFF_WRCH, DMA_CH_CONTROL1_OFF_RDCH};
 	u32 mode_cnt[2] = {DMA_WR_CHNL_NUM, DMA_RD_CHNL_NUM};
 
-	if (prv->ch_init & OSI_BIT(rw_type)) {
-		dma_common_wr(prv->edma_base, 0, eng_off[rw_type]);
-		for (i = 0; i < mode_cnt[rw_type]; i++)
-			dma_channel_wr(prv->edma_base, i, 0, ctrl_off[rw_type]);
+	if (prv->ch_init & OSI_BIT(rw_safe)) {
+		dma_common_wr(prv->edma_base, 0, eng_off[rw_safe]);
+		for (i = 0; i < mode_cnt[rw_safe]; i++)
+			dma_channel_wr(prv->edma_base, i, 0, ctrl_off[rw_safe]);
 	}
 }
 
@@ -309,7 +313,7 @@ static inline void process_ch_irq(struct edma_prv *prv, u32 chan, struct edma_ch
 	}
 
 	if (ch->st == TEGRA_PCIE_DMA_ABORT) {
-		dev_info(prv->dev, "Abort: ch %d at r_idx %d->idx %d, w_idx is %d\n", chan,
+		dev_info(prv->dev, "A: ch %d at r_idx %d->idx %d, w_idx is %d\n", chan,
 			 ch->r_idx, idx, ch->w_idx);
 		if (ch->r_idx == idx)
 			goto process_abort;
@@ -366,7 +370,7 @@ irqreturn_t edma_irq_handler(int irq, void *cookie)
 			continue;
 
 		val = dma_common_rd(prv->edma_base, int_status_off[i]);
-		if ((val & OSI_GENMASK(31, 16)) != 0U) {
+		if ((val & GENMASK(31, 16)) != 0U) {
 			/**
 			 * If ABORT, immediately update state for all channels as aborted.
 			 * This setting stop further SW queuing
@@ -429,6 +433,7 @@ void *tegra234_pcie_edma_initialize(struct tegra_pcie_dma_init_info *info, void 
 	struct edma_chan *ch = NULL;
 	struct edma_chan *chan[2];
 	u32 mode_cnt[2] = {DMA_WR_CHNL_NUM, DMA_RD_CHNL_NUM};
+	u32 doorbell_off[2] = {DMA_WRITE_DOORBELL_OFF, DMA_READ_DOORBELL_OFF};
 	struct tegra_pcie_dma_chans_info *chan_info[2];
 	struct tegra_pcie_dma_chans_info *ch_info;
 	struct platform_device *pdev;
@@ -450,7 +455,7 @@ void *tegra234_pcie_edma_initialize(struct tegra_pcie_dma_init_info *info, void 
 	chan_info[1] = &info->rx[0];
 
 	if (!info->dev) {
-		pr_err("%s: dev pointer is NULL\n", __func__);
+		pr_err("EDMA init failed as dev pointer is NULL\n");
 		goto free_priv;
 	}
 	prv->dev = info->dev;
@@ -458,7 +463,7 @@ void *tegra234_pcie_edma_initialize(struct tegra_pcie_dma_init_info *info, void 
 
 	if (info->remote != NULL) {
 		if (info->msi_irq > INT_MAX) {
-			pr_err("%s: msi_irq is out of range\n", __func__);
+			pr_err("EDMA init failed as msi_irq is out of range\n");
 			goto free_priv;
 		}
 		prv->irq = (int)info->msi_irq;
@@ -541,7 +546,7 @@ void *tegra234_pcie_edma_initialize(struct tegra_pcie_dma_init_info *info, void 
 			ch->type = ch_info->ch_type;
 			ch->desc_sz = ch_info->num_descriptors;
 			ch->edma_desc_size = (sizeof(struct edma_dblock)) * ((ch->desc_sz / 2) + 1);
-
+			ch->db_off = doorbell_off[j];
 			if (prv->is_remote_dma) {
 				ch->dma_iova = ch_info->desc_iova;
 				ch->remap_desc = devm_ioremap(prv->dev, ch_info->desc_phy_base,
@@ -549,8 +554,7 @@ void *tegra234_pcie_edma_initialize(struct tegra_pcie_dma_init_info *info, void 
 							      ((ch->desc_sz / 2) + 1));
 				ch->desc = (__force void *)ch->remap_desc;
 				if (!ch->desc) {
-					dev_err(prv->dev, "desc region map failed, phy: 0x%llx\n",
-						ch_info->desc_phy_base);
+					dev_err(prv->dev, "desc region map failed\n");
 					goto dma_iounmap;
 				}
 			} else {
@@ -597,7 +601,7 @@ void *tegra234_pcie_edma_initialize(struct tegra_pcie_dma_init_info *info, void 
 
 	edma_hw_init(prv, false);
 	edma_hw_init(prv, true);
-	dev_info(prv->dev, "%s: success", __func__);
+	dev_info(prv->dev, "EDMA initialized successfully\n");
 
 	return prv;
 
@@ -644,10 +648,10 @@ tegra_pcie_dma_status_t tegra234_pcie_edma_submit_xfer(void *cookie,
 	u32 avail, to_ms;
 	struct tegra_pcie_dma_xfer_info *ring;
 	u32 int_status_off[2] = {DMA_WRITE_INT_STATUS_OFF, DMA_READ_INT_STATUS_OFF};
-	u32 doorbell_off[2] = {DMA_WRITE_DOORBELL_OFF, DMA_READ_DOORBELL_OFF};
 	u32 mode_cnt[2] = {DMA_WR_CHNL_NUM, DMA_RD_CHNL_NUM};
 	bool pcs, final_pcs = false;
 	long ret, to_jif;
+	uint64_t safe64AddVal = 0xFFFFFFFFFFFFFFFULL;
 
 	if (!prv || !tx_info || tx_info->nents == 0 || !tx_info->desc ||
 	    (tx_info->type < TEGRA_PCIE_DMA_WRITE || tx_info->type > TEGRA_PCIE_DMA_READ) ||
@@ -689,8 +693,9 @@ tegra_pcie_dma_status_t tegra234_pcie_edma_submit_xfer(void *cookie,
 		dma_ll_virt = &db->desc[ch->db_pos];
 		dma_ll_virt->size = tx_info->desc[i].sz;
 		/* calculate number of packets and add those many headers */
-		total_sz +=  (u64)(((tx_info->desc[i].sz / ch->desc_sz) + 1) * 30ULL);
-		total_sz += tx_info->desc[i].sz;
+		total_sz = (total_sz & safe64AddVal) + ((u64)((((tx_info->desc[i].sz / ch->desc_sz)
+					+ 1) & 0x7FFFFFFFFFFFFFULL) * 30ULL) & safe64AddVal);
+		total_sz = (total_sz & safe64AddVal) + (tx_info->desc[i].sz & safe64AddVal);
 		dma_ll_virt->sar_low = lower_32_bits(tx_info->desc[i].src);
 		dma_ll_virt->sar_high = upper_32_bits(tx_info->desc[i].src);
 		dma_ll_virt->dar_low = lower_32_bits(tx_info->desc[i].dst);
@@ -744,7 +749,7 @@ tegra_pcie_dma_status_t tegra234_pcie_edma_submit_xfer(void *cookie,
 	/* Ensure that all reads and writes are ordered */
 	smp_mb();
 
-	dma_common_wr(prv->edma_base, tx_info->channel_num, doorbell_off[tx_info->type]);
+	dma_common_wr(prv->edma_base, tx_info->channel_num, ch->db_off);
 
 	if (ch->type == TEGRA_PCIE_DMA_CHAN_XFER_SYNC) {
 		total_sz = GET_SYNC_TIMEOUT(total_sz);
@@ -755,9 +760,9 @@ tegra_pcie_dma_status_t tegra234_pcie_edma_submit_xfer(void *cookie,
 		if (ret == 0) {
 			/* dummy print to avoid misra-c voilations */
 			dev_dbg(prv->dev, "read back pcs: %d\n", pcs);
-			dev_err(prv->dev, "%s: timeout at %d ch, w_idx(%d), r_idx(%d)\n",
-				__func__, tx_info->channel_num, ch->w_idx, ch->r_idx);
-			dev_err(prv->dev, "%s: int status 0x%x", __func__,
+			dev_err(prv->dev, "Timeout while submitting EDMA transfers at %d ch, w_idx(%d), r_idx(%d)\n",
+					tx_info->channel_num, ch->w_idx, ch->r_idx);
+			dev_err(prv->dev, "Int status while submitting EDMA transfers 0x%x",
 				dma_common_rd(prv->edma_base, int_status_off[tx_info->type]));
 			st = TEGRA_PCIE_DMA_FAIL_TIMEOUT;
 			goto unlock;

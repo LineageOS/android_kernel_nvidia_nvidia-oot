@@ -359,7 +359,7 @@ u8 phydm_search_min_power_index(void *dm_void)
 
 				if (gain_index == 0xff) {
 					min_gain_index = 0x20;
-					PHYDM_DBG(dm, DBG_DYN_TXPWR, 
+					PHYDM_DBG(dm, DBG_DYN_TXPWR,
 						  "Error Gain idx!! Rewite to: ((%d))\n",
 						  min_gain_index);
 					break;
@@ -524,6 +524,7 @@ void phydm_dtp_per_sta(void *dm_void)
 	struct phydm_bb_ram_ctrl *bb_ctrl = &dm->p_bb_ram_ctrl;
 	u8 sta_cnt = 0;
 	u8 i = 0;
+	u8 macid = 0;
 	u8 curr_pwr_lv = 0;
 	u8 last_pwr_lv = 0;
 	u8 mac_id_cnt = 0;
@@ -536,9 +537,14 @@ void phydm_dtp_per_sta(void *dm_void)
 		if (is_sta_active(sta)) {
 			sta_cnt++;
 
+			if (sta->mac_id > 63)
+				macid = 63;
+			else
+				macid = sta->mac_id;
+
 			dtp = &sta->dtp_stat;
 			rssi = &sta->rssi_stat;
-			macid_mask = (u64)BIT(sta->mac_id);
+			macid_mask = (u64)BIT(macid);
 			if (!(bb_ctrl->macid_is_linked & macid_mask))
 				dtp->sta_last_dtp_lvl = tx_high_pwr_level_normal;
 
@@ -653,9 +659,7 @@ void phydm_dtp_debug(void *dm_void, char input[][16], u32 *_used, char *output,
 		#endif
 	} else {
 		for (i = 0; i < 7; i++) {
-			if (input[i + 1])
-				PHYDM_SSCANF(input[i + 1], DCMD_DECIMAL,
-					     &var1[i]);
+			PHYDM_SSCANF(input[i + 1], DCMD_DECIMAL, &var1[i]);
 		}
 		switch (var1[0]) {
 		case 1:

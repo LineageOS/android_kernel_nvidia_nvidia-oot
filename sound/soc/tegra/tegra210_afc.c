@@ -75,7 +75,7 @@ static int tegra210_afc_runtime_resume(struct device *dev)
 static int tegra210_afc_controls_get(struct snd_kcontrol *kctl,
 	struct snd_ctl_elem_value *uctl)
 {
-	struct snd_soc_component *cmpnt = snd_soc_kcontrol_component(kctl);
+	struct snd_soc_component *cmpnt = snd_kcontrol_chip(kctl);
 	struct tegra210_afc *afc = snd_soc_component_get_drvdata(cmpnt);
 
 	if (strstr(kctl->id.name, "ppm diff"))
@@ -95,7 +95,7 @@ static int tegra210_afc_controls_get(struct snd_kcontrol *kctl,
 static int tegra210_afc_controls_put(struct snd_kcontrol *kctl,
 	struct snd_ctl_elem_value *uctl)
 {
-	struct snd_soc_component *cmpnt = snd_soc_kcontrol_component(kctl);
+	struct snd_soc_component *cmpnt = snd_kcontrol_chip(kctl);
 	struct tegra210_afc *afc = snd_soc_component_get_drvdata(cmpnt);
 	int value = uctl->value.integer.value[0];
 

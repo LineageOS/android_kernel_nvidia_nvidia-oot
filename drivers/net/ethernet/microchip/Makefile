@@ -17,6 +17,9 @@ ifeq ($(PATCHLEVEL), 1)
 else ifeq ($(PATCHLEVEL), 6)
     obj-m += lan743x.o
     lan743x-objs += 6.6/lan743x_main.o 6.6/lan743x_ethtool.o 6.6/lan743x_ptp.o
+else ifeq ($(PATCHLEVEL), 8)
+    obj-m += lan743x.o
+    lan743x-objs += 6.8/lan743x_main.o 6.8/lan743x_ethtool.o 6.8/lan743x_ptp.o
 endif #PATCHLEVEL
 
 

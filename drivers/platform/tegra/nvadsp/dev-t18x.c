@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/**
- * Copyright (c) 2015-2024, NVIDIA CORPORATION. All rights reserved.
- */
+// SPDX-FileCopyrightText: Copyright (c) 2014-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
-#include <linux/version.h>
 #include <soc/tegra/fuse.h>
 #include <soc/tegra/virt/hv-ivc.h>
 #include <linux/platform_device.h>

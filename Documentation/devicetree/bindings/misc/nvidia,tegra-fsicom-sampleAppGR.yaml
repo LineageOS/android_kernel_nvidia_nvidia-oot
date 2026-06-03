@@ -38,14 +38,20 @@ select:
 properties:
 
     channelid_list:
+        description: |
+            Channel ID that sampleAppGR uses for communication. Only channel ID 5 is defined for sampleAppGR.
         $ref: "/schemas/types.yaml#/definitions/uint32"
         minimum: 0x5
         maximum: 0x5
 
 required:
     - compatible
+    - channelid_list
 
 examples:
     - |
-        FsiComQnxAppChConfAppGR {
+        FsiComQnxAppChConfAppGR{
+            compatible = "nvidia,tegra-fsicom-sampleAppGR";
+            status = "okay";
+            channelid_list = <5>;
         };

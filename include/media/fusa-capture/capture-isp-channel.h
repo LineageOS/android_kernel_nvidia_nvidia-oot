@@ -1,6 +1,15 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/*
- * Copyright (c) 2017-2022 NVIDIA Corporation.  All rights reserved.
+/* SPDX-FileCopyrightText: Copyright (c) 2017-2026 NVIDIA CORPORATION & AFFILIATES.
+ * All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms and conditions of the GNU General Public License,
+ * version 2, as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
  */
 
 /**
@@ -18,9 +27,9 @@
 struct isp_channel_drv;
 
 /**
- * @brief ISP fops for Host1x syncpt/gos allocations
+ * @brief ISP fops for Host1x syncpt allocations
  *
- * This fops is a HAL for chip/IP generations, see the respective VI platform
+ * This fops is a HAL for chip/IP generations, see the respective ISP platform
  * drivers for the implementations.
  */
 struct isp_channel_drv_ops {
@@ -51,7 +60,7 @@ struct isp_channel_drv_ops {
 	/**
 	 * Fast forward a progres syncpt to Host1x.
 	 *
-	 * @param[in]	pdev		VI platform_device
+	 * @param[in]	pdev		ISP platform_device
 	 * @param[in]	id			syncpt id to fast forward
 	 * @param[in]	threshold	value to fast forward to
 	 */
@@ -61,31 +70,18 @@ struct isp_channel_drv_ops {
 		uint32_t threshold);
 
 	/**
-	 * @brief Retrieve the GoS table allocated in the ISP-THI carveout.
-	 *
-	 * @param[in]	pdev	ISP platform_device
-	 * @param[out]	table	GoS table pointer
-	 */
-	uint32_t (*get_gos_table)(
-		struct platform_device *pdev,
-		const dma_addr_t **table);
-
-	/**
-	 * @brief Get a syncpt's GoS backing in the ISP-THI carveout.
+	 * @brief Get a syncpt's shim address.
 	 *
 	 * @param[in]	pdev		ISP platform_device
 	 * @param[in]	id		syncpt id
-	 * @param[out]	gos_index	GoS id
-	 * @param[out]	gos_offset	Offset of syncpt within GoS [dword]
+	 * @param[out]	syncpt_addr	syncpt shim address
 	 *
 	 * @returns	0 (success), neg. errno (failure)
 	 */
-	int (*get_syncpt_gos_backing)(
+	int (*get_syncpt_addr)(
 		struct platform_device *pdev,
 		uint32_t id,
-		dma_addr_t *syncpt_addr,
-		uint32_t *gos_index,
-		uint32_t *gos_offset);
+		dma_addr_t *syncpt_addr);
 };
 
 /**
@@ -99,7 +95,8 @@ struct tegra_isp_channel {
 	struct isp_channel_drv *drv; /**< ISP channel driver context */
 	void *priv; /**< ISP channel private context */
 	struct isp_capture *capture_data; /**< ISP channel capture context */
-	const struct isp_channel_drv_ops *ops; /**< ISP syncpt/gos fops */
+	const struct isp_channel_drv_ops *ops; /**< ISP syncpt fops */
+	uint32_t pipeline_id; /**< Pipeline ID for logging */
 };
 
 /**
@@ -130,7 +127,7 @@ void isp_channel_drv_unregister(
 	struct device *dev);
 
 /**
- * @brief Register the chip specific syncpt/gos related function table
+ * @brief Register the chip specific syncpt related function table
  *
  * @param[in]	ops	isp_channel_drv_ops fops
  * @returns	0 (success), neg. errno (failure)

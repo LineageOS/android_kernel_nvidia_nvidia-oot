@@ -2137,13 +2137,15 @@ unsigned int OnAuth(_adapter *padapter, union recv_frame *precv_frame)
 			if (rtw_is_list_empty(&pstat->asoc_list) == _FALSE) {
 				rtw_stapriv_asoc_list_del(pstapriv, pstat);
 				RTW_INFO("%s, asoc_list_cnt=%u\n", __func__, pstapriv->asoc_list_cnt);
-				if (pstat->expire_to > 0)
-					;/* TODO: STA re_auth within expire_to */
+				if (pstat->expire_to > 0) {
+					/* TODO: STA re_auth within expire_to */
+				}
 			}
 			rtw_stapriv_asoc_list_unlock(pstapriv);
 
-			if (seq == 1)
-				; /* TODO: STA re_auth and auth timeout */
+			if (seq == 1) {
+				/* TODO: STA re_auth and auth timeout */
+			}
 
 		}
 	}
@@ -9713,6 +9715,9 @@ unsigned int receive_disconnect(_adapter *padapter, unsigned char *MacAddr, unsi
 			pmlmepriv->roam_buf_pkt = _TRUE;
 			rtw_roam_stop_queue(padapter);
 		}
+#endif
+#ifdef CONFIG_RTW_FSM
+		rtw_fsm_notify_disconnect_start(&padapter->fsmpriv);
 #endif
 		if (pmlmeinfo->state & WIFI_FW_ASSOC_SUCCESS) {
 			if (report_del_sta_event(padapter, MacAddr, reason, _TRUE, locally_generated) != _FAIL)

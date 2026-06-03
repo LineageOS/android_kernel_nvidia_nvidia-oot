@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2015-2024, NVIDIA CORPORATION & AFFILIATES. All Rights Reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2015-2026, NVIDIA CORPORATION & AFFILIATES. All Rights Reserved.
  */
 
 #include <nvidia/conftest.h>
@@ -48,6 +48,9 @@
 #define NVDEC_RISCV_CG				0x4398
 #define NVDEC_RISCV_CG_SLCG			BIT(0)
 #define NVDEC_RISCV_CG_CORE_SLCG		BIT(1)
+#define NVDEC_RISCV_CPUCTL			0x4388
+#define NVDEC_RISCV_CPUCTL_ACTIVE_STATE_V(x)	((x >> 7) & 0x1)
+#define NVDEC_RISCV_CPUCTL_ACTIVE_STATE_ACTIVE_V	0x1
 
 #define NVDEC_PG				0x2314
 #define NVDEC_PG_DEEP_ELPG_EN			BIT(18)
@@ -185,6 +188,15 @@ static int nvdec_wait_debuginfo(struct nvdec *nvdec, const char *phase)
 static int nvdec_boot_riscv(struct nvdec *nvdec)
 {
 	int err;
+	u32 val;
+
+	/*
+	 * If the power domain is set to always-on, the hardware doesn't
+	 * get reset during runtime suspend. In that case, skip the boot.
+	 */
+	val = readl(nvdec->regs + NVDEC_RISCV_CPUCTL);
+	if (NVDEC_RISCV_CPUCTL_ACTIVE_STATE_V(val) == NVDEC_RISCV_CPUCTL_ACTIVE_STATE_ACTIVE_V)
+		return 0;
 
 	err = reset_control_acquire(nvdec->reset);
 	if (err)
@@ -623,6 +635,12 @@ static __maybe_unused int nvdec_runtime_resume(struct device *dev)
 	if (err < 0)
 		return err;
 
+	err = nvdec_set_rate(nvdec, ULONG_MAX);
+	if (err < 0) {
+		dev_err(dev, "failed to set clock rate: %d\n", err);
+		goto disable;
+	}
+
 	usleep_range(10, 20);
 
 	if (nvdec->config->has_riscv) {
@@ -641,8 +659,6 @@ static __maybe_unused int nvdec_runtime_resume(struct device *dev)
 
 	nvdec_enable_slcg(nvdec);
 
-	/* Forcely set frequency as Fmax when device is resumed back */
-	nvdec->devfreq->resume_freq = nvdec->devfreq->scaling_max_freq;
 	err = devfreq_resume_device(nvdec->devfreq);
 	if (err < 0)
 		goto disable;
@@ -656,6 +672,9 @@ static __maybe_unused int nvdec_runtime_resume(struct device *dev)
 	return 0;
 
 disable:
+	if (nvdec->icc_write)
+		icc_set_bw(nvdec->icc_write, 0, 0);
+
 	clk_bulk_disable_unprepare(nvdec->num_clks, nvdec->clks);
 	return err;
 }

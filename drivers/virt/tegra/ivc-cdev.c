@@ -308,17 +308,9 @@ long ivc_dev_ioctl(struct file *filp, unsigned int cmd,
 			info.rx_first = (s_guestid == ivcd->qd->peers[0]);
 		}
 
-		if (cmd == NVIPC_IVC_IOCTL_GET_INFO) {
-			if (copy_to_user((void __user *) arg, &info,
-				sizeof(struct nvipc_ivc_info))) {
-				ret = -EFAULT;
-			}
-		} else {
-			/* Added temporarily. will be removed */
-			if (copy_to_user((void __user *) arg, &info,
-				sizeof(struct nvipc_ivc_info) - 16)) {
-				ret = -EFAULT;
-			}
+		if (copy_to_user((void __user *) arg, &info,
+			sizeof(struct nvipc_ivc_info))) {
+			ret = -EFAULT;
 		}
 		break;
 

@@ -178,9 +178,9 @@ enum pva_error pva_kmd_submitter_submit(struct pva_kmd_submitter *submitter,
  *                              Valid value: non-null, must be initialized
  * @param[in] fence_val         Fence value to wait for completion
  *                              Valid range: [0 .. UINT32_MAX]
- * @param[in] poll_interval_ms  Polling interval in milliseconds
+ * @param[in] poll_interval_us  Polling interval in microseconds
  *                              Valid range: [1 .. UINT32_MAX]
- * @param[in] timeout_ms        Timeout period in milliseconds
+ * @param[in] timeout_us        Timeout period in microseconds
  *                              Valid range: [1 .. UINT32_MAX]
  *
  * @retval PVA_SUCCESS       Fence value reached, command buffer completed
@@ -188,8 +188,8 @@ enum pva_error pva_kmd_submitter_submit(struct pva_kmd_submitter *submitter,
  */
 enum pva_error pva_kmd_submitter_wait(struct pva_kmd_submitter *submitter,
 				      uint32_t fence_val,
-				      uint32_t poll_interval_ms,
-				      uint32_t timeout_ms);
+				      uint32_t poll_interval_us,
+				      uint32_t timeout_us);
 
 /**
  * @brief Submit a command buffer with custom fence configuration

@@ -1,5 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
-/* SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
+// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include <nvidia/conftest.h>
 
@@ -84,17 +84,6 @@ int vblk_submit_ioctl_req(struct vblk_dev *vblkdev,
 	struct request *rq;
 	int err;
 
-	/*
-	 * The caller must have CAP_SYS_RAWIO, and must be calling this on the
-	 * whole block device, not on a partition.  This prevents overspray
-	 * between sibling partitions.
-	 */
-	if ((!capable(CAP_SYS_RAWIO))) {
-		dev_err(vblkdev->device,
-			"Permission denied for passthrough cmds\n");
-		return -EPERM;
-	}
-
 	ioctl_req = kzalloc(sizeof(struct vblk_ioctl_req), GFP_KERNEL);
 	if (!ioctl_req) {
 		dev_err(vblkdev->device,
@@ -125,7 +114,8 @@ int vblk_submit_ioctl_req(struct vblk_dev *vblkdev,
 	if (err)
 		goto free_ioctl_req;
 
-	rq = blk_mq_alloc_request(vblkdev->queue, REQ_OP_DRV_IN, BLK_MQ_REQ_NOWAIT);
+	rq = blk_mq_alloc_request(vblkdev->allow_ffu_passthrough_cmds == false ? vblkdev->ioctl_queue : vblkdev->ffu_queue,
+	REQ_OP_DRV_IN, BLK_MQ_REQ_NOWAIT);
 	if (IS_ERR_OR_NULL(rq)) {
 		dev_err(vblkdev->device,
 			"Failed to get handle to a request!\n");
@@ -137,7 +127,8 @@ int vblk_submit_ioctl_req(struct vblk_dev *vblkdev,
 #if defined(NV_BLK_EXECUTE_RQ_HAS_NO_GENDISK_ARG) /* Linux v5.17 */
 	blk_execute_rq(rq, 0);
 #else
-	blk_execute_rq(vblkdev->gd, rq, 0);
+	blk_execute_rq((vblkdev->allow_ffu_passthrough_cmds == false ? vblkdev->ioctl_gd : vblkdev->ffu_gd),
+	rq, 0);
 #endif
 
 	blk_mq_free_request(rq);
@@ -189,6 +180,70 @@ static int vblk_common_ioctl(struct vblk_dev *vblkdev, fmode_t mode,
 	}
 
 	return ret;
+}
+
+/* The ioctl() implementation */
+int vblk_rpmb_ioctl(struct vblk_dev *vblkdev, fmode_t mode,
+		unsigned int cmd, unsigned long arg)
+{
+	struct vblk_ioctl_req *ioctl_req = NULL;
+	struct request *rq;
+	int err;
+
+	ioctl_req = kzalloc(sizeof(struct vblk_ioctl_req), GFP_KERNEL);
+	if (!ioctl_req) {
+		dev_err(vblkdev->device,
+			"failed to alloc memory for ioctl req!\n");
+		return -ENOMEM;
+	}
+
+	switch (cmd) {
+	case SG_IO:
+		err = vblk_prep_rpmb_io(vblkdev, ioctl_req,
+			(void __user *)arg);
+		break;
+	default:
+		dev_err(vblkdev->device, "unsupported command %x!\n", cmd);
+		err = -EINVAL;
+		goto free_ioctl_req;
+	}
+
+	if (err)
+		goto free_ioctl_req;
+
+	rq = blk_mq_alloc_request(vblkdev->ioctl_queue, REQ_OP_DRV_IN, BLK_MQ_REQ_NOWAIT);
+	if (IS_ERR_OR_NULL(rq)) {
+		dev_err(vblkdev->device,
+			"Failed to get handle to a request!\n");
+		err = PTR_ERR(rq);
+		goto free_ioctl_req;
+	}
+	vblkdev->ioctl_req = ioctl_req;
+
+#if defined(NV_BLK_EXECUTE_RQ_HAS_NO_GENDISK_ARG) /* Linux v5.17 */
+	blk_execute_rq(rq, 0);
+#else
+	blk_execute_rq(vblkdev->ioctl_gd, rq, 0);
+#endif
+
+	blk_mq_free_request(rq);
+
+	switch (cmd) {
+	case SG_IO:
+		err = vblk_complete_rpmb_io(vblkdev, ioctl_req,
+			(void __user *)arg);
+		break;
+	default:
+		dev_err(vblkdev->device, "unsupported command %x!\n", cmd);
+		err = -EINVAL;
+		goto free_ioctl_req;
+	}
+
+free_ioctl_req:
+	if (ioctl_req)
+		kfree(ioctl_req);
+
+	return err;
 }
 
 /**
@@ -280,7 +335,10 @@ int vblk_ioctl(struct block_device *bdev, fmode_t mode,
 	struct vblk_dev *vblkdev = bdev->bd_disk->private_data;
 
 	mutex_lock(&vblkdev->ioctl_lock);
-	ret = vblk_common_ioctl(vblkdev, mode, cmd, arg);
+	if (vblkdev->config.blk_config.req_ops_supported & VS_BLK_RPMB_OP_F)
+		ret = vblk_rpmb_ioctl(vblkdev, mode, cmd, arg);
+	else
+		ret = vblk_common_ioctl(vblkdev, mode, cmd, arg);
 	mutex_unlock(&vblkdev->ioctl_lock);
 
 	return ret;

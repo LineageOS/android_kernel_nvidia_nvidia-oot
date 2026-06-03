@@ -4,4 +4,6 @@
 obj-m += cpuidle-tegra-auto.o
 obj-m += cpuidle-debugfs.o
 
+cpuidle-debugfs-objs := cpuidle-dbg-fs.o cpuidle-dbg-core.o
+
 CFLAGS_cpuidle-debugfs.o := -I$(src)

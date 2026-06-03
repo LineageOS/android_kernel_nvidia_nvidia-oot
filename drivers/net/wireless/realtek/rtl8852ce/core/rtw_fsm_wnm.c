@@ -100,6 +100,7 @@ struct btm_obj {
 	struct wlan_network *candidate;
 	int nb_poll_times;
 	int finish;
+	int unexpect_terminated;
 
 	struct sitesurvey_parm parm;
 	struct rtw_ieee80211_channel scan_ch;
@@ -423,7 +424,7 @@ static int btm_start_st_hdl(void *obj, u16 event, void *param)
 			rtw_wnm_issue_action(a, &pbtm->pnb, RTW_WLAN_ACTION_WNM_BTM_RSP,
 				pbtm->resp_reason, pbtm->pnb.btm_cache.dialog_token);
 		fallthrough;
-	case FSM_EV_DISCONNECTED: /* no need to reply btm_req */
+	case FSM_EV_DISCONNECT_START: /* no need to reply btm_req */
 		rtw_fsm_st_goto(pbtm, BTM_ST_END);
 		break;
 	case FSM_EV_STATE_OUT:
@@ -462,7 +463,7 @@ static int btm_nb_req_st_hdl(void *obj, u16 event, void *param)
 			rtw_wnm_issue_action(a, &pbtm->pnb, RTW_WLAN_ACTION_WNM_BTM_RSP,
 				pbtm->resp_reason, pbtm->pnb.btm_cache.dialog_token);
 		fallthrough;
-	case FSM_EV_DISCONNECTED: /* no need to reply btm_req */
+	case FSM_EV_DISCONNECT_START: /* no need to reply btm_req */
 		rtw_fsm_st_goto(pbtm, BTM_ST_END);
 		break;
 	case FSM_EV_STATE_OUT:
@@ -497,6 +498,8 @@ static int btm_scan_st_hdl(void *obj, u16 event, void *param)
 
 	switch (event) {
 	case FSM_EV_STATE_IN:
+		pbtm->unexpect_terminated = _FALSE;
+		fallthrough;
 	case BTM_EV_scan_deny_expire:
 		ssc_chk = rtw_sitesurvey_condition_check(a, _FALSE);
 		if (ssc_chk == SS_DENY_BUSY_TRAFFIC) {
@@ -558,6 +561,10 @@ static int btm_scan_st_hdl(void *obj, u16 event, void *param)
 		/* wait scan done */
 		break;
 	case FSM_EV_SCAN_DONE:
+		if (pbtm->unexpect_terminated) {
+			rtw_fsm_st_goto(pbtm, BTM_ST_END);
+			return _SUCCESS;
+		}
 		rtw_fsm_cancel_alarm(pbtm);
 
 		if (pbtm->roam_reason & RTW_ROAM_ACTIVE) {
@@ -620,10 +627,15 @@ static int btm_scan_st_hdl(void *obj, u16 event, void *param)
 		else
 			rtw_fsm_st_goto(pbtm, BTM_ST_ROAM);
 		break;
-	case BTM_EV_scan_timeout:
 	case FSM_EV_ABORT:
-	case FSM_EV_DISCONNECTED:
+	case FSM_EV_DISCONNECT_START:
+		pbtm->unexpect_terminated = _TRUE;
 		rtw_scan_abort_no_wait(a);
+		/* need to wait scan done */
+		break;
+	case BTM_EV_scan_timeout:
+		rtw_scan_abort_no_wait(a);
+		/* may not expect scan done event */
 		rtw_fsm_st_goto(pbtm, BTM_ST_END);
 		break;
 	case FSM_EV_STATE_OUT:
@@ -683,7 +695,7 @@ static int btm_otd_st_hdl(void *obj, u16 event, void *param)
 	case FSM_EV_STATE_OUT:
 		rtw_fsm_cancel_alarm(pbtm);
 		break;
-	case FSM_EV_DISCONNECTED:
+	case FSM_EV_DISCONNECT_START:
 	case FSM_EV_ABORT:
 		rtw_fsm_st_goto(pbtm, BTM_ST_END);
 		break;
@@ -734,8 +746,11 @@ static int btm_roam_st_hdl(void *obj, u16 event, void *param)
 		receive_disconnect(a, pmlmepriv->dev_cur_network.network.MacAddress
 			, WLAN_REASON_ACTIVE_ROAM, _FALSE);
 		break;
+
+	case FSM_EV_DISCONNECT_END:
+		rtw_fsm_cancel_alarm(pbtm);
+		fallthrough;
 	case BTM_EV_disassoc_timeout:
-	case FSM_EV_DISCONNECTED:
 		FSM_INFO(pbtm, "roam to %s("MAC_FMT", ch:%d-%s) rssi:%d\n",
 			pbtm->candidate->network.Ssid.Ssid,
 			MAC_ARG(pbtm->candidate->network.MacAddress),
@@ -955,8 +970,13 @@ int rtw_btm_reg_fsm(struct fsm_priv *fsmpriv)
 	tb.deinit_priv = btm_deinit_priv_cb;
 	tb.dump_obj = btm_dump_obj_cb;
 	tb.dump_fsm = btm_dump_fsm_cb;
+#if RTW_WNM_DBG
+	tb.dbg_level = FSM_LV_DBG;
+	tb.evt_level = FSM_LV_DBG;
+#else
 	tb.dbg_level = FSM_LV_INFO;
 	tb.evt_level = FSM_LV_INFO;
+#endif
 	tb.debug = btm_debug;
 
 	fsm = rtw_fsm_register_fsm(root, "wnm", &tb);

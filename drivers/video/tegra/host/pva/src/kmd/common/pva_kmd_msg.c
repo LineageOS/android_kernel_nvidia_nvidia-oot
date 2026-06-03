@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include "pva_kmd_msg.h"
 #include "pva_api_types.h"
@@ -46,9 +46,9 @@ void pva_kmd_handle_hyp_msg(void *pva_dev, uint32_t const *data, uint8_t len)
 		pva_kmd_drain_fw_print(pva);
 
 		pva_kmd_log_err("Firmware aborted! The abort message is: ");
-		/* CERT INT31-C: PVA_EXTRACT returns 8-bit value, safe to cast to char */
-		abort_msg[0] = (char)PVA_EXTRACT(data[0], 7, 0, uint32_t);
-		abort_msg[1] = (char)PVA_EXTRACT(data[0], 15, 8, uint32_t);
+		/* CERT INT31-C: Use memcpy to copy bytes without unsigned-to-signed cast.
+		 * First 2 bytes of abort message are in data[0], rest in data[1..]. */
+		(void)memcpy((void *)abort_msg, (const void *)&data[0], 2U);
 		(void)memcpy((void *)(abort_msg + 2), (const void *)&data[1],
 			     (size_t)size);
 		abort_msg[PVA_FW_MSG_ABORT_STR_MAX_LEN] = '\0';
@@ -66,8 +66,7 @@ void pva_kmd_handle_hyp_msg(void *pva_dev, uint32_t const *data, uint8_t len)
 		break;
 
 	default:
-		FAULT("Unknown message type from firmware");
-		/* MISRA Rule 16.3 requires break; Rule 2.1: break is unreachable but required by MISRA 16.3 */
+		pva_kmd_log_err("Unknown message type from firmware");
 		break;
 	}
 }

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include "pva_kmd_device.h"
 #include "pva_kmd_debugfs.h"
@@ -12,6 +12,7 @@
 #include "pva_kmd_r5_ocd.h"
 #include "pva_kmd_fw_tracepoints.h"
 #include "pva_kmd_limits.h"
+#include "pva_kmd_shim_debugfs.h"
 
 int64_t pva_kmd_read_from_buffer_to_user(void *to, uint64_t count,
 					 uint64_t offset, const void *from,

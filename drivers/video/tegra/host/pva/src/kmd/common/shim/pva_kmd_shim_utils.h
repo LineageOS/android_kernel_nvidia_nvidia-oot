@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
+/* SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
 
 #ifndef PVA_KMD_SHIM_UTILS_H
 #define PVA_KMD_SHIM_UTILS_H
@@ -91,6 +91,31 @@ void pva_kmd_log_err(const char *str);
  *                 Valid range: [0 .. UINT64_MAX]
  */
 void pva_kmd_log_err_u64(const char *str, uint64_t n);
+
+/**
+ * @brief Log an error message string with a signed integer.
+ *
+ * Logs an error message string followed by a signed integer value. This function is always enabled,
+ * including in safety environments. Useful for logging errno values without signed-to-unsigned
+ * conversion issues.
+ *
+ * @details This function performs the following operations:
+ * - Outputs the specified string followed by the numeric value
+ * - Formats the number in decimal representation
+ * - Provides error logging with numeric context
+ * - Uses platform-appropriate output mechanisms
+ * - Ensures output is visible in production and safety builds
+ *
+ * This function is designed for critical error logging with numeric
+ * context and is enabled even in safety environments. For general
+ * debug output, use @ref pva_dbg_printf() instead.
+ *
+ * @param[in] str  Null-terminated string to print
+ *                 Valid value: non-null, null-terminated string
+ * @param[in] n    Signed integer to print after the string
+ *                 Valid range: [INT_MIN .. INT_MAX]
+ */
+void pva_kmd_log_err_int(const char *str, int n);
 
 /**
  * @brief Log an error message string with a 32-bit unsigned integer in hexadecimal format.
@@ -235,7 +260,39 @@ static inline uint32_t array_index_nospec(uint32_t index, uint32_t size)
  */
 uint64_t pva_kmd_get_time_tsc(void);
 
+/**
+ * @brief Issue a full memory barrier.
+ *
+ * @details This function ensures that all memory operations (reads and writes)
+ * issued before the barrier are visible to other processors/devices before any
+ * memory operations issued after the barrier. Used to enforce ordering of
+ * memory operations for shared memory communication.
+ *
+ * Platform implementations:
+ * - Linux kernel: mb()
+ * - QNX: dmb sy (full system domain, required since PVA R5 is outside inner shareable domain)
+ * - Native/userspace: __sync_synchronize()
+ */
+void pva_kmd_shim_memory_barrier_order(void);
+
+#if !defined(__KERNEL__)
+#include <time.h>
+/**
+ * @brief Get current real-time clock value.
+ *
+ * @details This function retrieves the current system real-time and stores
+ * it in the provided timespec structure. Used for timeout calculations
+ * with timed wait operations. Only available in userspace builds.
+ *
+ * @param[out] ts  Pointer to timespec structure to fill with current time
+ *
+ * @retval 0       Success
+ * @retval -1      Failure to get time
+ */
+int pva_kmd_get_realtime(struct timespec *ts);
+#endif /* !__KERNEL__ */
+
 /* Shim function with platform-specific implementations (QNX, Linux, Native) */
-bool pva_kmd_is_ops_allowed(struct pva_kmd_context *ctx, uint32_t opcode);
+bool pva_kmd_is_ops_allowed(struct pva_kmd_context *ctx, uint64_t opcode);
 
 #endif // PVA_KMD_SHIM_UTILS_H

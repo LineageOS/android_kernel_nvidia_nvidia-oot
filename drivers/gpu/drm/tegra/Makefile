@@ -9,10 +9,12 @@ tegra-drm-y := \
 	drm.o \
 	uapi.o \
 	submit.o \
-	firewall.o \
 	gem.o \
 	fb.o \
 	virt.o
+
+# Legacy firewall support for pre-T186 chips
+tegra-drm-$(CONFIG_DRM_TEGRA_LEGACY_FIREWALL) += firewall.o
 
 ifeq ($(CONFIG_DRM_TEGRA_HAVE_DISPLAY),y)
 tegra-drm-y += \

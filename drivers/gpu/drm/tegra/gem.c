@@ -552,6 +552,7 @@ void tegra_bo_free_object(struct drm_gem_object *gem)
 	kfree(bo);
 }
 
+#ifndef CONFIG_TEGRA_DRM_DISABLE_LEGACY_INTERFACE
 int tegra_bo_dumb_create(struct drm_file *file, struct drm_device *drm,
 			 struct drm_mode_create_dumb *args)
 {
@@ -569,6 +570,7 @@ int tegra_bo_dumb_create(struct drm_file *file, struct drm_device *drm,
 
 	return 0;
 }
+#endif
 
 static vm_fault_t tegra_bo_fault(struct vm_fault *vmf)
 {
@@ -606,7 +608,7 @@ int __tegra_gem_mmap(struct drm_gem_object *gem, struct vm_area_struct *vma)
 		 * and set the vm_pgoff (used as a fake buffer offset by DRM)
 		 * to 0 as we want to map the whole buffer.
 		 */
-#if defined(NV_VM_AREA_STRUCT_HAS_CONST_VM_FLAGS) /* Linux v6.3 */
+#if defined(NV_VM_FLAGS_SET_PRESENT) /* Linux v6.3 */
 		vm_flags_clear(vma, VM_PFNMAP);
 #else
 		vma->vm_flags &= ~VM_PFNMAP;
@@ -624,7 +626,7 @@ int __tegra_gem_mmap(struct drm_gem_object *gem, struct vm_area_struct *vma)
 	} else {
 		pgprot_t prot = vm_get_page_prot(vma->vm_flags);
 
-#if defined(NV_VM_AREA_STRUCT_HAS_CONST_VM_FLAGS) /* Linux v6.3 */
+#if defined(NV_VM_FLAGS_SET_PRESENT) /* Linux v6.3 */
 		vm_flags_set(vma, VM_MIXEDMAP);
 		vm_flags_clear(vma, VM_PFNMAP);
 #else

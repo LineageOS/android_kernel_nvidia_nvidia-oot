@@ -101,7 +101,7 @@ struct nvdla_queue_ops {
  * alloc_table		Bitmap of allocated queues
  * max_queue_cnt	Max number queues available for client
  * queue_task_pool	Pointer to the task memory pool for queues.
- *
+ * debugfs		Pointer to queues debugfs entry.
  */
 struct nvdla_queue_pool {
 	struct platform_device *pdev;
@@ -111,6 +111,7 @@ struct nvdla_queue_pool {
 	unsigned long alloc_table;
 	unsigned int max_queue_cnt;
 	void *queue_task_pool;
+	struct dentry *debugfs;
 };
 
 /**

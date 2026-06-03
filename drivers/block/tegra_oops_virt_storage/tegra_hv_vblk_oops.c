@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/*
- * SPDX-FileCopyrightText: Copyright (c) 2023-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- */
+// SPDX-FileCopyrightText: Copyright (c) 2023-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include <nvidia/conftest.h>
 
@@ -205,8 +203,13 @@ static ssize_t vblk_oops_read(char *buf, size_t bytes, loff_t pos)
 	 * For non-block aligned read requests, we can read full block(s) and
 	 * return requested bytes.
 	 */
-	if (bytes & (block_size - 1))
-		blocks += 1;
+	if (bytes & (block_size - 1)) {
+		if (check_add_overflow(blocks, 1U, &blocks)) {
+			dev_err(vblkdev_oops->device, "Blocks overflow(%u + 1)\n",
+				blocks);
+			goto fail;
+		}
+	}
 
 	if (vblkdev_oops->use_vm_address)
 		POPULATE_BLK_REQ_IOVA(req_in, VS_DATA_REQ, VS_BLK_READ, block_pos, blocks,
@@ -522,9 +525,14 @@ static void setup_device(struct vblk_dev *vblkdev)
 	struct vsc_request *req;
 	struct tegra_hv_ivm_cookie *ivmk;
 
-	vblkdev->size =
-		vblkdev->config.blk_config.num_blks *
-			vblkdev->config.blk_config.hardblk_size;
+	if (check_mul_overflow(vblkdev->config.blk_config.num_blks,
+			(uint64_t)vblkdev->config.blk_config.hardblk_size,
+			&vblkdev->size)) {
+		dev_err(vblkdev->device, "Size overflow(%llu * %u)\n",
+			vblkdev->config.blk_config.num_blks,
+			vblkdev->config.blk_config.hardblk_size);
+		return;
+	}
 
 	mutex_init(&vblkdev->ivc_lock);
 
@@ -682,8 +690,12 @@ static void setup_device(struct vblk_dev *vblkdev)
 	pstore_zone.panic_write = vblk_oops_panic_write;
 
 #if KERNEL_VERSION(6, 2, 0) > LINUX_VERSION_CODE
+#if IS_ENABLED(CONFIG_PSTORE_ZONE)
 	if (register_pstore_zone(&pstore_zone))
 		dev_err(vblkdev->device, "Could not register with pstore_zone\n");
+#else
+	dev_warn(vblkdev->device, "Pstore zone support not available - crash dump capture disabled\n");
+#endif
 #endif
 }
 

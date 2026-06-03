@@ -462,16 +462,16 @@ irqreturn_t ether_vm_isr(int irq, void *data);
  *  - The ``rd`` structure variable is used to retrieve pointers
  *    to the mii_ioctl_data data structure and hwtstamp_config structure.
  *  - Used Structure variables:
- *      - For SIOCGMIIPHY: mii_ioctl_data->phy_id, mii_ioctl_data->reg_num
- *      - For SIOCGMIIREG: mii_ioctl_data->phy_id, mii_ioctl_data->reg_num
- *      - For SIOCSMIIREG:: mii_ioctl_data->phy_id, mii_ioctl_data->reg_num
+ *      - For SIOCGMIIPHY: mii_ioctl_data->phy_id, mii_ioctl_data->reg_num. MAX PORTAD 31 and MAX DEVAD 31
+ *      - For SIOCGMIIREG: mii_ioctl_data->phy_id, mii_ioctl_data->reg_num. MAX PORTAD 31 and MAX DEVAD 31
+ *      - For SIOCSMIIREG:: mii_ioctl_data->phy_id, mii_ioctl_data->reg_num. MAX PORTAD 31 and MAX DEVAD 31
  *      - For SIOCSHWTSTAMP: hwtstamp_config->flags, hwtstamp_config->tx_type,
  *        hwtstamp_config->rx_filter
  * @param[in] cmd:
  *  - Net device IOCTL command.
- *  - SIOCGMIIPHY: read register from the current PHY.
- *  - SIOCGMIIREG: read register from the specified PHY.
- *  - SIOCSMIIREG: set a register on the specified PHY.
+ *  - SIOCGMIIPHY: read register from the current PHY. MAX PORTAD 31 and MAX DEVAD 31
+ *  - SIOCGMIIREG: read register from the specified PHY. MAX PORTAD 31 and MAX DEVAD 31
+ *  - SIOCSMIIREG: set a register on the specified PHY. MAX PORTAD 31 and MAX DEVAD 31
  *  - SIOCSHWTSTAMP: Configure hardware time stamping.
  *  - SIOCGHWTSTAMP: Get hardware time stamp configuration.
  *
@@ -532,8 +532,8 @@ int ether_ioctl(struct net_device *dev, struct ifreq *rq, int cmd);
  * @param[in] cmd:
  *  - Net device IOCTL command, valid values:
  *     - SIOCDEVPRIVATE: For Net device private IOCTLs
- *     - NVETHERNET_LINUX_PIF$ETHER_PRV_RMDIO_IOCTL
- *     - NVETHERNET_LINUX_PIF$ETHER_PRV_WMDIO_IOCTL
+ *     - NVETHERNET_LINUX_PIF$ETHER_PRV_RMDIO_IOCTL. MAX PORTAD 31 and MAX DEVAD 31
+ *     - NVETHERNET_LINUX_PIF$ETHER_PRV_WMDIO_IOCTL. MAX PORTAD 31 and MAX DEVAD 31
  *
  * @usage
  * - Allowed context for the API call
@@ -670,6 +670,7 @@ int ether_setup_tc(struct net_device *ndev, enum tc_setup_type type,
  * @return
  * - EOK on success
  * - "-EINVAL" If the new_mtu is more than NVETHERNETRM_PIF$OSI_MTU_SIZE_9000
+ * - "-EINVAL" If the new_mtu is less than NVETHERNETRM_PIF$OSI_MTU_SIZE_68
  * - Return values of NVETHERNETRM_PIF#osi_handle_ioctl with
  *   the NVETHERNETRM_PIF$OSI_CMD_MAC_MTU command.
  *
@@ -698,6 +699,7 @@ int ether_change_mtu(struct net_device *ndev, int new_mtu);
  *  - Used Structure variables: None
  * @param[in] feat:
  *  - Net device HW features flags type of u64.
+ *  - Supported values: NETIF_F_RXCSUM
  *
  * @usage
  * - Allowed context for the API call
@@ -876,6 +878,47 @@ void ether_get_strings(struct net_device *dev, u32 stringset, u8 *data);
 /**
  * @brief
  * Description:
+ * - Get HW supported time stamping.
+ *
+ * @param[in] ndev:
+ *  - Pointer to net device structure.
+ *  - The ``ndev`` structure variable is used to retrieve pointers to the private data structure.
+ *  - Used Structure variables: None
+ *
+ * @param[in] *info:
+ *  - Pointer to kernel_ethtool_ts_info or ethtool_ts_info type
+ *  - Used Structure variables: so_timestamping, tx_types, rx_filters
+ *
+ * @usage
+ * - Allowed context for the API call
+ *    - Interrupt: No
+ *    - Signal handler: No
+ *    - Thread-Safe: No
+ *    - Sync/Asyc: Sync
+ *    - Re-entrant: No
+ * - Required Privileges: None.
+ * - API Group:
+ *      - Initialization: No
+ *      - Run time: Yes
+ *      - De-initialization: No
+ *
+ * @pre This should be invoked following a successful
+ *   execution of the NVETHERNET_LINUX_PIF#ether_open event.
+ *
+ * @dir
+ * - forward
+ *
+ */
+int ether_get_ts_info(struct net_device *ndev,
+#if defined(NV_ETHTOOL_KERNEL_ETHTOOL_TS_INFO_STRUCT_PRESENT) /* Linux v6.11 */
+		struct kernel_ethtool_ts_info *info);
+#else
+		struct ethtool_ts_info *info);
+#endif
+
+/**
+ * @brief
+ * Description:
  * - Adjust link call back for Linux PHY sus system.
  *
  * @param[in] dev:
@@ -1010,104 +1053,12 @@ void ether_get_ethtool_stats(struct net_device *dev,
 #endif /* DOXYGEN_ICD */
 int ether_get_sset_count(struct net_device *dev, int sset);
 
-#ifndef OSI_STRIPPED_LIB
-/**
- * @brief
- * Description:
- * - This function is invoked by kernel when user request to get report
- *   whether wake-on-lan is enable or not.
- *
- * @param[in] ndev:
- *  - Pointer to net device structure.
- *  - The ``ndev`` structure variable is used to retrieve pointers to the private data structure.
- *  - Used Structure variables: None
- * param[in] wol
- *  – pointer to ethtool_wolinfo structure.
- *  - Used Structure variables: wol->supported, wol->wolopts.
- *
- * @usage
- * - Allowed context for the API call
- *    - Interrupt: No
- *    - Signal handler: No
- *    - Thread-Safe: No
- *    - Sync/Asyc: Sync
- *    - Re-entrant: No
- * - Required Privileges: None.
- * - API Group:
- *      - Initialization: No
- *      - Run time: Yes
- *      - De-initialization: No
- *
- * @pre This should be invoked following a successful
- *   execution of the NVETHERNET_LINUX_PIF#ether_open event.
- *
- * @dir
- * - forward
- *
- */
-#ifndef DOXYGEN_ICD
-/*
- * @note
- * Algorithm:
- * - Return Wake On Lan status in wol param
- *
- */
-#endif /* DOXYGEN_ICD */
-void ether_get_wol(struct net_device *ndev, struct ethtool_wolinfo *wol);
-
-/**
- * @brief
- * Description:
- * - This function is invoked by kernel when user request to set
- *   pmt parameters for remote wakeup or magic wakeup
- *
- * @param[in] ndev:
- *  - Pointer to net device structure.
- *  - The ``ndev`` structure variable is used to retrieve pointers to the private data structure.
- *  - Used Structure variables: None
- * param[in] wol
- *  – pointer to ethtool_wolinfo structure.
- *  - Used Structure variables: wol->wolopts.
- *
- * @usage
- * - Allowed context for the API call
- *    - Interrupt: No
- *    - Signal handler: No
- *    - Thread-Safe: No
- *    - Sync/Asyc: Sync
- *    - Re-entrant: No
- * - Required Privileges: None.
- * - API Group:
- *      - Initialization: No
- *      - Run time: Yes
- *      - De-initialization: No
- *
- * @pre This should be invoked following a successful
- *   execution of the NVETHERNET_LINUX_PIF#ether_open event.
- *
- * @return
- * - EOK on success
- *
- * @dir
- * - forward
- *
- */
-#ifndef DOXYGEN_ICD
-/*
- * @note
- * Algorithm:
- * - Enable or Disable Wake On Lan status based on wol param
- *
- */
-#endif /* DOXYGEN_ICD */
-int ether_set_wol(struct net_device *ndev, struct ethtool_wolinfo *wol);
-
 /**
  * @brief
  * Description:
  * - Ethernet selftests.
  *
- * @param[in] ndev:
+ * @param[in] dev:
  *  - Pointer to net device structure.
  *  - The ``ndev`` structure variable is used to retrieve pointers to the private data structure.
  *  - Used Structure variables: None
@@ -1158,10 +1109,10 @@ void ether_selftest_run(struct net_device *dev,
  *  - Pointer to net device structure.
  *  - The ``ndev`` structure variable is used to retrieve pointers to the private data structure.
  *  - Used Structure variables: None
- * param[in] rxnfc:
+ * @param[in] rxnfc:
  *  - Pointer to rxflow data
  *  - Used Structure variables: rxnfc->cmd
- * param[in] rule_locs:
+ * @param[in] rule_locs:
  *  - Rule location number
  *
  * @usage
@@ -1337,6 +1288,106 @@ u32 ether_get_rxfh_key_size(struct net_device *ndev);
 /**
  * @brief
  * Description:
+ * - Get the contents of the RX flow hash indirection table, hash key
+ *   and/or hash function
+ *
+ * @param[in] ndev:
+ *  - Pointer to net device structure.
+ *  - The ``ndev`` structure variable is used to retrieve pointers to the private data structure.
+ *  - Used Structure variables: None
+ * @param[out] rxfh:
+ *  - Pointer to indirection table or ethtool_rxfh_param structure type.
+ * @param[out] key:
+ *  - Pointer to Hash key.
+ * @param[out] hfunc:
+ *  - Pointer to Hash function.
+ *
+ * @usage
+ * - Allowed context for the API call
+ *    - Interrupt: No
+ *    - Signal handler: No
+ *    - Thread-Safe: No
+ *    - Sync/Asyc: Sync
+ *    - Re-entrant: No
+ * - Required Privileges: None.
+ * - API Group:
+ *      - Initialization: No
+ *      - Run time: Yes
+ *      - De-initialization: No
+ *
+ * @pre This should be invoked following a successful
+ *   execution of the NVETHERNET_LINUX_PIF#ether_open event.
+ *
+ * @return
+ * - EOK on success
+ *
+ * @dir
+ * - forward
+ *
+ */
+#if defined(NV_ETHTOOL_OPS_GET_SET_RXFH_HAS_RXFH_PARAM_ARGS)
+int ether_get_rxfh(struct net_device *ndev,
+		   struct ethtool_rxfh_param *rxfh);
+#else
+int ether_get_rxfh(struct net_device *ndev, u32 *rxfh, u8 *key,
+		   u8 *hfunc);
+#endif
+
+/**
+ * @brief
+ * Description:
+ *  - Set the contents of the RX flow hash indirection table, hash key
+ *    and/or hash function
+ *
+ * @param[in] ndev:
+ *  - Pointer to net device structure.
+ *  - The ``ndev`` structure variable is used to retrieve pointers to the private data structure.
+ *  - Used Structure variables: None
+ * @param[in] rxfh:
+ *  - A pointer to the indirection table or the ethtool_rxfh_param structure,
+ *    which contains valid DMA channels allocated to the VF
+ * @param[in] key:
+ *  - Pointer to Hash key.
+ * @param[in] hfunc:
+ *  - Hash function type. Supported values: ETH_RSS_HASH_NO_CHANGE, ETH_RSS_HASH_TOP
+ *
+ * @usage
+ * - Allowed context for the API call
+ *    - Interrupt: No
+ *    - Signal handler: No
+ *    - Thread-Safe: No
+ *    - Sync/Asyc: Sync
+ *    - Re-entrant: No
+ * - Required Privileges: None.
+ * - API Group:
+ *      - Initialization: No
+ *      - Run time: Yes
+ *      - De-initialization: No
+ *
+ * @pre This should be invoked following a successful
+ *   execution of the NVETHERNET_LINUX_PIF#ether_open event.
+ *
+ * @return
+ * - EOK on success
+ * - -ENODEV on interface down.
+ * - -EOPNOTSUPP on invalid hfunc value.
+ *
+ * @dir
+ * - forward
+ *
+ */
+#if defined(NV_ETHTOOL_OPS_GET_SET_RXFH_HAS_RXFH_PARAM_ARGS)
+int ether_set_rxfh(struct net_device *ndev,
+		   struct ethtool_rxfh_param *rxfh,
+		   struct netlink_ext_ack *extack);
+#else
+int ether_set_rxfh(struct net_device *ndev, const u32 *rxfh,
+		   const u8 *key, const u8 hfunc);
+#endif
+
+/**
+ * @brief
+ * Description:
  * - Get the size of the RX flow hash indirection table
  *
  * @param[in] ndev:
@@ -1376,92 +1427,6 @@ u32 ether_get_rxfh_key_size(struct net_device *ndev);
  */
 #endif /* DOXYGEN_ICD */
 u32 ether_get_rxfh_indir_size(struct net_device *ndev);
-
-/**
- * @brief
- * Description:
- * - Get the debug message level of the driver
- *
- * @param[in] ndev:
- *  - Pointer to net device structure.
- *  - The ``ndev`` structure variable is used to retrieve pointers to the private data structure.
- *  - Used Structure variables: None
- *
- * @usage
- * - Allowed context for the API call
- *    - Interrupt: No
- *    - Signal handler: No
- *    - Thread-Safe: No
- *    - Sync/Asyc: Sync
- *    - Re-entrant: No
- * - Required Privileges: None.
- * - API Group:
- *      - Initialization: No
- *      - Run time: Yes
- *      - De-initialization: No
- *
- * @pre This should be invoked following a successful
- *   execution of the NVETHERNET_LINUX_PIF#ether_open event.
- *
- * @return
- * - message level set in the driver
- *
- * @dir
- * - forward
- *
- */
-#ifndef DOXYGEN_ICD
-/*
- * @note
- * Algorithm:
- * - Returns the message level set in the driver.
- *
- */
-#endif /* DOXYGEN_ICD */
-unsigned int ether_get_msglevel(struct net_device *ndev);
-
-/**
- * @brief
- * Description:
- * - Set the debug message level into the driver
- *
- * @param[in] ndev:
- *  - Pointer to net device structure.
- *  - The ``ndev`` structure variable is used to retrieve pointers to the private data structure.
- *  - Used Structure variables: None
- * @param[in] level:
- *  - debug message level
- *
- * @usage
- * - Allowed context for the API call
- *    - Interrupt: No
- *    - Signal handler: No
- *    - Thread-Safe: No
- *    - Sync/Asyc: Sync
- *    - Re-entrant: No
- * - Required Privileges: None.
- * - API Group:
- *      - Initialization: No
- *      - Run time: Yes
- *      - De-initialization: No
- *
- * @pre This should be invoked following a successful
- *   execution of the NVETHERNET_LINUX_PIF#ether_open event.
- *
- * @dir
- * - forward
- *
- */
-#ifndef DOXYGEN_ICD
-/*
- * @note
- * Algorithm:
- * - Returns the message level set in the driver.
- *
- */
-#endif /* DOXYGEN_ICD */
-void ether_set_msglevel(struct net_device *ndev, u32 level);
-#endif /* OSI_STRIPPED_LIB */
 
 /* Work Queue functions */
 /**
@@ -1781,6 +1746,7 @@ int ether_get_time(struct ptp_clock_info *ptp, struct timespec64 *ts);
  *
  * @return
  * - EOK on NVETHERNETRM_PIF$OSI_CMD_SET_SYSTOHW_TIME IOCTL success
+ * - ERANGE on reception of invalid Time value
  * - Return values of NVETHERNETRM_PIF#osi_handle_ioctl with
  *   the NVETHERNETRM_PIF$OSI_CMD_SET_SYSTOHW_TIME command.
  *
@@ -2034,6 +2000,12 @@ void osd_receive_packet(void *priv, struct osi_rx_ring *rx_ring,
  * @dir
  * - forward
  *
+ * @return
+ * - EOK on success
+ * - "-EINVAL" on invalid attributes present in the 'info' structure.
+ * - "-EPROTO" on incorrect MACsec platform configuration failure.
+ * - "-ENETDOWN" on MAC interface down.
+ *
  */
 int macsec_init(struct sk_buff *skb, struct genl_info *info);
 
@@ -2068,6 +2040,12 @@ int macsec_init(struct sk_buff *skb, struct genl_info *info);
  *
  * @dir
  * - forward
+ *
+ * @return
+ * - EOK on success
+ * - "-EINVAL" on invalid attributes present in the 'info' structure.
+ * - "-EPROTO" on incorrect MACsec platform configuration failure.
+ * - "-ENETDOWN" on MAC interface down.
  *
  */
 int macsec_set_replay_prot(struct sk_buff *skb, struct genl_info *info);
@@ -2104,6 +2082,12 @@ int macsec_set_replay_prot(struct sk_buff *skb, struct genl_info *info);
  * @dir
  * - forward
  *
+ * @return
+ * - EOK on success
+ * - "-EINVAL" on invalid attributes present in the 'info' structure.
+ * - "-EPROTO" on incorrect MACsec platform configuration failure.
+ * - "-ENETDOWN" on MAC interface down.
+ *
  */
 int macsec_set_cipher(struct sk_buff *skb, struct genl_info *info);
 
@@ -2138,6 +2122,12 @@ int macsec_set_cipher(struct sk_buff *skb, struct genl_info *info);
  *
  * @dir
  * - forward
+ *
+ * @return
+ * - EOK on success
+ * - "-EINVAL" on invalid attributes present in the 'info' structure.
+ * - "-EPROTO" on incorrect MACsec platform configuration failure.
+ * - "-ENETDOWN" on MAC interface down.
  *
  */
 int macsec_deinit(struct sk_buff *skb, struct genl_info *info);
@@ -2174,6 +2164,12 @@ int macsec_deinit(struct sk_buff *skb, struct genl_info *info);
  * @dir
  * - forward
  *
+ * @return
+ * - EOK on success
+ * - "-EINVAL" on invalid attributes present in the 'info' structure.
+ * - "-EPROTO" on incorrect MACsec platform configuration failure.
+ * - "-ENETDOWN" on MAC interface down.
+ *
  */
 int macsec_en_tx_sa(struct sk_buff *skb, struct genl_info *info);
 
@@ -2208,6 +2204,12 @@ int macsec_en_tx_sa(struct sk_buff *skb, struct genl_info *info);
  *
  * @dir
  * - forward
+ *
+ * @return
+ * - EOK on success
+ * - "-EINVAL" on invalid attributes present in the 'info' structure.
+ * - "-EPROTO" on incorrect MACsec platform configuration failure.
+ * - "-ENETDOWN" on MAC interface down.
  *
  */
 int macsec_create_tx_sa(struct sk_buff *skb, struct genl_info *info);
@@ -2244,6 +2246,12 @@ int macsec_create_tx_sa(struct sk_buff *skb, struct genl_info *info);
  * @dir
  * - forward
  *
+ * @return
+ * - EOK on success
+ * - "-EINVAL" on invalid attributes present in the 'info' structure.
+ * - "-EPROTO" on incorrect MACsec platform configuration failure.
+ * - "-ENETDOWN" on MAC interface down.
+ *
  */
 int macsec_dis_tx_sa(struct sk_buff *skb, struct genl_info *info);
 
@@ -2278,6 +2286,12 @@ int macsec_dis_tx_sa(struct sk_buff *skb, struct genl_info *info);
  *
  * @dir
  * - forward
+ *
+ * @return
+ * - EOK on success
+ * - "-EINVAL" on invalid attributes present in the 'info' structure.
+ * - "-EPROTO" on incorrect MACsec platform configuration failure.
+ * - "-ENETDOWN" on MAC interface down.
  *
  */
 int macsec_en_rx_sa(struct sk_buff *skb, struct genl_info *info);
@@ -2314,6 +2328,12 @@ int macsec_en_rx_sa(struct sk_buff *skb, struct genl_info *info);
  * @dir
  * - forward
  *
+ * @return
+ * - EOK on success
+ * - "-EINVAL" on invalid attributes present in the 'info' structure.
+ * - "-EPROTO" on incorrect MACsec platform configuration failure.
+ * - "-ENETDOWN" on MAC interface down.
+ *
  */
 int macsec_create_rx_sa(struct sk_buff *skb, struct genl_info *info);
 
@@ -2348,6 +2368,12 @@ int macsec_create_rx_sa(struct sk_buff *skb, struct genl_info *info);
  *
  * @dir
  * - forward
+ *
+ * @return
+ * - EOK on success
+ * - "-EINVAL" on invalid attributes present in the 'info' structure.
+ * - "-EPROTO" on incorrect MACsec platform configuration failure.
+ * - "-ENETDOWN" on MAC interface down.
  *
  */
 int macsec_dis_rx_sa(struct sk_buff *skb, struct genl_info *info);
@@ -2384,7 +2410,333 @@ int macsec_dis_rx_sa(struct sk_buff *skb, struct genl_info *info);
  * @dir
  * - forward
  *
+ * @return
+ * - EOK on success
+ * - "-EINVAL" on invalid attributes present in the 'info' structure.
+ * - "-EPROTO" on incorrect MACsec platform configuration failure.
+ * - "-ENETDOWN" on MAC interface down.
+ *
  */
 int macsec_get_tx_next_pn(struct sk_buff *skb, struct genl_info *info);
+
+/**
+ * @brief
+ * Description:
+ * - MII call back for MDIO register write.
+ *
+ * @param[in] bus:
+ *  - MDIO bus instances.
+ * @param[in] phyaddr:
+ *  - PHY address (ID).
+ * @param[in] phyreg:
+ *  - PHY register to write.
+ * @param[in] phydata:
+ *  - Data to be written in register.
+ *
+ * @usage
+ * - Allowed context for the API call
+ *    - Interrupt: No
+ *    - Signal handler: No
+ *    - Thread-Safe: No
+ *    - Sync/Asyc: Sync
+ *    - Re-entrant: No
+ * - Required Privileges: None.
+ * - API Group:
+ *      - Initialization: No
+ *      - Run time: Yes
+ *      - De-initialization: No
+ *
+ * @pre This should be invoked following a successful
+ *   execution of the NVETHERNET_LINUX_PIF#ether_open event.
+ *
+ * @dir
+ * - forward
+ *
+ * @return
+ * - EOK on success
+ * - "-ENODEV" on No clks available
+ * - "-ENOMEM" on  NVETHERNETRM_PIF#osi_write_phy_reg fail.
+ *
+ */
+int ether_mdio_write(struct mii_bus *bus, int phyaddr, int phyreg,
+		    u16 phydata);
+/**
+ * @brief
+ * Description:
+ * - MII call back for MDIO register read.
+ *
+ * @param[in] bus:
+ *  - MDIO bus instances.
+ * @param[in] phyaddr:
+ *  - PHY address (ID).
+ * @param[in] phyreg:
+ *  - PHY register to write.
+ *
+ * @usage
+ * - Allowed context for the API call
+ *    - Interrupt: No
+ *    - Signal handler: No
+ *    - Thread-Safe: No
+ *    - Sync/Asyc: Sync
+ *    - Re-entrant: No
+ * - Required Privileges: None.
+ * - API Group:
+ *      - Initialization: No
+ *      - Run time: Yes
+ *      - De-initialization: No
+ *
+ * @pre This should be invoked following a successful
+ *   execution of the NVETHERNET_LINUX_PIF#ether_open event.
+ *
+ * @dir
+ * - forward
+ *
+ * @return
+ * - EOK on success
+ * - "-ENODEV" on No clks available
+ * - "-ENOMEM" on  NVETHERNETRM_PIF#osi_read_phy_reg fail.
+ *
+ */
+int ether_mdio_read(struct mii_bus *bus, int phyaddr, int phyreg);
+
+/**
+ * @brief
+ * Description:
+ *  - NAPI poll handler for receive.
+ *
+ * @param[in] napi:
+ *  - NAPI instance for Rx NAPI.
+ * @param[in] budget:
+ *  - NAPI budget.
+ *
+ * @usage
+ * - Allowed context for the API call
+ *    - Interrupt: No
+ *    - Signal handler: No
+ *    - Thread-Safe: No
+ *    - Sync/Asyc: Sync
+ *    - Re-entrant: No
+ * - Required Privileges: None.
+ * - API Group:
+ *      - Initialization: No
+ *      - Run time: Yes
+ *      - De-initialization: No
+ *
+ * @pre This should be invoked following a successful
+ *   execution of the NVETHERNET_LINUX_PIF#ether_open event.
+ *
+ * @dir
+ * - forward
+ *
+ * @return
+ * - number of packets received.
+ *
+ */
+int ether_napi_poll_rx(struct napi_struct *napi, int budget);
+
+/**
+ * @brief
+ * Description:
+ *  - NAPI poll handler for transmission.
+ *
+ * @param[in] napi:
+ *  - NAPI instance for Rx NAPI.
+ * @param[in] budget:
+ *  - NAPI budget.
+ *
+ * @usage
+ * - Allowed context for the API call
+ *    - Interrupt: No
+ *    - Signal handler: No
+ *    - Thread-Safe: No
+ *    - Sync/Asyc: Sync
+ *    - Re-entrant: No
+ * - Required Privileges: None.
+ * - API Group:
+ *      - Initialization: No
+ *      - Run time: Yes
+ *      - De-initialization: No
+ *
+ * @pre This should be invoked following a successful
+ *   execution of the NVETHERNET_LINUX_PIF#ether_open event.
+ *
+ * @dir
+ * - forward
+ *
+ * @return
+ *  - Number of Tx buffer cleaned.
+ *
+ */
+int ether_napi_poll_tx(struct napi_struct *napi, int budget);
+
+/**
+ * @brief osd_log
+ *  - logging function
+ *
+ * @param[in] priv: OSD private data
+ * @param[in] func: Function name
+ * @param[in] line: Line number
+ * @param[in] level: Log level
+ * @param[in] type: Error type
+ * @param[in] err: Error string
+ * @param[in] loga: Error additional information
+ *
+ *
+ * @usage
+ * - Allowed context for the API call
+ *  - Interrupt handler: No
+ *  - Signal handler: No
+ *  - Thread safe: No
+ *  - Async/Sync: Sync
+ * - Required Privileges: None
+ * -API Group:
+ * - Initialization: Yes
+ * - Run time: Yes
+ * - De-initialization: Yes
+ *
+ * @pre This should be invoked following a successful
+ *   execution of the NVETHERNET_LINUX_PIF#ether_open event.
+ *
+ * @dir
+ *  - forward
+ */
+void osd_log(void *priv,
+	     const char *func,
+	     unsigned int line,
+	     unsigned int level,
+	     unsigned int type,
+	     const char *err,
+	     unsigned long long loga);
+
+/**
+ * @brief osd_udelay
+ *  - delay in micro seconds
+ *
+ * @param[in] usec: Time in usec
+ *
+ * @usage
+ * - Allowed context for the API call
+ *  - Interrupt handler: No
+ *  - Signal handler: No
+ *  - Thread safe: No
+ *  - Async/Sync: Sync
+ * - Required Privileges: None
+ * -API Group:
+ * - Initialization: Yes
+ * - Run time: No
+ * - De-initialization: No
+ *
+ *
+ * @pre This should be invoked following a successful
+ *   execution of the NVETHERNET_LINUX_PIF#ether_open event.
+ *
+ * @dir
+ *  - forward
+ */
+void osd_udelay(uint64_t usec);
+
+/**
+ * @brief osd_sleep
+ *  - Adds sleep in micro seconds
+ *
+ * @param[in] usec: Time in usec
+ *
+ * @usage
+ * - Allowed context for the API call
+ *  - Interrupt handler: No
+ *  - Signal handler: No
+ *  - Thread safe: No
+ *  - Async/Sync: Sync
+ * - Required Privileges: None
+ * -API Group:
+ * - Initialization: Yes
+ * - Run time: No
+ * - De-initialization: No
+ *
+ *
+ * @pre This should be invoked following a successful
+ *   execution of the NVETHERNET_LINUX_PIF#ether_open event.
+ *
+ * @dir
+ *  - forward
+ */
+void osd_usleep(unsigned long long usec);
+
+/**
+ * @brief
+ * Description:
+ * - Timer callback function used in the implementation of the NAPI driver framework
+ *
+ * @param[in] data:
+ *  - hrtimer structure with platform driver data.
+ *  - The ``data`` structure variable is used to retrieve pointers to struct net_device and the private data structure.
+ *  - Used Structure variables: None
+ *
+ * @usage
+ * - Allowed context for the API call
+ *    - Interrupt: No
+ *    - Signal handler: No
+ *    - Thread-Safe: No
+ *    - Sync/Asyc: Sync
+ *    - Re-entrant: No
+ * - Required Privileges: None.
+ * - API Group:
+ *      - Initialization: No
+ *      - Run time: Yes
+ *      - De-initialization: No
+ *
+ * @pre Ethernet driver probe NVETHERNET_LINUX_PIF#ether_probe event
+ * need to be completed successfully with ethernet network device created.
+ *
+ * @return
+ * - HRTIMER_NORESTART on success
+ *
+ * @dir
+ * - forward
+ *
+ */
+enum hrtimer_restart ether_tx_usecs_hrtimer(struct hrtimer *data);
+
+/**
+ * @brief
+ * Description:
+ * - Function used to get PTP time
+ *
+ * @param[in] dev:
+ *  - Net device data structure.
+ *  - The ``dev`` structure variable is used to retrieve pointers to struct net_device and the private data structure.
+ *  - Used Structure variables: None
+ *
+ * @param[out] ts:
+ *  - Pointer to the user timestamp data.
+ *
+ * @param[in] ts_type:
+ *  - Time stamp type requested by user. Supported types PTP_TSC_HWTIME, PTP_HWTIME.
+ *
+ * @usage
+ * - Allowed context for the API call
+ *    - Interrupt: No
+ *    - Signal handler: No
+ *    - Thread-Safe: No
+ *    - Sync/Asyc: Sync
+ *    - Re-entrant: No
+ * - Required Privileges: None.
+ * - API Group:
+ *      - Initialization: No
+ *      - Run time: Yes
+ *      - De-initialization: No
+ *
+ * @pre Ethernet driver probe NVETHERNET_LINUX_PIF#ether_probe event
+ * need to be completed successfully with ethernet network device created.
+ *
+ * @return
+ * - "nano seconds" of MAC system time
+ *
+ * @dir
+ * - forward
+ *
+ */
+int ether_get_hw_time(struct net_device *dev,
+		      void *ts, int ts_type);
 
 #endif /* ETHER_CALLBACK_EXPORT_H */

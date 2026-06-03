@@ -374,13 +374,13 @@ enum pva_error pva_kmd_pfsd_register_dma_config(struct pva_kmd_context *ctx)
 		goto out;
 	}
 
-	pfsd_dma_cfg.header.vpu_exec_resource_id =
-		ctx->pfsd_resource_ids.vpu_elf_resource_id;
-
 	// Build dma_register structure locally and copy to buffer
 	dma_register.header.opcode = PVA_OPS_OPCODE_DMA_CONFIG_REGISTER;
 	dma_register.header.size = total_size;
 	dma_register.dma_config_header = pfsd_dma_cfg.header;
+	/* Set vpu_exec_resource_id after struct copy to ensure value is used */
+	dma_register.dma_config_header.vpu_exec_resource_id =
+		ctx->pfsd_resource_ids.vpu_elf_resource_id;
 
 	offset = (uint32_t)sizeof(struct pva_ops_dma_config_register);
 

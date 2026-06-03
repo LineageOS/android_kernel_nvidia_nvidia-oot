@@ -1,13 +1,12 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Copyright (c) 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  */
 
 #ifndef INCLUDE_CAPTURE_IVC_H
 #define INCLUDE_CAPTURE_IVC_H
 
 #include <linux/types.h>
-#include <linux/version.h>
 
 /**
  * @brief Submit the control message binary blob to capture-IVC driver,

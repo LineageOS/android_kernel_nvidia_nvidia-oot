@@ -1,16 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* SPDX-FileCopyrightText: Copyright (c) 2017-2025 NVIDIA CORPORATION & AFFILIATES.
- * All rights reserved.
- *
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
+/*
+ * SPDX-FileCopyrightText: Copyright (c) 2017-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  */
 
 #include <nvidia/conftest.h>
@@ -21,7 +11,6 @@
 #if !defined(_TRACE_CAMERA_COMMON_H) || defined(TRACE_HEADER_MULTI_READ)
 #define _TRACE_CAMERA_COMMON_H
 
-#include <linux/version.h>
 #include <linux/tracepoint.h>
 
 #ifdef NV_IS_L4T

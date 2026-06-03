@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-// SPDX-FileCopyrightText: Copyright (c) 2022-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2022-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include "soc/tegra/camrtc-dbg-messages.h"
 
@@ -89,9 +89,6 @@ struct camrtc_debug {
 	struct icc_path *icc_path;
 	struct camrtc_test_mem mem[CAMRTC_DBG_NUM_MEM_TEST_MEM];
 	struct device *mem_devices[CAMRTC_TEST_CAM_DEVICES];
-	struct ast_regset {
-		struct debugfs_regset32 common, region[8];
-	} ast_regsets[2];
 };
 
 #define NV(x) "nvidia," #x
@@ -1435,7 +1432,8 @@ static int camrtc_run_mem_map(struct tegra_ivc_channel *ch,
 			dev_err(&ch->dev, "failed to map %s mem at 0x%llx\n",
 				dev_name(dev), (u64)mem->iova);
 			sg_free_table(sgt);
-			ret = -ENXIO;
+			sgt->sgl = NULL;
+			return -ENXIO;
 		}
 
 		*return_iova = sgt->sgl->dma_address;
@@ -2181,352 +2179,61 @@ DEFINE_SIMPLE_ATTRIBUTE(camrtc_dbgfs_fops_coverage_enable,
 			camrtc_dbgfs_store_coverage_enable,
 			"%lld\n");
 
-#define TEGRA_APS_AST_CONTROL			0x0
-#define TEGRA_APS_AST_STREAMID_CTL		0x20
-#define TEGRA_APS_AST_REGION_0_SLAVE_BASE_LO	0x100
-#define TEGRA_APS_AST_REGION_0_SLAVE_BASE_HI	0x104
-#define TEGRA_APS_AST_REGION_0_MASK_LO		0x108
-#define TEGRA_APS_AST_REGION_0_MASK_HI		0x10c
-#define TEGRA_APS_AST_REGION_0_MASTER_BASE_LO	0x110
-#define TEGRA_APS_AST_REGION_0_MASTER_BASE_HI	0x114
-#define TEGRA_APS_AST_REGION_0_CONTROL		0x118
-
-#define TEGRA_APS_AST_REGION_STRIDE		0x20
-
-#define AST_RGN_CTRL_VM_INDEX		15
-#define AST_RGN_CTRL_SNOOP		BIT(2)
-
-#define AST_ADDR_MASK64			(~0xfffULL)
-
-struct tegra_ast_region_info {
-	u8  enabled;
-	u8  lock;
-	u8  snoop;
-	u8  non_secure;
-
-	u8  ns_passthru;
-	u8  carveout_id;
-	u8  carveout_al;
-	u8  vpr_rd;
-
-	u8  vpr_wr;
-	u8  vpr_passthru;
-	u8  vm_index;
-	u8  physical;
-
-	u8  stream_id;
-	u8  stream_id_enabled;
-	u8  pad[2];
-
-	u64 slave;
-	u64 mask;
-	u64 master;
-	u32 control;
-};
-
 /**
- * @brief Gets AST region configuration information
+ * @brief Show function for CPU load debugfs file
  *
- * This function reads the configuration of an AST region from hardware
- * registers and populates a region information structure. It performs
- * the following operations:
- * - Reads control register and extracts flags
- * - Reads stream ID configuration
- * - Reads slave, mask, and master address values
- * - Formats the information into the provided structure
- *
- * @param[in] base   Base address of the AST registers
- * @param[in] region Region number to retrieve
- * @param[out] info  Pointer to store the region information
- */
-static void tegra_ast_get_region_info(void __iomem *base,
-			u32 region,
-			struct tegra_ast_region_info *info)
-{
-	u32 offset;
-	u32 vmidx, stream_id, gcontrol, control;
-	u64 lo, hi;
-
-	(void)__builtin_umul_overflow(region, TEGRA_APS_AST_REGION_STRIDE, &offset);
-	control = readl(base + TEGRA_APS_AST_REGION_0_CONTROL + offset);
-	info->control = control;
-
-	info->lock = (control & BIT(0)) != 0;
-	info->snoop = (control & BIT(2)) != 0;
-	info->non_secure = (control & BIT(3)) != 0;
-	info->ns_passthru = (control & BIT(4)) != 0;
-	info->carveout_id = (control >> 5) & (0x1f);
-	info->carveout_al = (control >> 10) & 0x3;
-	info->vpr_rd = (control & BIT(12)) != 0;
-	info->vpr_wr = (control & BIT(13)) != 0;
-	info->vpr_passthru = (control & BIT(14)) != 0;
-	vmidx = (control >> AST_RGN_CTRL_VM_INDEX) & 0xf;
-	info->vm_index = vmidx;
-	info->physical = (control & BIT(19)) != 0;
-
-	if (info->physical) {
-		gcontrol = readl(base + TEGRA_APS_AST_CONTROL);
-		info->stream_id = (gcontrol >> 22) & 0x7F;
-		info->stream_id_enabled = 1;
-	} else {
-		stream_id = readl(base + TEGRA_APS_AST_STREAMID_CTL +
-				(4 * vmidx));
-		info->stream_id = (stream_id >> 8) & 0xFF;
-		info->stream_id_enabled = (stream_id & BIT(0)) != 0;
-	}
-
-	lo = readl(base + TEGRA_APS_AST_REGION_0_SLAVE_BASE_LO + offset);
-	hi = readl(base + TEGRA_APS_AST_REGION_0_SLAVE_BASE_HI + offset);
-
-	info->slave = ((hi << 32U) + lo) & AST_ADDR_MASK64;
-	info->enabled = (lo & BIT(0)) != 0;
-
-	hi = readl(base + TEGRA_APS_AST_REGION_0_MASK_HI + offset);
-	lo = readl(base + TEGRA_APS_AST_REGION_0_MASK_LO + offset);
-
-	info->mask = ((hi << 32) + lo) | ~AST_ADDR_MASK64;
-
-	hi = readl(base + TEGRA_APS_AST_REGION_0_MASTER_BASE_HI + offset);
-	lo = readl(base + TEGRA_APS_AST_REGION_0_MASTER_BASE_LO + offset);
-
-	info->master = ((hi << 32U) + lo) & AST_ADDR_MASK64;
-}
-
-/**
- * @brief Maps I/O memory by name from device tree
- *
- * This function maps I/O memory based on a register name from the device tree.
+ * This function is called when the CPU load debugfs file is read.
+ * It retrieves CPU load statistics from the camera-rtcpu and displays them.
  * It performs the following operations:
- * - Looks up the register index by name in the device tree
- * - Maps the I/O memory using @ref of_iomap if found
- *
- * @param[in] dev   Pointer to the device structure
- * @param[in] name  Name of the register to map
- *
- * @retval (void __iomem *) Mapped I/O memory address on success
- * @retval (void __iomem *) Error pointer on failure
- */
-static void __iomem *iomap_byname(struct device *dev, const char *name)
-{
-	int index = of_property_match_string(dev->of_node, "reg-names", name);
-	if (index < 0)
-		return IOMEM_ERR_PTR(-ENOENT);
-
-	return of_iomap(dev->of_node, index);
-}
-
-/**
- * @brief Show function for AST region debugfs file
- *
- * This function displays information about an AST (Address Space Translator) region
- * in a sequence file. It performs the following operations:
- * - Gets the region configuration using @ref tegra_ast_get_region_info
- * - Displays whether the region is enabled or disabled
- * - If enabled, displays details about the region's configuration:
- *   - Slave and master addresses
- *   - Region size
- *   - Security flags (lock, snoop, non-secure, etc.)
- *   - Carveout settings
- *   - VPR settings
- *   - VM index and physical mode
- *   - Stream ID information
- *
- * @param[in] file  Pointer to the sequence file for output
- * @param[in] base  Base address of the AST registers
- * @param[in] index AST region index to display
- */
-static void camrtc_dbgfs_show_ast_region(struct seq_file *file,
-						void __iomem *base, u32 index)
-{
-	struct tegra_ast_region_info info;
-
-	tegra_ast_get_region_info(base, index, &info);
-
-	seq_printf(file, "ast region %u %s\n", index,
-		info.enabled ? "enabled" : "disabled");
-
-	if (!info.enabled)
-		return;
-
-	seq_printf(file,
-		"\tslave=0x%llx\n"
-		"\tmaster=0x%llx\n"
-		"\tsize=0x%llx\n"
-		"\tlock=%u snoop=%u non_secure=%u ns_passthru=%u\n"
-		"\tcarveout_id=%u carveout_al=%u\n"
-		"\tvpr_rd=%u vpr_wr=%u vpr_passthru=%u\n"
-		"\tvm_index=%u physical=%u\n"
-		"\tstream_id=%u (enabled=%u)\n",
-		info.slave, info.master, info.mask + 1,
-		info.lock, info.snoop,
-		info.non_secure, info.ns_passthru,
-		info.carveout_id, info.carveout_al,
-		info.vpr_rd, info.vpr_wr, info.vpr_passthru,
-		info.vm_index, info.physical,
-		info.stream_id, info.stream_id_enabled);
-}
-
-/**
- * @brief Structure to hold information about an AST node in debugfs
- *
- * This structure represents an AST (Address Space Translator) node
- * in the debugfs interface, containing references to the IVC channel,
- * name of the AST, and a bitmask of regions to display.
- */
-struct camrtc_dbgfs_ast_node {
-	struct tegra_ivc_channel *ch;  /**< IVC channel for the AST */
-	const char *name;              /**< Name of the AST */
-	uint8_t mask;                  /**< Bitmask of regions to display */
-};
-
-/**
- * @brief Show function for AST debugfs file
- *
- * This function is called when an AST debugfs file is read.
- * It displays information about the specified AST regions.
- * It performs the following operations:
- * - Gets the AST node from the private data
- * - Maps the AST registers using @ref iomap_byname
- * - Iterates through the regions specified in the mask
- * - Displays each region using @ref camrtc_dbgfs_show_ast_region
- * - Unmaps the registers with @ref iounmap
+ * - Sends a GET_CPU_LOAD request to the camera-rtcpu
+ * - Receives the response containing CPU load statistics
+ * - Displays load percentage, idle percentage, cycles per second, and timing info
  *
  * @param[in] file  Pointer to the sequence file
  * @param[in] data  Private data pointer (unused)
  *
  * @retval 0 on success
- * @retval -ENOMEM if @ref iomap_byname fails
+ * @retval -EPROTO if response status is not OK
+ * @retval (int) Error code from @ref camrtc_ivc_dbg_xact
  */
-static int camrtc_dbgfs_show_ast(struct seq_file *file,
-				void *data)
+static int camrtc_dbgfs_show_cpuload(struct seq_file *file, void *data)
 {
-	struct camrtc_dbgfs_ast_node *node = file->private;
-	void __iomem *ast;
-	int i;
+	struct tegra_ivc_channel *ch = file->private;
+	struct camrtc_dbg_request req = {
+		.req_type = CAMRTC_REQ_GET_CPU_LOAD,
+	};
+	struct camrtc_dbg_response resp;
+	int ret;
 
-	ast = iomap_byname(camrtc_get_device(node->ch), node->name);
-	if (ast == NULL)
-		return -ENOMEM;
+	ret = camrtc_ivc_dbg_xact(ch, &req, &resp, 0);
+	if (ret != 0)
+		return ret;
 
-	for (i = 0; i <= 7; i++) {
-		if (!(node->mask & BIT(i)))
-			continue;
+	if (resp.status != CAMRTC_STATUS_OK)
+		return -EPROTO;
 
-		camrtc_dbgfs_show_ast_region(file, ast, i);
+	seq_printf(file, "CPU Load:    %u.%u%%\n",
+		   resp.data.cpu_load.load_permille / 10,
+		   resp.data.cpu_load.load_permille % 10);
+	seq_printf(file, "Idle:        %u.%u%%\n",
+		   resp.data.cpu_load.idle_permille / 10,
+		   resp.data.cpu_load.idle_permille % 10);
+	seq_printf(file, "Cycles/sec:  %u\n", resp.data.cpu_load.cycles_per_second);
+	seq_printf(file, "Idle time:   %u us\n", resp.data.cpu_load.idle_time_us);
+	seq_printf(file, "Total time:  %u us\n", resp.data.cpu_load.total_time_us);
 
-		if (node->mask & (node->mask - 1)) /* are multiple bits set? */
-			seq_puts(file, "\n");
-	}
-
-	iounmap(ast);
 	return 0;
 }
 
 /**
- * @brief File operations for AST
+ * @brief File operations for CPU load
  *
- * This macro defines the file operations for the AST debugfs file.
- * It specifies that @ref camrtc_dbgfs_show_ast should be called
+ * This macro defines the file operations for the CPU load debugfs file.
+ * It specifies that @ref camrtc_dbgfs_show_cpuload should be called
  * when the file is read.
  */
-DEFINE_SEQ_FOPS(camrtc_dbgfs_fops_ast, camrtc_dbgfs_show_ast);
+DEFINE_SEQ_FOPS(camrtc_dbgfs_fops_cpuload, camrtc_dbgfs_show_cpuload);
 
-/**
- * @brief Common AST register definitions
- *
- * This array defines the common registers in the AST (Address Space Translator)
- * that are displayed in the debugfs interface.
- */
-static const struct debugfs_reg32 ast_common_regs[] = {
-	{ .name = "control", 0x0 },
-	{ .name = "error_status", 0x4 },
-	{ .name = "error_addr_lo", 0x8 },
-	{ .name = "error_addr_h", 0xC },
-	{ .name = "streamid_ctl_0", 0x20 },
-	{ .name = "streamid_ctl_1", 0x24 },
-	{ .name = "streamid_ctl_2", 0x28 },
-	{ .name = "streamid_ctl_3", 0x2C },
-	{ .name = "streamid_ctl_4", 0x30 },
-	{ .name = "streamid_ctl_5", 0x34 },
-	{ .name = "streamid_ctl_6", 0x38 },
-	{ .name = "streamid_ctl_7", 0x3C },
-	{ .name = "streamid_ctl_8", 0x40 },
-	{ .name = "streamid_ctl_9", 0x44 },
-	{ .name = "streamid_ctl_10", 0x48 },
-	{ .name = "streamid_ctl_11", 0x4C },
-	{ .name = "streamid_ctl_12", 0x50 },
-	{ .name = "streamid_ctl_13", 0x54 },
-	{ .name = "streamid_ctl_14", 0x58 },
-	{ .name = "streamid_ctl_15", 0x5C },
-	{ .name = "write_block_status", 0x60 },
-	{ .name = "read_block_status", 0x64 },
-};
-
-/**
- * @brief AST region register definitions
- *
- * This array defines the registers for each AST region that are
- * displayed in the debugfs interface.
- */
-static const struct debugfs_reg32 ast_region_regs[] = {
-	{ .name = "slave_lo", 0x100 },
-	{ .name = "slave_hi", 0x104 },
-	{ .name = "mask_lo", 0x108 },
-	{ .name = "mask_hi", 0x10C },
-	{ .name = "master_lo", 0x110 },
-	{ .name = "master_hi", 0x114 },
-	{ .name = "control", 0x118 },
-};
-
-/**
- * @brief Creates debugfs files for AST registers
- *
- * This function creates debugfs files to display AST registers.
- * It performs the following operations:
- * - Maps the AST registers using @ref iomap_byname
- * - Sets up the common registers debugfs file
- * - Creates a debugfs file for each region's registers
- *
- * @param[in] ch       Pointer to the IVC channel
- * @param[in] dir      Parent debugfs directory
- * @param[in] ars      Pointer to the AST regset structure
- * @param[in] ast_name Name of the AST
- *
- * @retval 0 on success
- * @retval -ENOMEM if @ref iomap_byname fails
- */
-static int ast_regset_create_files(struct tegra_ivc_channel *ch,
-				struct dentry *dir,
-				struct ast_regset *ars,
-				char const *ast_name)
-{
-	void __iomem *base;
-	int i;
-
-	base = iomap_byname(camrtc_get_device(ch), ast_name);
-	if (IS_ERR_OR_NULL(base))
-		return -ENOMEM;
-
-	ars->common.base = base;
-	ars->common.regs = ast_common_regs;
-	ars->common.nregs = ARRAY_SIZE(ast_common_regs);
-
-	debugfs_create_regset32("regs-common", 0444, dir, &ars->common);
-
-	for (i = 0; i < ARRAY_SIZE(ars->region); i++) {
-		char name[16];
-
-		snprintf(name, sizeof(name), "regs-region%u", i);
-
-		ars->region[i].base = base + i * TEGRA_APS_AST_REGION_STRIDE;
-		ars->region[i].regs = ast_region_regs;
-		ars->region[i].nregs = ARRAY_SIZE(ast_region_regs);
-
-		debugfs_create_regset32(name, 0444, dir, &ars->region[i]);
-	}
-
-	return 0;
-}
 
 /**
  * @brief Populates the debugfs directory with camera RTCPU debug files
@@ -2538,7 +2245,6 @@ static int ast_regset_create_files(struct tegra_ivc_channel *ch,
  * - Creates files for falcon coverage data and enable controls
  * - Creates files for version, reboot, ping, SM-ping, log-level, etc.
  * - Sets up timeout, test case, and test memory debugfs files
- * - Creates AST debugfs files if AST is available
  *
  * @param[in] ch  Pointer to the IVC channel
  *
@@ -2552,8 +2258,7 @@ static int camrtc_debug_populate(struct tegra_ivc_channel *ch)
 	struct dentry *coverage;
 	struct dentry *vi;
 	struct dentry *isp;
-	struct camrtc_dbgfs_ast_node *ast_nodes;
-	unsigned int i, dma, region;
+	unsigned int i;
 	char const *name = "camrtc";
 
 	of_property_read_string(ch->dev.of_node, NV(debugfs), &name);
@@ -2668,47 +2373,12 @@ static int camrtc_debug_populate(struct tegra_ivc_channel *ch)
 			goto error;
 	}
 
-	ast_nodes = devm_kzalloc(&ch->dev, 18 * sizeof(*ast_nodes),
-					GFP_KERNEL);
-	if (unlikely(ast_nodes == NULL))
+	dir = debugfs_create_dir("perf", crd->root);
+	if (dir == NULL)
 		goto error;
 
-	for (dma = 0; dma <= 1; dma++) {
-		const char *ast_name = dma ? "ast-dma" : "ast-cpu";
-
-		dir = debugfs_create_dir(ast_name, crd->root);
-		if (dir == NULL)
-			goto error;
-
-		ast_regset_create_files(ch, dir, &crd->ast_regsets[dma],
-					ast_name);
-
-		ast_nodes->ch = ch;
-		ast_nodes->name = ast_name;
-		ast_nodes->mask = 0xff;
-
-		if (!debugfs_create_file("all", 0444, dir, ast_nodes,
-						&camrtc_dbgfs_fops_ast))
-			goto error;
-
-		ast_nodes++;
-
-		for (region = 0; region < 8; region++) {
-			char name[8];
-
-			snprintf(name, sizeof name, "%u", region);
-
-			ast_nodes->ch = ch;
-			ast_nodes->name = ast_name;
-			ast_nodes->mask = BIT(region);
-
-			if (!debugfs_create_file(name, 0444, dir, ast_nodes,
-						&camrtc_dbgfs_fops_ast))
-				goto error;
-
-			ast_nodes++;
-		}
-	}
+	if (!debugfs_create_file("cpu", 0444, dir, ch, &camrtc_dbgfs_fops_cpuload))
+		goto error;
 
 	return 0;
 error:

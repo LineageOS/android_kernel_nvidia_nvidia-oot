@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2015-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2015-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include <nvidia/conftest.h>
 
@@ -13,15 +13,12 @@
 #include <soc/tegra/fuse.h>
 #include <linux/reset.h>
 #include <soc/tegra/pmc.h>
-#include <linux/gpio/consumer.h>
-#include <linux/gpio.h>
 #include <linux/jiffies.h>
 #include <soc/tegra/fuse-helper.h>
 
 #include <linux/of.h>
 #include <linux/of_device.h>
 #include <linux/of_platform.h>
-#include <linux/of_gpio.h>
 #include <linux/iommu.h>
 #include <linux/pinctrl/consumer.h>
 

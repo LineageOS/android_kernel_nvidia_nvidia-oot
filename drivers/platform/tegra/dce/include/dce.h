@@ -112,7 +112,8 @@
 #define DCE_WAIT_ADMIN_IPC		2
 #define DCE_WAIT_SC7_ENTER		3
 #define DCE_WAIT_LOG			4
-#define DCE_MAX_WAIT			5
+#define DCE_WAIT_DEINIT		5
+#define DCE_MAX_WAIT			6
 
 /**
  * DCE IPC timeout values.
@@ -405,6 +406,7 @@ static inline void dce_set_load_fw_status(struct tegra_dce *d, bool val)
 void dce_driver_start(struct tegra_dce *d);
 void dce_driver_stop(struct tegra_dce *d);
 int dce_driver_init(struct tegra_dce *d);
+int dce_deinit(struct tegra_dce *d);
 void dce_driver_deinit(struct tegra_dce *d);
 
 int dce_start_boot_flow(struct tegra_dce *d);
@@ -428,6 +430,8 @@ int dce_admin_send_cmd_echo(struct tegra_dce *d,
 			    struct dce_ipc_message *msg);
 int dce_admin_send_cmd_rm_bootstrap(struct tegra_dce *d,
 			    struct dce_ipc_message *msg);
+int dce_admin_send_cmd_deinit(struct tegra_dce *d,
+			       struct dce_ipc_message *msg);
 int dce_admin_send_cmd_ext_test(struct tegra_dce *d,
 				struct dce_ipc_message *msg);
 int dce_admin_send_prepare_sc7(struct tegra_dce *d,
@@ -436,6 +440,8 @@ int dce_admin_send_enter_sc7(struct tegra_dce *d,
 			     struct dce_ipc_message *msg);
 int dce_admin_handle_ipc_requested_event(struct tegra_dce *d, void *params);
 int dce_admin_handle_ipc_received_event(struct tegra_dce *d, void *params);
+int dce_handle_deinit_requested_event(struct tegra_dce *d, void *params);
+int dce_handle_deinit_done_received_event(struct tegra_dce *d, void *params);
 int dce_admin_send_cmd_get_perf_stat(struct tegra_dce *d,
 				     struct dce_ipc_message *msg);
 int dce_admin_send_cmd_set_perf_stat(struct tegra_dce *d,
@@ -473,6 +479,7 @@ void dce_waiters_deinit(struct tegra_dce *d);
  */
 void dce_config_ast(struct tegra_dce *d);
 int dce_reset_dce(struct tegra_dce *d);
+int dce_reset_dce_module(struct tegra_dce *d);
 
 #ifdef CONFIG_DEBUG_FS
 void dce_init_debug(struct tegra_dce *d);

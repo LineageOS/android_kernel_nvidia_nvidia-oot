@@ -2,7 +2,7 @@
 # Copyright (c) 2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 include <uapi/linux/fcntl.h>
-include "cam_fsync.h"
+include <uapi/media/cam_fsync.h>
 
 resource fd_cam_fsync[fd]
 

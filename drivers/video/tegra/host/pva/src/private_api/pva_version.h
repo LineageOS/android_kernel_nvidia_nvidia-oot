@@ -9,7 +9,7 @@ extern "C" {
 #endif
 
 /** rief Specifies the PVA system software commit ID. */
-#define PVA_SYSSW_COMMIT_ID "3352231e246ddab0b969a7977dadba002e7723d8"
+#define PVA_SYSSW_COMMIT_ID "8c8c057f71ef2df5566172eaa51050c8c4470618"
 
 #ifdef __cplusplus
 }

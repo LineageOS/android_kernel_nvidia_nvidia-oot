@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * SPDX-FileCopyrightText: Copyright (C) 2015-2025 NVIDIA CORPORATION.  All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (C) 2015-2026 NVIDIA CORPORATION.  All rights reserved.
  */
 
 #include <linux/bitops.h>
@@ -182,6 +182,15 @@ static int vic_riscv_boot(struct vic *vic)
 {
 	int err;
 	u32 val;
+
+
+	/*
+	 * If the power domain is set to always-on, the hardware doesn't
+	 * get reset during runtime suspend. In that case, skip the boot.
+	 */
+	val = readl(vic->regs + VIC_RISCV_CPUCTL);
+	if (VIC_RISCV_CPUCTL_ACTIVE_STATE_V(val) == VIC_RISCV_CPUCTL_ACTIVE_STATE_ACTIVE_V)
+		return 0;
 
 	vic_writel(vic, VIC_RISCV_BCR_CTRL_CORE_SELECT_RISCV, VIC_RISCV_BCR_CTRL);
 
@@ -671,6 +680,12 @@ static int __maybe_unused vic_runtime_resume(struct device *dev)
 	if (err < 0)
 		return err;
 
+	err = vic_set_rate(vic, ULONG_MAX);
+	if (err < 0) {
+		dev_err(dev, "failed to set clock rate: %d\n", err);
+		goto disable;
+	}
+
 	usleep_range(10, 20);
 
 	err = reset_control_deassert(vic->rst);
@@ -700,8 +715,6 @@ static int __maybe_unused vic_runtime_resume(struct device *dev)
 			goto assert;
 	}
 
-	/* Forcely set frequency as Fmax when device is resumed back */
-	vic->devfreq->resume_freq = vic->devfreq->scaling_max_freq;
 	err = devfreq_resume_device(vic->devfreq);
 	if (err < 0)
 		goto assert;
@@ -723,6 +736,9 @@ static int __maybe_unused vic_runtime_resume(struct device *dev)
 assert:
 	reset_control_assert(vic->rst);
 disable:
+	if (vic->icc_write)
+		icc_set_bw(vic->icc_write, 0, 0);
+
 	clk_disable_unprepare(vic->clk);
 	return err;
 }
@@ -949,9 +965,17 @@ static int vic_probe(struct platform_device *pdev)
 	}
 
 	vic->icc_write = devm_of_icc_get(dev, "write");
-	if (IS_ERR(vic->icc_write))
-		return dev_err_probe(&pdev->dev, PTR_ERR(vic->icc_write),
-				     "failed to get icc write handle\n");
+	if (IS_ERR(vic->icc_write)) {
+		if (dev_to_node(dev) == 1) {
+			/* Socket 1 WAR: Continue without ICC */
+			dev_info(&pdev->dev, "Socket 1 WAR - ICC write handle failed (err=%ld), continuing without ICC\n",
+				PTR_ERR(vic->icc_write));
+			vic->icc_write = NULL;
+		} else {
+			return dev_err_probe(&pdev->dev, PTR_ERR(vic->icc_write),
+					     "failed to get icc write handle\n");
+		}
+	}
 
 	if (!dev->pm_domain) {
 		vic->rst = devm_reset_control_get(dev, "vic");

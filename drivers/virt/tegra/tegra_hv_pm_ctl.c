@@ -18,6 +18,7 @@
 #include <linux/sched.h>
 #include <linux/pid.h>
 #include <linux/atomic.h>
+#include <linux/types.h>
 
 #ifdef CONFIG_PM_SLEEP
 #include <linux/suspend.h>
@@ -27,18 +28,19 @@
 #endif
 #include <soc/tegra/virt/hv-ivc.h>
 #include <soc/tegra/fuse.h>
-#include <soc/tegra/virt/tegra_hv_pm_ctl.h>
 #include <soc/tegra/virt/syscalls.h>
 #include <soc/tegra/virt/tegra_hv_sysmgr.h>
-
 
 #define DRV_NAME	"tegra_hv_pm_ctl"
 #define CHAR_DEV_COUNT	1
 #define MAX_GUESTS_NUM	8
+#define ENABLE_PM_SERVER_DT_NODE	"enable_pm_server"
 
 #ifdef CONFIG_PM_SLEEP
 #define NETLINK_USERSPACE_PM	30
 #define MAX_USER_CLIENT		64
+/* Supplimentry group for the pm socket */
+#define NETLINK_PMSOCKET_SUPP_GROUP	4000
 #define USERSPACE_RESPONSE_TIMEOUT msecs_to_jiffies(5000)
 
 static struct sock *nl_sk;
@@ -74,8 +76,13 @@ int (*tegra_hv_pm_ctl_prepare_shutdown)(void);
 /* Global driver data */
 static struct tegra_hv_pm_ctl *tegra_hv_pm_ctl_data;
 
+/* Global flag to store enable_pm_server DT node presence */
+static bool pm_server_enabled;
+
+#ifndef CONFIG_KERNEL_BUILD_WITH_PROD_DEFCONFIG
 /* Guest ID for state */
 static u32 guest_id;
+#endif
 
 static int tegra_hv_pm_ctl_get_guest_state(u32 vmid, u32 *state);
 
@@ -142,7 +149,7 @@ static int do_wait_for_guests_inactive(void)
 	return 0;
 }
 
-int tegra_hv_pm_ctl_trigger_sys_suspend(void)
+static int tegra_hv_pm_ctl_trigger_sys_suspend(void)
 {
 	int ret;
 
@@ -168,9 +175,8 @@ int tegra_hv_pm_ctl_trigger_sys_suspend(void)
 
 	return 0;
 }
-EXPORT_SYMBOL(tegra_hv_pm_ctl_trigger_sys_suspend);
 
-int tegra_hv_pm_ctl_trigger_sys_shutdown(void)
+static int tegra_hv_pm_ctl_trigger_sys_shutdown(void)
 {
 	int ret;
 
@@ -198,9 +204,8 @@ int tegra_hv_pm_ctl_trigger_sys_shutdown(void)
 
 	return 0;
 }
-EXPORT_SYMBOL(tegra_hv_pm_ctl_trigger_sys_shutdown);
 
-int tegra_hv_pm_ctl_trigger_sys_reboot(void)
+static int tegra_hv_pm_ctl_trigger_sys_reboot(void)
 {
 	int ret;
 
@@ -219,8 +224,8 @@ int tegra_hv_pm_ctl_trigger_sys_reboot(void)
 
 	return 0;
 }
-EXPORT_SYMBOL(tegra_hv_pm_ctl_trigger_sys_reboot);
 
+#ifndef CONFIG_KERNEL_BUILD_WITH_PROD_DEFCONFIG
 static int tegra_hv_pm_ctl_trigger_guest_resume(u32 vmid)
 {
 	int ret;
@@ -240,6 +245,7 @@ static int tegra_hv_pm_ctl_trigger_guest_resume(u32 vmid)
 
 	return 0;
 }
+#endif
 
 static int tegra_hv_pm_ctl_get_guest_state(u32 vmid, u32 *state)
 {
@@ -404,6 +410,7 @@ static const struct file_operations tegra_hv_pm_ctl_fops = {
 	.release	= tegra_hv_pm_ctl_release,
 };
 
+#ifndef CONFIG_KERNEL_BUILD_WITH_PROD_DEFCONFIG
 static ssize_t ivc_id_show(struct device *dev,
 			   struct device_attribute *attr, char *buf)
 {
@@ -435,6 +442,7 @@ static ssize_t ivc_peer_vmid_show(struct device *dev,
 
 	return snprintf(buf, PAGE_SIZE, "%d\n", data->ivck->peer_vmid);
 }
+#endif
 
 static ssize_t trigger_sys_suspend_store(struct device *dev,
 					  struct device_attribute *attr,
@@ -521,6 +529,7 @@ static ssize_t trigger_sys_reboot_store(struct device *dev,
 	return count;
 }
 
+#ifndef CONFIG_KERNEL_BUILD_WITH_PROD_DEFCONFIG
 static ssize_t trigger_guest_suspend_store(struct device *dev,
 					struct device_attribute *attr,
 					const char *buf, size_t count)
@@ -651,31 +660,36 @@ static ssize_t wait_for_guests_show(struct device *dev,
 
 	return count;
 }
+#endif
 
+#ifndef CONFIG_KERNEL_BUILD_WITH_PROD_DEFCONFIG
 static DEVICE_ATTR_RO(ivc_id);
 static DEVICE_ATTR_RO(ivc_frame_size);
 static DEVICE_ATTR_RO(ivc_nframes);
 static DEVICE_ATTR_RO(ivc_peer_vmid);
-static DEVICE_ATTR_WO(trigger_sys_suspend);
-static DEVICE_ATTR_WO(trigger_sys_shutdown);
-static DEVICE_ATTR_WO(trigger_sys_reboot);
 static DEVICE_ATTR_WO(trigger_guest_suspend);
 static DEVICE_ATTR_WO(trigger_guest_resume);
 static DEVICE_ATTR_RW(guest_state);
 static DEVICE_ATTR_RO(wait_for_guests);
+#endif
+static DEVICE_ATTR_WO(trigger_sys_suspend);
+static DEVICE_ATTR_WO(trigger_sys_shutdown);
+static DEVICE_ATTR_WO(trigger_sys_reboot);
 
 static struct attribute *tegra_hv_pm_ctl_attributes[] = {
+#ifndef CONFIG_KERNEL_BUILD_WITH_PROD_DEFCONFIG
 	&dev_attr_ivc_id.attr,
 	&dev_attr_ivc_frame_size.attr,
 	&dev_attr_ivc_nframes.attr,
 	&dev_attr_ivc_peer_vmid.attr,
-	&dev_attr_trigger_sys_suspend.attr,
-	&dev_attr_trigger_sys_shutdown.attr,
-	&dev_attr_trigger_sys_reboot.attr,
 	&dev_attr_trigger_guest_suspend.attr,
 	&dev_attr_trigger_guest_resume.attr,
 	&dev_attr_guest_state.attr,
 	&dev_attr_wait_for_guests.attr,
+#endif
+	&dev_attr_trigger_sys_suspend.attr,
+	&dev_attr_trigger_sys_shutdown.attr,
+	&dev_attr_trigger_sys_reboot.attr,
 	NULL
 };
 
@@ -786,6 +800,24 @@ static int tegra_hv_pm_ctl_parse_dt(struct tegra_hv_pm_ctl *data)
 	return 0;
 }
 
+/* Helper function to check if device tree node is present */
+static bool is_device_node_present(const char *node_name)
+{
+	struct device_node *node;
+	bool node_present = false;
+
+	node = of_find_node_by_name(NULL, node_name);
+	if (node) {
+		node_present = true;
+		of_node_put(node);
+		pr_info("Found %s node in device tree\n", node_name);
+	} else {
+		pr_info("No %s node found in device tree\n", node_name);
+	}
+
+	return node_present;
+}
+
 #ifdef CONFIG_PM_SLEEP
 
 static void pm_recv_msg(struct sk_buff *skb)
@@ -794,8 +826,16 @@ static void pm_recv_msg(struct sk_buff *skb)
 	struct nlmsghdr *nlh;
 	static uint32_t i;
 	void *ptr = skb->data;
+	kgid_t gid;
 
 	nlh = (struct nlmsghdr *)ptr;
+
+	/* check whether process have NETLINK_PMSOCKET_SUPP_GROUP supplementary group set */
+	gid = make_kgid(current_user_ns(), NETLINK_PMSOCKET_SUPP_GROUP);
+	if (!in_group_p(gid)) {
+		dev_err(data->dev, "error: unauthorized client \"%s\" trying to communicate\n", current->comm);
+		return;
+	}
 
 	/*process messages coming from User Space only*/
 	if (nlh->nlmsg_pid != 0) {
@@ -1026,7 +1066,10 @@ static int netlink_pm_notify(struct notifier_block *nb,
 	case PM_SUSPEND_PREPARE:
 
 		/*Send the message to userspace*/
-		msg_size = strlen(suspend_req);
+		if (check_add_overflow(strlen(suspend_req), (size_t)1u, &msg_size)) {
+			dev_err(data->dev, "Overflow computing message size for suspend_req\n");
+			return NOTIFY_BAD;
+		}
 
 		ret = notify_client(suspend_req, msg_size);
 		if (ret != 0)
@@ -1048,7 +1091,10 @@ static int netlink_pm_notify(struct notifier_block *nb,
 	case PM_POST_SUSPEND:
 
 		/*Send the message to userspace*/
-		msg_size = strlen(resume_req);
+		if (check_add_overflow(strlen(resume_req), (size_t)1u, &msg_size)) {
+			dev_err(data->dev, "Overflow computing message size for resume_req\n");
+			return NOTIFY_BAD;
+		}
 
 		ret = notify_client(resume_req, msg_size);
 		if (ret != 0)
@@ -1076,6 +1122,44 @@ static struct notifier_block netlink_pm_nb = {
 };
 #endif
 
+/**
+ * @defgroup tegra_hv_pmctl_framework Tegra HV PMCTL Driver Framework
+ * @{
+ */
+
+/**
+ * @brief          Probe function to initialize tegra hv pm ctl driver
+ *                 This function does below initialization :-
+ *                 1. Create sysfs nodes for reboot/shutdown/suspend ops
+ *                 2. Initlaize ivc queue connection with peer end for communication.
+ *                 3. Register with netlink layer to communicate with userspace process for sc7 ops
+ *                 4. Create character device to communicate to kernel space by userspace.
+ *
+ * @param[in]      pdev Platform device structure representing driver
+ *
+ * @retval         0 On uccess and an error code otherwise
+ *
+ * @pre
+ *                 - Tegra hypervisor driver should have been initialized.
+ *                 - This driver should be enabled on virtual/hypervisor environment only.
+ *
+ * @post
+ *                 - Tegra pm ctl driver will be operational for shutdown/reboot/suspend
+ *
+ * @usage
+ *                 - This driver will be used to trigger shutdown/reboot/suspend operations
+ *                 - Userspace client can register and deregister for suspend notifications
+ *                 - Allowed context for the API call
+ *                   - Interrupt handler: No
+ *                   - Signal handler: No
+ *                   - Thread-safe: No
+ *                   - Async/Sync: Sync
+ *                   - Re-entrant: No
+ *                 - API Group
+ *                   - Init: Yes
+ *                   - Runtime: No
+ *                   - De-Init: No
+ */
 static int tegra_hv_pm_ctl_probe(struct platform_device *pdev)
 {
 	struct tegra_hv_pm_ctl *data;
@@ -1107,6 +1191,9 @@ static int tegra_hv_pm_ctl_probe(struct platform_device *pdev)
 	mutex_init(&data->mutex_lock);
 	init_waitqueue_head(&data->wq);
 
+	/* Check enable_pm_server DT node presence once and store the result */
+	pm_server_enabled = is_device_node_present(ENABLE_PM_SERVER_DT_NODE);
+
 	ret = tegra_hv_pm_ctl_parse_dt(data);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "%s: Failed to parse device tree, %d\n",
@@ -1114,29 +1201,35 @@ static int tegra_hv_pm_ctl_probe(struct platform_device *pdev)
 		return ret;
 	}
 
+	/* Create class, sysfs entries, and setup IVC only if enable_pm_server DT node is not present */
+	if (!pm_server_enabled) {
 #if defined(NV_CLASS_CREATE_HAS_NO_OWNER_ARG) /* Linux v6.4 */
-	data->class = class_create(DRV_NAME);
+		data->class = class_create(DRV_NAME);
 #else
-	data->class = class_create(THIS_MODULE, DRV_NAME);
+		data->class = class_create(THIS_MODULE, DRV_NAME);
 #endif
-	if (IS_ERR(data->class)) {
-		dev_err(data->dev, "%s: Failed to create class, %ld\n",
-			__func__, PTR_ERR(data->class));
-		return PTR_ERR(data->class);
-	}
+		if (IS_ERR(data->class)) {
+			dev_err(data->dev, "%s: Failed to create class, %ld\n",
+				__func__, PTR_ERR(data->class));
+			return PTR_ERR(data->class);
+		}
 
-	ret = sysfs_create_group(&pdev->dev.kobj, &tegra_hv_pm_ctl_attr_group);
-	if (ret < 0) {
-		dev_err(&pdev->dev, "%s: Failed to create sysfs group, %d\n",
-			__func__, ret);
-		goto error_class_destroy;
-	}
+		ret = sysfs_create_group(&pdev->dev.kobj, &tegra_hv_pm_ctl_attr_group);
+		if (ret < 0) {
+			dev_err(&pdev->dev, "%s: Failed to create sysfs group, %d\n",
+				__func__, ret);
+			goto error_class_destroy;
+		}
 
-	ret = tegra_hv_pm_ctl_setup(data);
-	if (ret < 0) {
-		dev_err(&pdev->dev, "%s: Failed to setup device, %d\n",
-			__func__, ret);
-		goto error_sysfs_remove_group;
+		ret = tegra_hv_pm_ctl_setup(data);
+		if (ret < 0) {
+			dev_err(&pdev->dev, "%s: Failed to setup device, %d\n",
+				__func__, ret);
+			goto error_sysfs_remove_group;
+		}
+		dev_info(&pdev->dev, "PM management: sysfs entries and IVC setup done\n");
+	} else {
+		dev_info(&pdev->dev, "PM management: sysfs entries and IVC setup skipped\n");
 	}
 
 	tegra_hv_pm_ctl_data = data;
@@ -1165,10 +1258,11 @@ static int tegra_hv_pm_ctl_probe(struct platform_device *pdev)
 	return 0;
 
 error_sysfs_remove_group:
-	sysfs_remove_group(&pdev->dev.kobj, &tegra_hv_pm_ctl_attr_group);
+	if (!pm_server_enabled)
+		sysfs_remove_group(&pdev->dev.kobj, &tegra_hv_pm_ctl_attr_group);
 error_class_destroy:
-	class_destroy(data->class);
-
+	if (!pm_server_enabled)
+		class_destroy(data->class);
 	return ret;
 }
 
@@ -1177,9 +1271,14 @@ static int tegra_hv_pm_ctl_remove(struct platform_device *pdev)
 	struct tegra_hv_pm_ctl *data = platform_get_drvdata(pdev);
 
 	tegra_hv_pm_ctl_data = NULL;
-	tegra_hv_pm_ctl_cleanup(data);
-	sysfs_remove_group(&pdev->dev.kobj, &tegra_hv_pm_ctl_attr_group);
-	class_destroy(data->class);
+
+	/* Perform cleanup only if class, sysfs entries, and IVC are created */
+	if (!pm_server_enabled) {
+		tegra_hv_pm_ctl_cleanup(data);
+		/* Remove sysfs entries only if enable_pm_server DT node is not present */
+		sysfs_remove_group(&pdev->dev.kobj, &tegra_hv_pm_ctl_attr_group);
+		class_destroy(data->class);
+	}
 
 	return 0;
 }
@@ -1190,6 +1289,39 @@ static const struct of_device_id tegra_hv_pm_ctl_match[] = {
 };
 MODULE_DEVICE_TABLE(of, tegra_hv_pm_ctl_match);
 
+/**
+ * @brief          Remove function to deinitilaize tegra pm ctl driver.
+ *                 This function does below deinitialization :-
+ *                 1. Destroy sysfs nodes for reboot/shutdown/suspend ops
+ *                 2. Deinitlaize ivc queue connectino with peer end for communication.
+ *                 3. Delete character device created
+ *
+ * @param[in]      pdev Platform device structure representing driver
+ *
+ * @retval         none (function with void return value)
+ *
+ * @pre
+ *                 - Tegra pm ctl drivr probe driver should have been initialized.
+ *                 - Tegra hypervisor driver should have been initialized.
+ *                 - This driver should be enabled on virtual/hypervisor environment only.
+ *
+ * @post
+ *                 - Tegra hv pmctl driver will be deinitialized.
+ *                 - This driver cannot be used to trigger shutdown/reboot/suspend operations
+ *
+ * @usage
+ *                 - When client want to deinitialized the driver
+ *                 - Allowed context for the API call
+ *                   - Interrupt handler: No
+ *                   - Signal handler: No
+ *                   - Thread-safe: No
+ *                   - Async/Sync: Sync
+ *                   - Re-entrant: No
+ *                 - API Group
+ *                   - Init: No
+ *                   - Runtime: No
+ *                   - De-Init: Yes
+ */
 #if defined(NV_PLATFORM_DRIVER_STRUCT_REMOVE_RETURNS_VOID) /* Linux v6.11 */
 static void tegra_hv_pm_ctl_remove_wrapper(struct platform_device *pdev)
 {
@@ -1212,6 +1344,8 @@ static struct platform_driver tegra_hv_pm_ctl_driver = {
 	.remove = tegra_hv_pm_ctl_remove_wrapper,
 };
 module_platform_driver(tegra_hv_pm_ctl_driver);
+
+/** @} */
 
 MODULE_DESCRIPTION("Nvidia hypervisor PM control driver");
 MODULE_AUTHOR("Jinyoung Park <jinyoungp@nvidia.com>");

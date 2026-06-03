@@ -18,7 +18,7 @@
 #define NVSCIIPC_BACKEND_ITC		0U
 #define NVSCIIPC_BACKEND_IPC		1U
 #define NVSCIIPC_BACKEND_IVC		2U
-#define NVSCIIPC_BACKEND_C2C_PCIE   3U
+#define NVSCIIPC_BACKEND_C2C        3U
 #define NVSCIIPC_BACKEND_C2C_NPM	4U
 #define NVSCIIPC_BACKEND_UNKNOWN	0xFFFFFFFFU
 
@@ -60,7 +60,7 @@ union nvsciipc_vuid_64 {
 /***********************************************************************/
 
 static void nvsciipc_cleanup(struct nvsciipc *ctx);
-
+static int nvsciipc_parse_dt(struct nvsciipc *ctx);
 static int nvsciipc_dev_open(struct inode *inode, struct file *filp);
 static int nvsciipc_dev_release(struct inode *inode, struct file *filp);
 long nvsciipc_dev_ioctl(struct file *filp, unsigned int cmd,
@@ -68,6 +68,8 @@ long nvsciipc_dev_ioctl(struct file *filp, unsigned int cmd,
 static int nvsciipc_ioctl_get_vuid(struct nvsciipc *ctx, unsigned int cmd,
 			unsigned long arg);
 static int nvsciipc_ioctl_set_db(struct nvsciipc *ctx, unsigned int cmd,
+			unsigned long arg);
+static int nvsciipc_ioctl_check_dt(struct nvsciipc *ctx, unsigned int cmd,
 			unsigned long arg);
 
 #endif /* __NVSCIIPC_KERNEL_H__ */

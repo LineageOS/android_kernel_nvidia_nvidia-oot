@@ -8,16 +8,27 @@
 
 #include <linux/ioctl.h>
 
+/**
+ * @defgroup tegra_hv_vcpu_yield_ioctl Tegra VCPU Yield Driver
+ * @{
+ */
+
+/** @brief vcpu yield IOCTL call magic number */
 #define VCPU_YIELD_IOC_MAGIC    'Y'
+
+/** @brief vcpu yield IOCTL number */
 #define VCPU_YIELD_START_CMDID  1
 
-/* Control data for VCPU Yield Start ioctl */
+/** @brief Control data for VCPU Yield Start ioctl */
 struct vcpu_yield_start_ctl {
-	/* max time in micro seconds for which vcpu will be yielded */
+	/** @brief max time in micro seconds for which vcpu will be yielded */
 	uint32_t timeout_us;
 };
 
+/** @brief IOCTL call to yield vcpu */
 #define VCPU_YIELD_START_IOCTL _IOW(VCPU_YIELD_IOC_MAGIC, \
 		VCPU_YIELD_START_CMDID, struct vcpu_yield_start_ctl)
+
+/** @} */
 
 #endif /* #ifndef TEGRA_HV_VCPU_YIELD_IOCTL_H */

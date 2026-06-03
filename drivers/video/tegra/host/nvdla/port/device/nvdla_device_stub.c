@@ -7,21 +7,43 @@
 #include "../nvdla_device.h"
 
 uint32_t nvdla_device_register_read(struct platform_device *pdev,
+	enum nvdla_aperture_type aperture_type,
 	uint32_t reg)
 {
 	(void) pdev;
+	(void) aperture_type;
 	(void) reg;
 
 	return 0U;
 }
 
 void nvdla_device_register_write(struct platform_device *pdev,
+	enum nvdla_aperture_type aperture_type,
 	uint32_t reg,
 	uint32_t value)
 {
 	(void) pdev;
+	(void) aperture_type;
 	(void) reg;
 	(void) value;
+}
+
+void nvdla_device_register_set_aperture(struct platform_device *pdev,
+	enum nvdla_aperture_type aperture_type,
+	void __iomem *addr)
+{
+	(void) pdev;
+	(void) aperture_type;
+	(void) addr;
+}
+
+void __iomem *nvdla_device_register_get_aperture(struct platform_device *pdev,
+	enum nvdla_aperture_type aperture_type)
+{
+	(void) pdev;
+	(void) aperture_type;
+
+	return NULL;
 }
 
 int32_t nvdla_module_init(struct platform_device *pdev)
@@ -34,6 +56,22 @@ int32_t nvdla_module_init(struct platform_device *pdev)
 void nvdla_module_deinit(struct platform_device *pdev)
 {
 	(void) pdev;
+}
+
+int32_t nvdla_module_context_register(struct platform_device *pdev,
+		void *context)
+{
+	(void) pdev;
+	(void) context;
+
+	return 0;
+}
+
+void nvdla_module_context_unregister(struct platform_device *pdev,
+		void *context)
+{
+	(void) pdev;
+	(void) context;
 }
 
 int32_t nvdla_module_client_register(struct platform_device *pdev,
@@ -115,19 +153,14 @@ void nvdla_module_complete_resume(struct device *dev)
 	(void) dev;
 }
 
-int32_t nvdla_driver_register(struct platform_driver *pdriver)
+int32_t nvdla_driver_register(void)
 {
-	(void) pdriver;
-
 	return -1;
 }
 
 /**
  * @brief Unregisters the platform driver.
- *
- * @param[in] pdriver Platform driver that is to be unregistered.
  **/
-void nvdla_driver_unregister(struct platform_driver *pdriver)
+void nvdla_driver_unregister(void)
 {
-	(void) pdriver;
 }

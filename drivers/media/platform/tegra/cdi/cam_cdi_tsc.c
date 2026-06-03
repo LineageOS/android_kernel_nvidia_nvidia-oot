@@ -244,9 +244,10 @@ static int cdi_tsc_find_and_add_generators(struct tsc_signal_controller *control
 		if (of_address_to_resource(np, 0, &res))
 			return -EINVAL;
 
-		generator->base = devm_ioremap_resource(controller->dev, &res);
-		if (IS_ERR(generator->base))
-			return PTR_ERR(generator->base);
+		generator->base = devm_ioremap(controller->dev, res.start,
+					       resource_size(&res));
+		if (!generator->base)
+			return -ENOMEM;
 
 		err = of_property_read_u32(np, "freq_hz", &generator->config.freq_hz);
 		if (err != 0) {
@@ -564,9 +565,19 @@ static int cdi_tsc_probe(struct platform_device *pdev)
 	INIT_LIST_HEAD(&controller->generators);
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	controller->base = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(controller->base))
-		return PTR_ERR(controller->base);
+	if (!res) {
+		dev_err(&pdev->dev, "Failed to get memory resource\n");
+		return -ENODEV;
+	}
+	/*
+	 * Use devm_ioremap (non-exclusive) instead of devm_ioremap_resource
+	 * so that this driver can coexist with cam_fsync on the same TSC
+	 * controller hardware using different generators.
+	 */
+	controller->base = devm_ioremap(&pdev->dev, res->start,
+					resource_size(res));
+	if (!controller->base)
+		return -ENOMEM;
 
 	platform_set_drvdata(pdev, controller);
 

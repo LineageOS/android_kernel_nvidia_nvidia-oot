@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/*
- * Copyright (c) 2021-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- */
+// SPDX-FileCopyrightText: Copyright (c) 2021-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include <nvidia/conftest.h>
 
@@ -1066,23 +1064,36 @@ EXPORT_SYMBOL(tegra_virt_machine_get_dai_link);
 void tegra_virt_machine_set_adsp_admaif_dai_params(
 		struct device *dev, uint32_t id, struct snd_soc_pcm_stream *params)
 {
-	struct snd_soc_dai_link *link = tegra_virt_t186ref_pcm_links;
+	struct snd_soc_dai_link *link = NULL;
+	/* Set platform-specific parameters and validate ADSP ADMAIF ID */
+	unsigned int array_size, adsp_admaif_offset, max_id;
 
 	if (of_machine_is_compatible("nvidia,tegra210")) {
-		link = tegra_virt_t210ref_pcm_links;
-	} else if (of_device_is_compatible(dev->of_node,
-			"nvidia,tegra264-virt-pcm-oot")) {
-		link = tegra_virt_t264ref_pcm_links;
+		pr_err("ADSP ADMAIF not supported on Tegra210 platform\n");
+		return;
 	}
 
-	/* Check for valid ADSP ADMAIF ID */
-	if (id >= MAX_ADMAIF_IDS) {
-		pr_err("Invalid ADSP ADMAIF ID: %d\n", id);
+	if (of_device_is_compatible(dev->of_node, "nvidia,tegra264-virt-pcm-oot")) {
+		link = tegra_virt_t264ref_pcm_links;
+		adsp_admaif_offset = TEGRA264_ADSP_ADMAIF_OFFSET;
+		max_id = MAX_ADMAIF_T264_IDS;
+		array_size = ARRAY_SIZE(tegra_virt_t264ref_pcm_links);
+	} else {
+		/* Default T186 configuration */
+		link = tegra_virt_t186ref_pcm_links;
+		adsp_admaif_offset = TEGRA186_ADSP_ADMAIF_OFFSET;
+		max_id = MAX_ADMAIF_T186_IDS;
+		array_size = ARRAY_SIZE(tegra_virt_t186ref_pcm_links);
+	}
+
+	if (id >= max_id || (id + adsp_admaif_offset) >= array_size) {
+		pr_err("Invalid ADSP ADMAIF ID: %d (max: %d, offset: %d, array: %d)\n",
+		       id, max_id - 1, adsp_admaif_offset, array_size);
 		return;
 	}
 
 	/* Find DAI link corresponding to ADSP ADMAIF */
-	link += id + MAX_ADMAIF_IDS;
+	link += id + adsp_admaif_offset;
 
 	memcpy(&adsp_admaif_params[id], params,
 		sizeof(struct snd_soc_pcm_stream));

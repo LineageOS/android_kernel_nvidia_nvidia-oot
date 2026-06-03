@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include "pva_kmd_resource_table.h"
 #include "pva_kmd_device_memory.h"
@@ -8,9 +8,6 @@
 #include "pva_api_dma.h"
 #include "pva_kmd_constants.h"
 #include "pva_kmd_device.h"
-
-/* DMA channels per engine (matches PVA_NUM_DMA_CHANNELS in pva_fw_constants.h) */
-#define PVA_KMD_DMA_CHANNELS_PER_ENGINE 16U
 
 static uint32_t get_slot_line_pitch(struct pva_fw_dma_descriptor *descs,
 				    struct pva_fw_dma_reloc const *relocs,
@@ -258,15 +255,17 @@ process_slot_relocations(struct pva_dma_config_resource *dma_config,
 		}
 		desc_offset_pl = assemble_addr(*addr_hi_ptr, *addr_lo_ptr);
 		offset = sat_add64(slot_offset_pl, desc_offset_pl);
-		/* CERT INT31-C: Bitwise NOT of shifted value, result masked by uint8_t cast,
-		 * safe as only lower 8 bits are used in bitwise AND */
+		/* CERT INT31-C: Use XOR with 0xFF instead of bitwise NOT to avoid
+		 * negative intermediate value. XOR flips bits same as NOT. */
 		desc->transfer_control0 &=
-			(uint8_t) ~(1U << format_field_shift);
+			(uint8_t)(0xFFU ^ (1U << format_field_shift));
 		if (is_block_linear) {
 			/* We need to insert bits surface_base_addr[13, 9] to
 			* transfer_control2[7:3] as specified by DMA IAS. This helps the
-			* HW identify starting GOB index inside a block. */
-			desc->transfer_control2 &= ~PVA_MASK8(7U, 3U);
+			* HW identify starting GOB index inside a block.
+			* CERT INT31-C: Use XOR with 0xFF instead of NOT to avoid negative int. */
+			desc->transfer_control2 &=
+				(uint8_t)(0xFFU ^ PVA_MASK8(7U, 3U));
 			desc->transfer_control2 |=
 				PVA_INSERT8(PVA_EXTRACT64(surface_base_addr, 13,
 							  9, uint8_t),
@@ -458,12 +457,11 @@ bind_static_vmem_slot(struct pva_dma_config_resource *dma_config,
 				goto out;
 			}
 
-			/* CERT INT31-C: buffer_addr >> 6 cast to uint16_t then masked with 0x7FFF.
-		 * The uint16_t cast naturally truncates to 16 bits, then mask keeps 15 bits.
-		 * This is intentional for VMEM address computation. */
-			desc->frda =
-				((uint16_t)(buffer_addr >> 6U) + desc->frda) &
-				0x7FFFU;
+			/* CERT INT31-C: Do arithmetic in 32-bit, then mask to 15 bits
+			 * before casting to uint16_t. Result always fits. */
+			desc->frda = (uint16_t)(((buffer_addr >> 6U) +
+						 (uint32_t)desc->frda) &
+						0x7FFFU);
 		}
 	}
 

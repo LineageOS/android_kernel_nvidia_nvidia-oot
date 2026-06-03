@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0-only
+/* SPDX-License-Identifier: GPL-2.0-only */
 /* SPDX-FileCopyrightText: Copyright (c) 2016-2026 NVIDIA CORPORATION & AFFILIATES.
  * All rights reserved.
  *
@@ -47,9 +47,6 @@ typedef uint64_t iova_t CAPTURE_IVC_ALIGN;
 /** Invalid syncpoint ID */
 #define SYNCPOINT_ID_INVALID	MK_U32(0)
 
-/** Invalid Grid-of-Semaphores index */
-#define GOS_INDEX_INVALID	MK_U8(0xFF)
-
 #pragma GCC diagnostic warning "-Wdeprecated-declarations"
 #define CAMRTC_DEPRECATED __attribute__((deprecated))
 
@@ -62,33 +59,6 @@ typedef struct syncpoint_info {
 
 	/** Syncpoint threshold when storing a fence [0, UIN32_MAX] */
 	uint32_t threshold;
-
-	/**
-	 * Grid-of-Semaphores (GoS) SMMU stream id [1, 127] (non-safety).
-	 *
-	 * @deprecated This field may be removed in the future.
-	 */
-	uint8_t gos_sid;
-
-	/**
-	 * Index into a table of GoS page base pointers or
-	 * @ref GOS_INDEX_INVALID.
-	 * (see @ref capture_channel_config::vi_gos_tables) (non-safety)
-	 *
-	 * @deprecated This field may be removed in the future.
-	 */
-	uint8_t gos_index;
-
-	/**
-	 * Offset of a semaphore within a Grid-of-Semaphores [0, 63].
-	 * (non-safety)
-	 *
-	 * @deprecated This field may be removed in the future.
-	 */
-	uint16_t gos_offset;
-
-	/** Reserved */
-	uint32_t pad_;
 
 	/**
 	 * IOVA address of the Host1x syncpoint register.
@@ -410,9 +380,6 @@ typedef struct syncpoint_info {
 	(ISP7_STATS_LTM_OFFSET + ISP7_STATS_LTM_MAX_SIZE)
 /**@}*/
 
-/** Maximum number of Grid-of-Semaphores tables supported by ISP */
-#define ISP_NUM_GOS_TABLES	MK_U32(8)
-
 /**
  * @defgroup ISPUnitIds
  * ISP Unit Identifiers
@@ -423,9 +390,6 @@ typedef struct syncpoint_info {
 /** ISP unit 1 */
 #define ISP_UNIT_ISP1                             MK_U32(0x0001)
 /**@}*/
-
-/** Maximum number of Grid-of-semaphores tables supported by VI */
-#define VI_NUM_GOS_TABLES	MK_U32(12)
 
 /** Maximum number of output surfaces supported by VI */
 #define VI_NUM_ATOMP_SURFACES	4U
@@ -736,9 +700,6 @@ struct capture_channel_config {
 	 */
 	uint32_t request_memoryinfo_size;
 
-	/** Reserved */
-	uint32_t reserved2;
-
 	/** SLVS-EC main stream (non-safety) */
 	uint8_t slvsec_stream_main;
 
@@ -747,26 +708,6 @@ struct capture_channel_config {
 
 	/** Reserved */
 	uint16_t reserved1;
-
-#define HAVE_VI_GOS_TABLES
-	/**
-	 * Number of elements in @ref vi_gos_tables array
-	 * [0, @ref VI_NUM_GOS_TABLES].
-	 *
-	 * @deprecated This field may be removed in the future.
-	 */
-	uint32_t num_vi_gos_tables;
-
-	/**
-	 * Array of IOVA pointers to VI Grid-of-Semaphores (GoS) tables
-	 * (non-safety).
-	 *
-	 * GoS table configuration, if present, must be the same on all
-	 * active channels. The IOVA addresses must be a multiple of 256.
-	 *
-	 * @deprecated This field may be removed in the future.
-	 */
-	iova_t vi_gos_tables[VI_NUM_GOS_TABLES];
 
 	/**
 	 * Capture progress syncpoint information. The progress syncpoint
@@ -2588,7 +2529,7 @@ struct capture_descriptor {
 	struct watermark_mem_offset watermark_offset;
 
 	/** Reserved */
-	uint32_t pad32__[10];
+	uint32_t pad32__[14];
 
 } CAPTURE_DESCRIPTOR_ALIGN;
 
@@ -2940,16 +2881,8 @@ struct nvcsi_brick_config {
 	 */
 	uint8_t lane_polarity[NVCSI_BRICK_NUM_LANES];
 
-	/**
-	 * Clock partition selection for DPHY 4-lane mode.
-	 * 0 = Use CLK from Partition A (default)
-	 * 1 = Use CLK from Partition B
-	 * Only applicable for DPHY mode with 4 lanes.
-	 */
-	uint32_t clk_partition;
-
 	/** Reserved */
-	uint32_t pad32__[2];
+	uint32_t pad32__;
 } CAPTURE_IVC_ALIGN;
 
 /**
@@ -3017,20 +2950,10 @@ struct nvcsi_cil_config {
 		uint8_t afe_hf_gain;
 		/** @a edge_delay [-10,9] */
 		int8_t edge_delay;
-		/**
-		 * DPHY deskew compare threshold [0,15].
-		 * 0 = use default (reset value).
-		 */
-		uint8_t deskew_compare;
-		/**
-		 * DPHY deskew settle time [0,15].
-		 * 0 = use default (reset value).
-		 */
-		uint8_t deskew_settle;
 	} tuning;
 
-	/** Reserved for 7-byte alignment */
-	uint8_t pad__[7];
+	/** Reserved */
+	uint8_t pad8__;
 
 } CAPTURE_IVC_ALIGN;
 
@@ -4150,25 +4073,8 @@ struct capture_channel_isp_config {
 	/** ISP unit ID. See @ref ISPUnitIds "ISP Unit Identifiers". */
 	uint32_t isp_unit_id;
 
-#define HAVE_ISP_GOS_TABLES
-	/**
-	 * Number of elements in @ref isp_gos_tables array
-	 * [0, @ref ISP_NUM_GOS_TABLES]. (non-safety)
-	 *
-	 * @deprecated This field may be removed in the future.
-	 */
-	uint32_t num_isp_gos_tables;
-
-	/**
-	 * Array of IOVA pointers to ISP Grid-of-Semaphores (GoS) tables.
-	 * (non-safety)
-	 *
-	 * GoS table configuration, if present, must be the same on all
-	 * active channels. The IOVA addresses must be a multiple of 256.
-	 *
-	 * @deprecated This field may be removed in the future.
-	 */
-	iova_t isp_gos_tables[ISP_NUM_GOS_TABLES];
+	/** Padding for 64-bit alignment */
+	uint32_t pad32__;
 } CAPTURE_IVC_ALIGN;
 
 /**
@@ -5003,9 +4909,6 @@ struct isp_capture_descriptor {
 	 */
 	iova_t isp_pb2_mem;
 
-	/** Reserved */
-	uint32_t pad_pb__[2];
-
 	/** Reserved. Not supported. */
 	uint32_t frame_timeout;
 
@@ -5030,7 +4933,7 @@ struct isp_capture_descriptor {
 	/* GID-STKHLDREQPLCL123-3812735 */
 
 /** Maximum number of prefences supported */
-#define ISP_MAX_PREFENCES	MK_U32(14)
+#define ISP_MAX_PREFENCES	MK_U32(16)
 
 	/**
 	 * Number of traditional prefences for a given capture request
@@ -5074,8 +4977,8 @@ struct isp_capture_descriptor {
 	 */
 	uint32_t program_buffer_index;
 
-	/** Reserved */
-	uint32_t pad__[5];
+	/** Reserved - padding to 64-byte alignment boundary */
+	uint32_t pad_end__;
 } CAPTURE_DESCRIPTOR_ALIGN;
 
 /**

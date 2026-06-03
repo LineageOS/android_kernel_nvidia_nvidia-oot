@@ -44,9 +44,8 @@ int dce_admin_ipc_wait(struct tegra_dce *d)
 
 	ret = dce_wait_cond_wait_interruptible(d, &d->ipc_waits[DCE_WAIT_ADMIN_IPC], true,
 						DCE_IPC_TIMEOUT_MS_MAX);
-	if (ret) {
+	if (ret != 0)
 		dce_os_err(d, "Admin IPC wait, interrupted or timedout:%d", ret);
-	}
 
 	return ret;
 }
@@ -63,7 +62,7 @@ static void dce_admin_wakeup_ipc(struct tegra_dce *d)
 	int ret;
 
 	ret = dce_fsm_post_event(d, EVENT_ID_DCE_ADMIN_IPC_MSG_RECEIVED, NULL);
-	if (ret)
+	if (ret != 0)
 		dce_os_err(d, "Error while posting ADMIN_IPC_MSG_RECEIVED event");
 }
 
@@ -498,7 +497,7 @@ static int dce_admin_channel_init(struct tegra_dce *d)
 
 	for (loop_cnt = 0; loop_cnt < DCE_IPC_CH_KMD_TYPE_MAX; loop_cnt++) {
 		ret = dce_ipc_channel_init_unlocked(d, loop_cnt);
-		if (ret) {
+		if (ret != 0) {
 			dce_os_err(d, "Channel init failed for type : [%d]",
 				loop_cnt);
 			goto out;
@@ -506,7 +505,7 @@ static int dce_admin_channel_init(struct tegra_dce *d)
 	}
 
 out:
-	if (ret)
+	if (ret != 0)
 		dce_admin_channel_deinit(d);
 	return ret;
 }
@@ -524,25 +523,25 @@ int dce_admin_init(struct tegra_dce *d)
 
 	d->boot_status |= DCE_EARLY_INIT_START;
 	ret = dce_os_ipc_init_region_info(d);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(d, "IPC region allocation failed");
 		goto err_ipc_reg_alloc;
 	}
 
 	ret = dce_log_buf_mem_init(d);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(d, "dce log buf mem init failed");
 		goto err_log_buf_alloc;
 	}
 
 	ret = dce_admin_channel_init(d);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(d, "Channel Initialization Failed");
 		goto err_channel_init;
 	}
 
 	ret = dce_admin_channel_client_buffers_init(d, DCE_ADMIN_CH_CL_ADMIN_BUFF);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(d, "Admin channel client buffers init failed: Admin");
 		goto err_channel_clients_buff_init;
 	}
@@ -599,7 +598,7 @@ int dce_admin_send_msg(struct tegra_dce *d, struct dce_ipc_message *msg)
 	ret = dce_fsm_post_event(d,
 				 EVENT_ID_DCE_ADMIN_IPC_MSG_REQUESTED,
 				 (void *)&params);
-	if (ret)
+	if (ret != 0)
 		dce_os_err(d, "Unable to send msg invalid FSM state");
 
 	return ret;
@@ -634,7 +633,7 @@ int dce_admin_handle_ipc_requested_event(struct tegra_dce *d, void *params)
 	msg = admin_params->msg;
 
 	ret = dce_ipc_send_message_sync(d, DCE_IPC_CHANNEL_TYPE_ADMIN, msg);
-	if (ret)
+	if (ret != 0)
 		dce_os_err(d, "Error sending admin message on admin interface");
 
 out:
@@ -699,7 +698,7 @@ int dce_admin_send_cmd_rm_bootstrap(struct tegra_dce *d,
 	req_msg->cmd = (uint32_t)DCE_ADMIN_CMD_RM_BOOTSTRAP2;
 
 	ret = dce_admin_send_msg(d, msg);
-	if ((ret) || (resp_msg->error != DCE_ERR_CORE_SUCCESS)) {
+	if ((ret != 0) || (resp_msg->error != DCE_ERR_CORE_SUCCESS)) {
 		dce_os_err(d, "Error sending bootstrap msg : [%d]", ret);
 		ret = ret ? ret : resp_msg->error;
 		goto out;
@@ -739,7 +738,7 @@ int dce_admin_send_cmd_echo(struct tegra_dce *d,
 	req_msg->cmd = (uint32_t)DCE_ADMIN_CMD_ECHO;
 
 	ret = dce_admin_send_msg(d, msg);
-	if ((ret) || (resp_msg->error != DCE_ERR_CORE_SUCCESS)) {
+	if ((ret != 0) || (resp_msg->error != DCE_ERR_CORE_SUCCESS)) {
 		dce_os_err(d, "Error sending echo msg : [%d]", ret);
 		ret = ret ? ret : resp_msg->error;
 		goto out;
@@ -779,7 +778,7 @@ int dce_admin_send_cmd_ext_test(struct tegra_dce *d,
 	req_msg->cmd = (uint32_t)DCE_ADMIN_CMD_EXT_TEST;
 
 	ret = dce_admin_send_msg(d, msg);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(d, "Error sending test msg : [%d]", ret);
 		goto out;
 	}
@@ -811,7 +810,7 @@ static int dce_admin_send_cmd_ver(struct tegra_dce *d,
 	ver_info = (struct dce_admin_version_info *)(&resp_msg->args.version);
 
 	ret = dce_admin_send_msg(d, msg);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(d, "Error sending get version info : [%d]", ret);
 		goto out;
 	}
@@ -856,7 +855,7 @@ int dce_admin_send_prepare_sc7(struct tegra_dce *d,
 	req_msg->cmd = (uint32_t)DCE_ADMIN_CMD_PREPARE_SC7;
 
 	ret = dce_admin_send_msg(d, msg);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(d, "Error sending prepare sc7 command [%d]", ret);
 		goto out;
 	}
@@ -889,7 +888,7 @@ int dce_admin_send_enter_sc7(struct tegra_dce *d,
 	req_msg->cmd = (uint32_t)DCE_ADMIN_CMD_ENTER_SC7;
 
 	ret = dce_ipc_send_message(d, DCE_IPC_CHANNEL_TYPE_ADMIN, msg->tx.data, msg->tx.size);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(d, "Error sending enter sc7 command [%d]", ret);
 		goto out;
 	}
@@ -897,9 +896,8 @@ int dce_admin_send_enter_sc7(struct tegra_dce *d,
 	/* Wait for SC7 Enter done */
 	ret = dce_wait_cond_wait_interruptible(d, &d->ipc_waits[DCE_WAIT_SC7_ENTER], true,
 						DCE_IPC_TIMEOUT_MS_MAX);
-	if (ret) {
+	if (ret != 0)
 		dce_os_err(d, "SC7 Enter wait, interrupted or timedout:%d", ret);
-	}
 
 out:
 	return ret;
@@ -922,7 +920,7 @@ int dce_admin_get_log_info(struct tegra_dce *d, struct dce_ipc_message *msg)
 	req_msg->cmd = (uint32_t)DCE_ADMIN_CMD_GET_LOG_INFO;
 
 	ret = dce_admin_send_msg(d, msg);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(d, "Error in sending get log call msg : [%d]", ret);
 		goto out;
 	}
@@ -946,7 +944,7 @@ int dce_admin_set_log_info(struct tegra_dce *d, struct dce_ipc_message *msg)
 	req_msg->cmd = (uint32_t)DCE_ADMIN_CMD_SET_LOGGING;
 
 	ret = dce_admin_send_msg(d, msg);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(d, "Error in sending set log call msg : [%d]", ret);
 		goto out;
 	}
@@ -976,7 +974,7 @@ static int dce_admin_setup_clients_ipc(struct tegra_dce *d,
 		if (i == DCE_IPC_CH_KMD_TYPE_ADMIN)
 			continue;
 		ret = dce_ipc_get_channel_info(d, &q_info, i);
-		if (ret) {
+		if (ret != 0) {
 			dce_os_info(d, "Get queue info failed for [%u]", i);
 			ret = 0;
 			continue;
@@ -989,7 +987,7 @@ static int dce_admin_setup_clients_ipc(struct tegra_dce *d,
 		ipc_info->n_frames = q_info.nframes;
 
 		ret = dce_admin_send_msg(d, msg);
-		if (ret) {
+		if (ret != 0) {
 			dce_os_err(d, "Error sending IPC create msg for type [%u]",
 				i);
 			goto out;
@@ -1026,7 +1024,7 @@ static int dce_admin_send_rm_bootstrap(struct tegra_dce *d,
 	ver_info = (struct dce_admin_version_info *)(&resp_msg->args.version);
 
 	ret = dce_admin_send_msg(d, msg);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(d, "Error sending rm bootstrap cmd: [%d]", ret);
 		goto out;
 	}
@@ -1044,6 +1042,70 @@ out:
 	return ret;
 }
 
+/**
+ * dce_admin_send_cmd_deinit - Sends DCE_ADMIN_CMD_DEINIT cmd.
+ *
+ * @d - Pointer to tegra_dce struct.
+ * @msg - Pointer to dce_ipc_msg struct.
+ *
+ * Return - 0 if successful
+ */
+int dce_admin_send_cmd_deinit(struct tegra_dce *d,
+			       struct dce_ipc_message *msg)
+{
+	int ret = -1;
+	struct dce_admin_ipc_cmd *req_msg;
+	struct dce_admin_ipc_resp *resp_msg;
+	struct dce_fsm_info *fsm = &d->fsm_info;
+
+	if (!msg || !msg->tx.data || !msg->rx.data)
+		goto out;
+
+	/* return if dce bootstrap not completed */
+	if (!dce_is_bootstrap_done(d)) {
+		dce_os_err(d, "Admin Bootstrap not yet done");
+		goto out;
+	}
+
+	/* Check if system is aborted - return immediately if so */
+	if (fsm->c_state == STATE_DCE_ABORT) {
+		dce_os_err(d, "DCE is in abort state, cannot deinit");
+		ret = -EINVAL;
+		goto out;
+	}
+
+	req_msg = (struct dce_admin_ipc_cmd *)(msg->tx.data);
+	resp_msg = (struct dce_admin_ipc_resp *) (msg->rx.data);
+
+	req_msg->cmd = (uint32_t)DCE_ADMIN_CMD_DEINIT;
+
+	ret = dce_ipc_send_message(d, DCE_IPC_CHANNEL_TYPE_ADMIN, msg->tx.data, msg->tx.size);
+	if (ret) {
+		dce_os_err(d, "Error sending deinit command [%d]", ret);
+		goto out;
+	}
+
+	/* Wait for DEINIT done interrupt */
+	ret = dce_wait_cond_wait_interruptible(d, &d->ipc_waits[DCE_WAIT_DEINIT], true,
+						DCE_IPC_TIMEOUT_MS_MAX);
+	if (ret) {
+		dce_os_err(d, "DEINIT wait, interrupted or timedout:%d", ret);
+		goto out;
+	}
+
+	/* Check response error */
+	if (resp_msg->error != DCE_ERR_CORE_SUCCESS) {
+		dce_os_err(d, "Error in deinit response : [0x%x]", resp_msg->error);
+		ret = resp_msg->error;
+		goto out;
+	}
+
+	ret = 0;
+
+out:
+	return ret;
+}
+
 int dce_start_admin_seq(struct tegra_dce *d)
 {
 	int ret = 0;
@@ -1056,34 +1118,34 @@ int dce_start_admin_seq(struct tegra_dce *d)
 
 	d->boot_status |= DCE_FW_ADMIN_SEQ_START;
 	ret = dce_admin_send_cmd_ver(d, msg);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(d, "RPC failed for DCE_ADMIN_CMD_VERSION");
 		goto out;
 	}
 
 	ret = dce_admin_setup_clients_ipc(d, msg);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(d, "RPC failed for DCE_ADMIN_CMD_IPC_CREATE");
 		goto out;
 	}
 
 	ret = dce_log_init(d, msg);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(d, "RPC failed for DCE_ADMIN_CMD_SET_LOGGING");
 		goto out;
 	}
 
 	ret = dce_admin_send_rm_bootstrap(d, msg);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(d, "RPC failed for DCE_ADMIN_CMD_RM_BOOTSTRAP");
 		goto out;
 	}
 	d->boot_status |= DCE_FW_ADMIN_SEQ_DONE;
 out:
-	if (msg)
+	if (msg != NULL)
 		dce_admin_channel_client_buffer_put(d, msg);
 
-	if (ret)
+	if (ret != 0)
 		d->boot_status |= DCE_FW_ADMIN_SEQ_FAILED;
 
 	return ret;

@@ -59,9 +59,11 @@ enum FSM_EV_ID {
 	FSM_GBL_EV_MASK_ = FSM_GBL_EV_MASK,
 	FSM_EV_CONNECTED,
 	FSM_EV_CONNECT_FAIL,
-	FSM_EV_DISCONNECTED,
+	FSM_EV_DISCONNECT_START,
+	FSM_EV_DISCONNECT_END,
 	FSM_EV_SCAN_START,
 	FSM_EV_SCAN_DONE,
+	FSM_EV_FREE_STA,
 
 	FSM_EV_GBL_MAX
 };
@@ -207,10 +209,12 @@ struct sta_info *obj_to_sta(struct fsm_obj *obj);
 _adapter *fsm_to_adapter(struct fsm_main *fsm);
 
 /* Notify function */
-void rtw_fsm_notify_connect(struct fsm_priv *fsmpriv, struct sta_info *psta, int res);
-void rtw_fsm_notify_disconnect(struct fsm_priv *fsmpriv, struct sta_info *psta);
-void rtw_fsm_notify_scan_start(struct fsm_priv *fsmpriv, struct sta_info *psta);
-void rtw_fsm_notify_scan_done(struct fsm_priv *fsmpriv, struct sta_info *psta);
+void rtw_fsm_notify_connect(struct fsm_priv *fsmpriv, int res);
+void rtw_fsm_notify_disconnect_start(struct fsm_priv *fsmpriv);
+void rtw_fsm_notify_disconnect_end(struct fsm_priv *fsmpriv);
+void rtw_fsm_notify_scan_start(struct fsm_priv *fsmpriv);
+void rtw_fsm_notify_scan_done(struct fsm_priv *fsmpriv);
+void rtw_fsm_notify_free_sta(struct fsm_priv *fsmpriv);
 
 _adapter *fsm_to_adapter(struct fsm_main *fsm);
 
@@ -223,18 +227,61 @@ _adapter *fsm_to_adapter(struct fsm_main *fsm);
 #define rtw_fsm_set_alarm(c, d, e) fsm_set_alarm(c->obj, d, e)
 #define rtw_fsm_cancel_alarm(c) fsm_cancel_alarm(c->obj)
 
-#define rtw_fsm_abort_obj(c) fsm_abort_obj(c->obj)
+#define rtw_fsm_abort_obj(c) \
+	do {\
+		if (c) \
+			fsm_abort_obj(c->obj); \
+	} while (0)
 
-#define rtw_fsm_new_msg(c, d) fsm_new_msg(c->obj, d)
-#define rtw_fsm_send_msg(c, d) fsm_send_msg(c->fsm, d)
-#define rtw_fsm_gen_msg(c, d, e, f) fsm_gen_msg(c->obj, d, e, f)
-#define rtw_fsm_activate_obj(c) fsm_activate_obj(c->obj)
-#define rtw_fsm_deactivate_obj(c) fsm_deactivate_obj(c->obj)
+#define rtw_fsm_new_msg(c, d) \
+	do {\
+		if (c) \
+			fsm_new_msg(c->obj, d); \
+	} while (0)
+
+#define rtw_fsm_send_msg(c, d) \
+	do {\
+		if (c) \
+			fsm_send_msg(c->fsm, d); \
+	} while (0)
+
+#define rtw_fsm_gen_msg(c, d, e, f) \
+	do {\
+		if (c) \
+			fsm_gen_msg(c->obj, d, e, f); \
+	} while (0)
+
+#define rtw_fsm_activate_obj(c) \
+	do {\
+		if (c) \
+			fsm_activate_obj(c->obj); \
+	} while (0)
+
+#define rtw_fsm_deactivate_obj(c) \
+	do {\
+		if (c) \
+			fsm_deactivate_obj(c->obj); \
+	} while (0)
+
 #define rtw_fsm_obj_name(c) fsm_obj_name(c->obj)
 #define rtw_fsm_evt_name(c, d) fsm_evt_name(c->fsm, d)
-#define rtw_fsm_cancel_alarm_ext(c, d) fsm_cancel_alarm_ext(c->obj, d)
-#define rtw_fsm_set_alarm_ext(c, d, e, f, g) fsm_set_alarm_ext(c->obj, d, e, f, g)
-#define rtw_fsm_del_obj(c) fsm_del_obj(c->obj)
+
+#define rtw_fsm_cancel_alarm_ext(c, d) \
+	do {\
+		if (c) \
+			fsm_cancel_alarm_ext(c->obj, d); \
+	} while (0)
+
+#define rtw_fsm_set_alarm_ext(c, d, e, f, g) \
+	do {\
+		if (c) \
+			fsm_set_alarm_ext(c->obj, d, e, f, g); \
+	} while (0)
+
+#define rtw_fsm_del_obj(c) \
+	do {\
+		if (c) fsm_del_obj(c->obj); \
+	} while (0)
 
 #if 1
 #define FSM_PRINT(fsm, fmt, ...) \

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* SPDX-FileCopyrightText: Copyright (c) 2015-2025 NVIDIA CORPORATION & AFFILIATES.
+/* SPDX-FileCopyrightText: Copyright (c) 2015-2026 NVIDIA CORPORATION & AFFILIATES.
  * All rights reserved.
- *
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -567,7 +566,10 @@ static int __cdi_create_dev(
 	INIT_LIST_HEAD(&cdi_dev->list);
 
 	memset(&brd, 0, sizeof(brd));
-	strncpy(brd.type, "cdi-dev", sizeof(brd.type));
+	if (strscpy(brd.type, "cdi-dev", sizeof(brd.type)) < 0) {
+		dev_err(cdi_mgr->dev, "strscpy failed\n");
+		goto dev_create_err;
+	}
 	brd.addr = cdi_dev->cfg.addr;
 	brd.platform_data = &cdi_dev->pdata;
 	cdi_dev->client = i2c_new_client_device(cdi_mgr->adap, &brd);
@@ -1069,6 +1071,82 @@ static int cdi_mgr_gpio_intr_wait_abort(struct cdi_mgr_priv *cdi_mgr)
 	return 0;
 }
 
+static int cdi_mgr_gpio_get_level(
+	struct cdi_mgr_priv *cdi_mgr,
+	void __user *arg)
+{
+	struct cdi_mgr_gpio_level pin_level;
+	u32 idx;
+	struct cam_gpio_config *pin;
+
+	if (!cdi_mgr)
+		return -EINVAL;
+
+	if (copy_from_user(&pin_level, arg, sizeof(pin_level))) {
+		dev_err(cdi_mgr->pdev,
+			"%s: failed to copy from user\n", __func__);
+		return -EFAULT;
+	}
+
+	idx = gpio_to_idx(cdi_mgr, pin_level.idx);
+	if (idx >= MAX_CDI_GPIOS) {
+		dev_err(cdi_mgr->pdev, "%s: unknown gpio idx %u\n",
+			__func__, pin_level.idx);
+		return -EINVAL;
+	}
+
+	pin = &cdi_mgr->gpios[idx];
+
+	pin_level.level = (gpiod_get_value_cansleep(pin->desc) == 0) ?
+		CDI_MGR_GPIO_LEVEL_LOW : CDI_MGR_GPIO_LEVEL_HIGH;
+
+	if (copy_to_user(arg, &pin_level, sizeof(pin_level))) {
+		dev_err(cdi_mgr->pdev,
+			"%s: failed to copy to user\n", __func__);
+		return -EFAULT;
+	}
+
+	return 0;
+}
+
+static int cdi_mgr_gpio_set_level(
+	struct cdi_mgr_priv *cdi_mgr,
+	const void __user *arg)
+{
+	struct cdi_mgr_gpio_level pin_level;
+	u32 idx;
+	struct cam_gpio_config *pin;
+
+	if (!cdi_mgr)
+		return -EINVAL;
+
+	if (copy_from_user(&pin_level, arg, sizeof(pin_level))) {
+		dev_err(cdi_mgr->pdev,
+			"%s: failed to copy from user\n", __func__);
+		return -EFAULT;
+	}
+
+	idx = gpio_to_idx(cdi_mgr, pin_level.idx);
+	if (idx >= MAX_CDI_GPIOS) {
+		dev_err(cdi_mgr->pdev, "%s: unknown gpio idx %u\n",
+			__func__, pin_level.idx);
+		return -EINVAL;
+	}
+
+	pin = &cdi_mgr->gpios[idx];
+	if (pin->gpio_dir != CAM_DEVBLK_GPIO_OUTPUT) {
+		dev_err(cdi_mgr->pdev,
+			"%s: gpio idx %u is not an output pin\n",
+			__func__, idx);
+		return -EINVAL;
+	}
+
+	gpiod_set_value_cansleep(pin->desc,
+		((pin_level.level == CDI_MGR_GPIO_LEVEL_LOW) ? 0 : 1));
+
+	return 0;
+}
+
 static int cdi_mgr_des_power(
 	struct cdi_mgr_priv *cdi_mgr, bool enable)
 {
@@ -1195,6 +1273,12 @@ static long cdi_mgr_ioctl(
 		break;
 	case CDI_MGR_IOCTL_INTR_WAIT_ABORT:
 		err = cdi_mgr_gpio_intr_wait_abort(cdi_mgr);
+		break;
+	case CDI_MGR_IOCTL_GPIO_GET_LEVEL:
+		err = cdi_mgr_gpio_get_level(cdi_mgr, (void __user *)arg);
+		break;
+	case CDI_MGR_IOCTL_GPIO_SET_LEVEL:
+		err = cdi_mgr_gpio_set_level(cdi_mgr, (const void __user *)arg);
 		break;
 	case CDI_MGR_IOCTL_GET_PWR_INFO:
 		err = cdi_mgr_get_pwr_ctrl_info(cdi_mgr, (void __user *)arg);
@@ -1596,6 +1680,31 @@ static const struct dev_pm_ops cdi_mgr_pm_ops = {
 	.runtime_resume = cdi_mgr_resume,
 };
 
+static int cdi_mgr_setup_gpio(struct device *dev, struct cdi_mgr_priv *cdi_mgr,
+			      uint32_t idx, uint32_t gpio_idx,
+			      uint32_t gpio_dir)
+{
+	int ret = 0;
+
+	if (gpio_dir == CAM_DEVBLK_GPIO_INPUT)
+		ret = gpiod_direction_input(cdi_mgr->gpios[idx].desc);
+	else if (gpio_dir == CAM_DEVBLK_GPIO_OUTPUT)
+		ret = gpiod_direction_output(cdi_mgr->gpios[idx].desc, 0);
+	else
+		return -EINVAL;
+
+	if (ret) {
+		dev_err(dev, "%s Failed to set gpio_dir %d for gpio_idx %d\n",
+			__func__, gpio_dir, gpio_idx);
+		return ret;
+	}
+
+	cdi_mgr->gpios[idx].gpio_dir = gpio_dir;
+	cdi_mgr->gpios[idx].idx = gpio_idx;
+
+	return 0;
+}
+
 static int cdi_mgr_setup_gpio_interrupt(struct device *dev, struct cdi_mgr_priv *cdi_mgr,
 					uint32_t idx, uint32_t gpio_idx, uint32_t intr_edge)
 {
@@ -1604,8 +1713,9 @@ static int cdi_mgr_setup_gpio_interrupt(struct device *dev, struct cdi_mgr_priv 
 
 	ret = gpiod_direction_input(cdi_mgr->gpios[idx].desc);
 	if (ret) {
-		dev_err(dev, "%s Failed to gpio direction : input 0\n",
-			__func__);
+		dev_err(dev,
+			"%s Failed to set input direction for gpio_idx %d\n",
+			__func__, gpio_idx);
 		return ret;
 	}
 
@@ -1616,11 +1726,11 @@ static int cdi_mgr_setup_gpio_interrupt(struct device *dev, struct cdi_mgr_priv 
 	}
 
 	cdi_mgr->gpios[idx].intr_irq = gpio_irq;
-	ret = devm_request_irq(dev,
+	ret = devm_request_any_context_irq(dev,
 			cdi_mgr->gpios[idx].intr_irq,
 			cdi_mgr_isr, intr_edge, dev_name(dev), cdi_mgr);
-	if (ret) {
-		dev_err(dev, "devm_request_irq failed with err %d\n", ret);
+	if (ret < 0) {
+		dev_err(dev, "devm_request_any_context_irq failed with err %d\n", ret);
 		return ret;
 	}
 	disable_irq(cdi_mgr->gpios[idx].intr_irq);
@@ -1688,12 +1798,60 @@ static int cdi_mgr_configure_gpios(struct device *dev, struct cdi_mgr_priv *cdi_
 					return ret;
 				}
 
-				if (of_property_read_bool(child, "intr-edge-falling")) {
+				if (of_property_read_bool(child, "input")) {
+					ret = cdi_mgr_setup_gpio(dev, cdi_mgr, i,
+							gpio_index, CAM_DEVBLK_GPIO_INPUT);
+					if (ret < 0) {
+						dev_err(dev, "%s():%d Failed to setup input gpio\n",
+							__func__, __LINE__);
+						return ret;
+					}
+				} else if (of_property_read_bool(child, "output")) {
+					ret = cdi_mgr_setup_gpio(dev, cdi_mgr, i,
+							gpio_index, CAM_DEVBLK_GPIO_OUTPUT);
+					if (ret < 0) {
+						dev_err(dev,
+							"%s():%d Failed to setup output gpio\n",
+							__func__, __LINE__);
+						return ret;
+					}
+				} else if (of_property_read_bool(child, "intr-level-low")) {
+					ret = cdi_mgr_setup_gpio_interrupt(dev, cdi_mgr, i,
+							gpio_index, IRQF_TRIGGER_LOW);
+					if (ret < 0) {
+						dev_err(dev,
+							"%s():%d Failed to setup intr-level-low"
+							"interrupt gpio\n",
+							__func__, __LINE__);
+						return ret;
+					}
+				} else if (of_property_read_bool(child, "intr-level-high")) {
+					ret = cdi_mgr_setup_gpio_interrupt(dev, cdi_mgr, i,
+							gpio_index, IRQF_TRIGGER_HIGH);
+					if (ret < 0) {
+						dev_err(dev,
+							"%s():%d Failed to setup intr-level-high"
+							"interrupt gpio\n",
+							__func__, __LINE__);
+						return ret;
+					}
+				} else if (of_property_read_bool(child, "intr-edge-any")) {
+					ret = cdi_mgr_setup_gpio_interrupt(dev, cdi_mgr, i,
+							gpio_index,
+							(IRQF_TRIGGER_FALLING | IRQF_TRIGGER_RISING));
+					if (ret < 0) {
+						dev_err(dev, "%s():%d Failed to setup intr-edge-any"
+							"interrupt gpio\n",
+							__func__, __LINE__);
+						return ret;
+					}
+				} else if (of_property_read_bool(child, "intr-edge-falling")) {
 					ret = cdi_mgr_setup_gpio_interrupt(dev, cdi_mgr, i,
 							gpio_index, IRQF_TRIGGER_FALLING);
 					if (ret < 0) {
-						dev_err(dev, "%s():%d Failed to setup input"
-							"interrupt gpio\n",
+						dev_err(dev,
+							"%s():%d Failed to setup intr-edge-falling"
+							" interrupt gpio\n",
 							__func__, __LINE__);
 						return ret;
 					}
@@ -1701,13 +1859,16 @@ static int cdi_mgr_configure_gpios(struct device *dev, struct cdi_mgr_priv *cdi_
 					ret = cdi_mgr_setup_gpio_interrupt(dev, cdi_mgr, i,
 							gpio_index, IRQF_TRIGGER_RISING);
 					if (ret < 0) {
-						dev_err(dev, "%s():%d Failed to setup input"
+						dev_err(dev,
+							"%s():%d Failed to setup intr-edge-rising"
 							" interrupt gpio\n",
 							__func__, __LINE__);
 						return ret;
 					}
 				} else {
-					dev_err(dev, "%s(): Invalid DT property\n", __func__);
+					dev_err(dev,
+						"%s(): Missing or unsupported Camera GPIO mode\n",
+						__func__);
 					return -EINVAL;
 				}
 				i++;

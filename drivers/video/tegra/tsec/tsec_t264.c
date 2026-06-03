@@ -65,6 +65,29 @@ struct tsec_reg_offsets_t t264_reg_offsets = {
 	.DMEM_LOGBUF_OFFSET = 0x14000,
 };
 
+int tsec_module_init_t26x(struct platform_device *dev)
+{
+	int err = 0;
+	struct tsec_device_data *pdata = platform_get_drvdata(dev);
+	struct resource *res = NULL;
+	void __iomem *regs = NULL;
+
+	/* Get register aperture */
+	res = platform_get_resource(dev, IORESOURCE_MEM, 0);
+	if (!res)
+		return -EINVAL;
+	regs = devm_ioremap_resource(&dev->dev, res);
+	if (IS_ERR(regs)) {
+		err = PTR_ERR(regs);
+
+		dev_err(&dev->dev, "failed to get register memory %d\n", err);
+		return err;
+	}
+	pdata->reg_aperture = regs;
+
+	return err;
+}
+
 int tsec_t264_init(struct platform_device *dev)
 {
 	int err = 0;
@@ -73,6 +96,18 @@ int tsec_t264_init(struct platform_device *dev)
 	u32 val;
 
 	mailbox0_addr = pdata->reg_aperture + t264_reg_offsets.MAILBOX0;
+
+	/*
+	 * Do not re-initialize tsec if it is already booted.
+	 * This is done to take care of the case wherein the
+	 * tsec driver is rmmod'ed and insmod'ed again without
+	 * resetting the device
+	 */
+	if (tsec_readl(pdata, t264_reg_offsets.MAILBOX0) == TSEC_RISCV_INIT_SUCCESS) {
+		dev_dbg(&dev->dev, "tsec fw already booted, no need to initialize it again\n");
+		pdata->power_on = true;
+		return err;
+	}
 
 	/* Program StreamID registers */
 	tsec_set_streamid_regs(&dev->dev, pdata);

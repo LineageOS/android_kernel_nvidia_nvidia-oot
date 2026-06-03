@@ -1,5 +1,18 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
-/* Copyright (c) 2019-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved */
+/* SPDX-License-Identifier: GPL-2.0-only
+ * SPDX-FileCopyrightText: Copyright (c) 2019-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms and conditions of the GNU General Public License,
+ * version 2, as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ */
 
 #ifndef INCLUDED_MACSEC_H
 #define INCLUDED_MACSEC_H
@@ -279,9 +292,9 @@ struct macsec_priv_data {
 
 int macsec_probe(struct ether_priv_data *pdata);
 int macsec_coe_config(struct macsec_priv_data *macsec_pdata,
-		uint32_t coe_enable, uint32_t coe_hdr_offset);
+		      u32 coe_enable, u32 coe_hdr_offset);
 int macsec_coe_lc(struct macsec_priv_data *macsec_pdata,
-		uint32_t ch, uint32_t lc1, uint32_t lc2);
+		  u32 ch, u32 lc1, u32 lc2);
 void macsec_remove(struct ether_priv_data *pdata);
 int macsec_open(struct macsec_priv_data *macsec_pdata,
 		void *const genl_info);
@@ -289,13 +302,13 @@ int macsec_close(struct macsec_priv_data *macsec_pdata);
 int macsec_suspend(struct macsec_priv_data *macsec_pdata);
 int macsec_resume(struct macsec_priv_data *macsec_pdata);
 
-#ifdef DEBUG_MACSEC
+#ifdef FTRACE_MACSEC
 #define PRINT_ENTRY()	(printk(KERN_DEBUG "-->%s()\n", __func__))
 #define PRINT_EXIT()	(printk(KERN_DEBUG "<--%s()\n", __func__))
 #else
 #define PRINT_ENTRY()
 #define PRINT_EXIT()
-#endif /* DEBUG_MACSEC */
+#endif /* FTRACE_MACSEC */
 
 #endif /* INCLUDED_MACSEC_H */
 

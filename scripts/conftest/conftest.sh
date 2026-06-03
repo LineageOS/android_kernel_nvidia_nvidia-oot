@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: Copyright (c) 2023-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2023-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 PATH="${PATH}:/bin:/sbin:/usr/bin"
 
@@ -5318,6 +5318,24 @@ compile_test() {
             compile_check_conftest "$CODE" "NV_OF_DMA_CONFIGURE_PRESENT" "" "functions"
         ;;
 
+        drm_unlocked_ioctl_flag_present)
+            # Determine if DRM_UNLOCKED IOCTL flag is present.
+            #
+            # DRM_UNLOCKED was removed by commit 2798ffcc1d6a ("drm: Remove
+            # locking for legacy ioctls and DRM_UNLOCKED") in v6.8.
+            #
+            # DRM_UNLOCKED definition was moved from drmP.h to drm_ioctl.h by
+            # commit 2640981f3600 ("drm: document drm_ioctl.[hc]") in v4.12.
+            CODE="
+            #include <drm/drm_ioctl.h>
+            #if defined(NV_DRM_DRMP_H_PRESENT)
+            #include <drm/drmP.h>
+            #endif
+            int flags = DRM_UNLOCKED;"
+
+            compile_check_conftest "$CODE" "NV_DRM_UNLOCKED_IOCTL_FLAG_PRESENT" "" "types"
+        ;;
+
         icc_get)
             #
             # Determine if icc_get() function is present
@@ -6229,23 +6247,23 @@ compile_test() {
             compile_check_conftest "$CODE" "NV_IOMMU_SVA_BIND_DEVICE_HAS_DRVDATA_ARG" "" "types"
         ;;
 
-        vm_area_struct_has_const_vm_flags)
+        vm_flags_set)
             #
-            # Determine if the 'vm_area_struct' structure has
-            # const 'vm_flags'.
+            # Determine if the vm_flags_set() function is present. The
+            # presence of this function indicates that the vm_flags_clear()
+            # function is also present.
             #
-            # A union of '__vm_flags' and 'const vm_flags' was added 
-            # by commit bc292ab00f6c ("mm: introduce vma->vm_flags
-            # wrapper functions") from v6.3-rc1 (2023-02-09) in the
-            # linux kernel tree.
+            # The functions vm_flags_set()/ vm_flags_clear() were added by
+            # commit bc292ab00f6c ("mm: introduce vma->vm_flags wrapper
+            # functions") in v6.3-rc1 (2023-02-09).
             #
             CODE="
-            #include <linux/mm_types.h>
-            int conftest_vm_area_struct_has_const_vm_flags(void) {
-                return offsetof(struct vm_area_struct, __vm_flags);
+            #include <linux/mm.h>
+            void conftest_vm_flags_set(void) {
+                vm_flags_set();
             }"
 
-            compile_check_conftest "$CODE" "NV_VM_AREA_STRUCT_HAS_CONST_VM_FLAGS" "" "types"
+            compile_check_conftest "$CODE" "NV_VM_FLAGS_SET_PRESENT" "" "functions" $1
         ;;
 
         drm_driver_has_dumb_destroy)
@@ -6692,6 +6710,25 @@ compile_test() {
             }"
 
             compile_check_conftest "$CODE" "NV_BLK_QUEUE_MAX_HW_SECTORS_PRESENT" "" "functions"
+        ;;
+
+        block_device_operations_getgeo_has_gendisk_arg)
+            #
+            # Determine if the 'getgeo' function pointer from the
+            # 'block_device_operations' structure has 'gendisk' type argument.
+            #
+            # Change made in Linux kernel version v6.18
+            # Change made by commit 4fc8728aa34f ("block: switch ->getgeo()
+            # to struct gendisk").
+            #
+            CODE="
+            #include <linux/blkdev.h>
+            int conftest(struct block_device_operations *ops) {
+                    int (*fn)(struct gendisk *, struct hd_geometry *) = ops->getgeo;
+            }"
+
+            compile_check_conftest "$CODE" \
+                    "NV_BLOCK_DEVICE_OPERATIONS_GETGEO_HAS_GENDISK_ARG" "" "types"
         ;;
 
         block_device_operations_open_has_gendisk_arg)
@@ -7376,6 +7413,25 @@ compile_test() {
             }"
 
             compile_check_conftest "$CODE" "NV_DRM_EDID_CONNECTOR_ADD_MODES_PRESENT" "" "functions"
+        ;;
+
+        drm_fb_helper_alloc_fbi)
+            #
+            # Determine if the function 'drm_fb_helper_alloc_info' is present.
+            #
+            # Commit 7fd50bc39d12 ("drm/fb-helper: Rename drm_fb_helper_alloc_fbi()
+            # to use _info postfix") renamed the function drm_fb_helper_alloc_fbi to
+            # drm_fb_helper_alloc_info in Linux v6.2.
+            #
+            CODE="
+            #undef CONFIG_ACPI
+            #include <drm/drm_fb_helper.h>
+            void conftest_drm_fb_helper_alloc_fbi(void)
+            {
+                    drm_fb_helper_alloc_fbi();
+            }"
+
+            compile_check_conftest "$CODE" "NV_DRM_FB_HELPER_ALLOC_FBI_PRESENT" "" "functions"
         ;;
 
         drm_fb_helper_alloc_info)
@@ -8189,21 +8245,37 @@ compile_test() {
             compile_check_conftest "$CODE" "NV_OF_PROPERTY_FOR_EACH_REMOVED_INTERNAL_ARGS" "" "types"
         ;;
 
-        page_pool_params_struct_has_netdev)
+        of_property_present)
             #
-            # Determine if the 'page_pool_params' structure has 'netdev' member.
+            # Determine if function of_property_present() is present.
             #
-            # Upstream Linux change info:
-            # - Commit 083772c9f972 ("net: page_pool: record pools per netdev")
-            # - Added in Linux v6.8
+            # Upstream Linux change details:
+            # - Commit 9cbad37ce812 ("of: Add of_property_present() helper")
+            # - Added in Linux v6.3
             #
             CODE="
-            #include <include/net/page_pool/types.h>
-            int conftest_page_pool_params_struct_has_netdev(void) {
-                return offsetof(struct page_pool_params, netdev);
+            #include <linux/of.h>
+            void conftest_of_property_present(void) {
+                of_property_present();
             }"
 
-            compile_check_conftest "$CODE" "NV_PAGE_POOL_PARAMS_STRUCT_HAS_NETDEV" "" "types"
+            compile_check_conftest "$CODE" "NV_OF_PROPERTY_PRESENT" "" "functions"
+        ;;
+
+        platform_msi_domain_alloc_irqs)
+            #
+            # Determine if the platform_msi_domain_alloc_irqs() API available or not.
+            #
+            # API platform_msi_domain_free_irqs() is dropped from Linux 6.9
+            # with commit 1a4671ff7a903e87 ("platform-msi: Remove unused interfaces")
+            #
+            CODE="
+            #include <linux/msi.h>
+            void conftest_platform_msi_domain_alloc_irqs(void) {
+                platform_msi_domain_alloc_irqs();
+            }"
+
+            compile_check_conftest "$CODE" "NV_PLATFORM_MSI_DOMAIN_ALLOC_IRQS_PRESENT" "" "functions"
         ;;
 
         page_struct_has___folio_index)
@@ -8222,26 +8294,20 @@ compile_test() {
             compile_check_conftest "$CODE" "NV_PAGE_STRUCT_HAS___FOLIO_INDEX" "" "types"
         ;;
 
-        platform_device_msi_init_and_alloc_irqs)
+        platform_msi_domain_free_irqs)
             #
-            # Determine if the functions platform_device_msi_init_and_alloc_irqs()
-            # and platform_device_msi_free_irqs_all() are present. These functions
-            # were added to replace the legacy platform_msi_domain_alloc_irqs() and
-            # platform_msi_domain_free_irqs function which were removed completely
-            # in Linux v6.9
+            # Determine if the platform_msi_domain_free_irqs() API available or not.
             #
-            # Upstream Linux change info:
-            # - Commit c88f9110bfbc ("platform-msi: Prepare for real per device domains")
-            # - Added in Linux v6.9.
+            # API platform_msi_domain_free_irqs() is dropped from Linux 6.9
+            # with commit 1a4671ff7a903e87 ("platform-msi: Remove unused interfaces")
             #
             CODE="
             #include <linux/msi.h>
-            void conftest_platform_device_msi_init_and_alloc_irqs(void) {
-                platform_device_msi_init_and_alloc_irqs();
+            void conftest_platform_msi_domain_free_irqs(void) {
+                platform_msi_domain_free_irqs();
             }"
 
-            compile_check_conftest "$CODE" \
-                "NV_PLATFORM_DEVICE_MSI_INIT_AND_ALLOC_IRQS_PRESENT" "" "functions"
+            compile_check_conftest "$CODE" "NV_PLATFORM_MSI_DOMAIN_FREE_IRQS_PRESENT" "" "functions"
         ;;
 
         pwm_chip_struct_has_base_arg)
@@ -8603,6 +8669,27 @@ compile_test() {
             compile_check_conftest "$CODE" "NV_SLAB_MEM_SPREAD" "" "types"
         ;;
 
+        snd_compress_ops_struct_pointer_has_tstamp64_arg)
+            #
+            # Determine if the 'pointer' function pointer of the
+            # 'snd_compress_ops' structure has a 'snd_compr_tstamp64' argument.
+            #
+            # Upstream Linux change info:
+            # - Commit 2c92e2fbe9e2 ("ALSA: compress_offload: Add 64-bit safe
+            #   timestamp infrastructure").
+            # - Added in Linux v6.18.
+            #
+            CODE="
+            #include <sound/soc-component.h>
+            int conftest(struct snd_compress_ops *ops) {
+                int (*fn)(struct snd_soc_component *, struct snd_compr_stream *,
+                          struct snd_compr_tstamp64 *tstamp) = ops->pointer;
+            }"
+
+            compile_check_conftest "$CODE" \
+                    "NV_SND_COMPRESS_OPS_STRUCT_POINTER_HAS_TSTAMP64_ARG" "" "types"
+        ;;
+
         snd_soc_card_jack_new_has_no_snd_soc_jack_pins)
             #
             # Determine if the function snd_soc_card_jack_new() has 'pins' and
@@ -8642,6 +8729,24 @@ compile_test() {
 
             compile_check_conftest "$CODE" \
                     "NV_SND_SOC_COMPONENT_DRIVER_STRUCT_HAS_NON_LEGACY_DAI_NAMING" "" "types"
+        ;;
+
+        snd_soc_component_to_dapm)
+            #
+            # Determine if the function 'snd_soc_component_to_dapm' is present.
+            #
+            # Upstream Linux change info:
+            # - Commit a1c99b6097af ("ASoC: soc-component: add snd_soc_component_to_dapm()")
+            # - Added in Linux v7.0.
+            #
+            CODE="
+            #include <sound/soc.h>
+            #include <sound/soc-dapm.h>
+            void conftest_snd_soc_component_to_dapm(void) {
+                snd_soc_component_to_dapm();
+            }"
+
+            compile_check_conftest "$CODE" "NV_SND_SOC_COMPONENT_TO_DAPM" "" "functions"
         ;;
 
         snd_soc_dai_link_struct_has_c2c_params_arg)
@@ -8696,6 +8801,44 @@ compile_test() {
 
             compile_check_conftest "$CODE" "NV_SND_SOC_DAI_STRUCT_HAS_SYMMETRIC_PREFIX" "" "types"
         ;;
+
+        snd_soc_dapm_kcontrol_to_dapm)
+            #
+            # Determine if the function 'snd_soc_dapm_kcontrol_to_dapm' is present.
+            #
+            # Upstream Linux change info:
+            # - Commit 253204186530 ("ASoC: soc-dapm: rename snd_soc_dapm_kcontrol_dapm()
+            #   to snd_soc_dapm_kcontrol_to_dapm()")
+            # - Added in Linux v7.0.
+            #
+            CODE="
+            #include <sound/soc.h>
+            #include <sound/soc-dapm.h>
+            void conftest_snd_soc_dapm_kcontrol_to_dapm(void) {
+                snd_soc_dapm_kcontrol_to_dapm();
+            }"
+
+            compile_check_conftest "$CODE" "NV_SND_SOC_DAPM_KCONTROL_TO_DAPM" "" "functions"
+        ;;
+
+        snd_soc_dapm_set_idle_bias)
+            #
+            # Determine if the function 'snd_soc_dapm_set_idle_bias' is present.
+            #
+            # Upstream Linux change info:
+            # - Commit cb3c715d8960 ("ASoC: soc-dapm: add snd_soc_dapm_set_idle_bias()").
+            # - Added in Linux v6.18.
+            #
+            CODE="
+            #include <sound/soc.h>
+            #include <sound/soc-dapm.h>
+            void conftest_snd_soc_dapm_set_idle_bias(void) {
+                snd_soc_dapm_set_idle_bias();
+            }"
+
+            compile_check_conftest "$CODE" "NV_SND_SOC_DAPM_SET_IDLE_BIAS" "" "functions"
+        ;;
+
 
         snd_soc_of_get_dai_name_has_index_arg)
             #
@@ -8841,18 +8984,21 @@ compile_test() {
             compile_check_conftest "$CODE" "NV_TEGRA264_CHIP_ID_PRESENT" "" "types"
         ;;
 
-        tegra264_io_pad_power_enable)
+        tegra_pmc_io_pad_power_enable)
             #
-            # Determine if tegra264_io_pad_power_enable() exists or not
+            # Determine if tegra_pmc_io_pad_power_enable/disable() are present.
             #
+            # Upstream Linux change info:
+            # - Commit 70f752ebb08c ("soc/tegra: pmc: Add PMC contextual functions").
+            # - Added in Linux v7.0.
             CODE="
             #include <soc/tegra/pmc.h>
-            int conftest_tegra264_io_pad_power_enable(void) {
-                tegra264_io_pad_power_enable();
+            int conftest_tegra_pmc_io_pad_power_enable(void) {
+                tegra_pmc_io_pad_power_enable();
             }
             "
 
-            compile_check_conftest "$CODE" "NV_TEGRA264_IO_PAD_POWER_ENABLE_PRESENT" "" "functions"
+            compile_check_conftest "$CODE" "NV_TEGRA_PMC_IO_PAD_POWER_ENABLE_PRESENT" "" "functions"
         ;;
 
         tegra_ivc_struct_has_iosys_map)
@@ -8873,19 +9019,6 @@ compile_test() {
 
             compile_check_conftest "$CODE" "NV_TEGRA_IVC_STRUCT_HAS_IOSYS_MAP" "" "types"
         ;;
-
-        tegra_ivc_use_ivc_ext_driver)
-            #
-            # Determine to use ivc ext driver
-            #
-            CODE="
-            #include <soc/tegra/ivc.h>
-            void conftest_tegra_ivc_use_ivc_ext_driver(void) {
-                    tegra_ivc_empty();
-            }"
-
-            compile_check_conftest "$CODE" "NV_TEGRA_IVC_USE_IVC_EXT_DRIVER" "" "types"
-	;;
 
         tegra264_bwmgr_debug_macro)
             #
@@ -9326,11 +9459,49 @@ compile_test() {
                     "NV_V4L2_SUBDEV_PAD_OPS_STRUCT_HAS_DV_TIMINGS" "" "types"
         ;;
 
+        vb2_buffer_struct_has_wait_prepare_and_finish)
+            #
+            # Determine if the structure 'vb2_buffer' has the 'wait_prepare' and
+            # 'wait_finish' function pointers.
+            #
+            # Upstream Linux change info:
+            # - Commit b70886ff5833 ("media: vb2: drop wait_prepare/finish callbacks").
+            # - These function pointers were removed in Linux v7.0.
+            #
+            CODE="
+            #include <media/videobuf2-core.h>
+            int conftest_vb2_buffer_struct_has_wait_prepare_and_finish(void) {
+                return offsetof(struct vb2_buffer, wait_prepare);
+            }"
+
+            compile_check_conftest "$CODE" "NV_VB2_BUFFER_STRUCT_HAS_WAIT_PREPARE_AND_FINISH" "" "types"
+        ;;
+
+        vsock_transport_struct_allow_callbacks_have_vsk_arg)
+            #
+            # Determine if the 'dgram_allow', 'stream_allow' and
+            # 'seqpacket_allow' callbacks of the 'vsock_transport' structure
+            # have a 'vsk' argument.
+            #
+            # Upstream Linux change info:
+            # - Commit eafb64f40ca4 ("vsock: add netns to vsock core").
+            # - Added in Linux v7.0
+            #
+            CODE="
+            #include <net/af_vsock.h>
+            void conftest(struct vsock_transport *t) {
+                bool (*fn)(struct vsock_sock *vsk, u32, u32) = t->dgram_allow;
+            }"
+
+            compile_check_conftest "$CODE" \
+                "NV_VSOCK_TRANSPORT_STRUCT_ALLOW_CALLBACKS_HAVE_VSK_ARG" "" "types"
+        ;;
+
         work_on_cpu_key)
             #
             # Determine if the function work_on_cpu_key() is present.
             #
-            # In Linux v6. , commit 265f3ed07703 ("workqueue: Provide one lock class
+            # In Linux v6.17, commit 265f3ed07703 ("workqueue: Provide one lock class
             # key per work_on_cpu() callsite") added the function work_on_cpu_key().
             #
             CODE="

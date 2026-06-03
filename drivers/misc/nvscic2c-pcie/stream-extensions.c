@@ -301,7 +301,7 @@ fops_mmap(struct file *filep, struct vm_area_struct *vma)
 	memaddr = stream_obj->aper;
 
 	vma->vm_pgoff  = 0;
-#if defined(NV_VM_AREA_STRUCT_HAS_CONST_VM_FLAGS) /* Linux v6.3 */
+#if defined(NV_VM_FLAGS_SET_PRESENT) /* Linux v6.3 */
 	vm_flags_set(vma, VM_DONTCOPY);
 #else
 	vma->vm_flags |= (VM_DONTCOPY);

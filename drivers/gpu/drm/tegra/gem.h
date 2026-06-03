@@ -88,8 +88,10 @@ struct tegra_bo *tegra_bo_create_with_handle(struct drm_file *file,
 					     unsigned long flags,
 					     u32 *handle);
 void tegra_bo_free_object(struct drm_gem_object *gem);
+#ifndef CONFIG_TEGRA_DRM_DISABLE_LEGACY_INTERFACE
 int tegra_bo_dumb_create(struct drm_file *file, struct drm_device *drm,
 			 struct drm_mode_create_dumb *args);
+#endif
 
 extern const struct vm_operations_struct tegra_bo_vm_ops;
 

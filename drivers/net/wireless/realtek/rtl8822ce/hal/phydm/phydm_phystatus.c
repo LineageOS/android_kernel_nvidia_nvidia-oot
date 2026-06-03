@@ -1653,6 +1653,9 @@ void phydm_avg_condi_num(void *dm_void,
 
 	arry_idx = pktinfo->rate_ss - 1;
 
+	if (arry_idx >= RF_PATH_MEM_SIZE)
+		return;
+
 	dbg_s->p4_cnt[arry_idx]++;
 	dbg_s->cn_sum[arry_idx] += dbg_i->condition_num_seg0;
 

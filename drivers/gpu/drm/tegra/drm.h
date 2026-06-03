@@ -148,9 +148,11 @@ int tegra_drm_unregister_client(struct tegra_drm *tegra,
 int host1x_client_iommu_attach(struct host1x_client *client);
 void host1x_client_iommu_detach(struct host1x_client *client);
 
+#ifndef CONFIG_TEGRA_DRM_DISABLE_LEGACY_INTERFACE
 void *tegra_drm_alloc(struct tegra_drm *tegra, size_t size, dma_addr_t *iova);
 void tegra_drm_free(struct tegra_drm *tegra, size_t size, void *virt,
 		    dma_addr_t iova);
+#endif
 
 #ifdef CONFIG_DRM_TEGRA_HAVE_DISPLAY
 struct cec_notifier;

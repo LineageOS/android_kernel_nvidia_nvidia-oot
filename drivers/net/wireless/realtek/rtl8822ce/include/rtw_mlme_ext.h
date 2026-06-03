@@ -468,7 +468,7 @@ struct get_chplan_resp {
 #endif
 	u8 proto_en;
 	u8 chset_num;
-	RT_CHANNEL_INFO chset[0];
+	RT_CHANNEL_INFO chset[];
 };
 
 #ifdef CONFIG_PROC_DEBUG

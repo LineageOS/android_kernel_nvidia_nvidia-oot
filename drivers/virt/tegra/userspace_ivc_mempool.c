@@ -1,7 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
-/*
- * Copyright (c) 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- */
+// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-FileCopyrightText: Copyright (c) 2022-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include <nvidia/conftest.h>
 
@@ -181,6 +179,16 @@ static int ivc_mempool_mmap(struct file *filp, struct vm_area_struct *vma)
 	if (((vma->vm_pgoff == 0) &&
 		(map_region_sz == mempooldev->mempoolcfg->size))) {
 
+		/* Prevent exec on this VMA: clear VM_MAYEXEC so mprotect cannot add PROT_EXEC */
+#if defined(NV_VM_FLAGS_SET_PRESENT) /* Linux v6.3 */
+		vm_flags_clear(vma, VM_MAYEXEC);
+#else
+		vma->vm_flags &= ~VM_MAYEXEC;
+#endif
+
+		/* Make page protections non-executable at page-prot level (optional but stronger) */
+		vma->vm_page_prot = pgprot_nx(vma->vm_page_prot);
+
 		mpool_ipa_pfn =
 			(mempooldev->mempoolcfg->pa >> PAGE_SHIFT);
 
@@ -247,7 +255,6 @@ static int __init add_ivc_mempool_dev(struct ivc_mempool_dev *mempooldev,
 {
 	int ret;
 
-	/* TODO - validate mempool data */
 	mempooldev->mempoolcfg = mempoolcfg;
 	mempooldev->minor = mempooldev->mempoolcfg->id;
 	mempooldev->dev = MKDEV(MAJOR(ivc_mempool_first_cdev),

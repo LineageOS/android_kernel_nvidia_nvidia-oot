@@ -17,7 +17,13 @@
 #include "dla_os_interface.h"
 #include "dla_t19x_fw_version.h"
 
+#include "port/nvdla_host_wrapper.h"
 #include "port/nvdla_sync.h"
+
+#if defined(NVDLA_HAVE_CONFIG_AXI) && (NVDLA_HAVE_CONFIG_AXI == 1)
+extern struct nvhost_device_data t25x_nvdla0_info;
+#endif // NVDLA_HAVE_CONFIG_AXI
+extern struct platform_driver nvdla_driver;
 
 #if defined(NVDLA_HAVE_CONFIG_HSIERRINJ) && (NVDLA_HAVE_CONFIG_HSIERRINJ == 1)
 #include <linux/tegra-hsierrrptinj.h>
@@ -70,9 +76,36 @@
 enum {
 	NV_DLA0_CLASS_ID		= 0xF3,
 	NV_DLA1_CLASS_ID		= 0xF4,
-	NV_DLA0_SIM_CLASS_ID		= 0xF5,
-	NV_DLA1_SIM_CLASS_ID		= 0xF6,
+
+	/* Reserving SIM,FPGA range 0x100-0x1FF */
+	NV_DLA_SIM_CLASS_ID_MIN		= 0x100,
+	NV_DLA_SIM_CLASS_ID_MAX		= 0x1FF,
+
+	NV_DLA0_SIM_CLASS_ID		= 0x100,
+	NV_DLA1_SIM_CLASS_ID		= 0x101,
+
+	/**
+	 * Reserving context range 0x1000-0x1FFF
+	 *  [ 31:12        | 11:8       | 7:0        ]
+	 *  [ Reserved     | Device ID  | Context ID ]
+	 **/
+	NV_DLA_CTX_CLASS_ID_MIN		= 0x1000,
+	NV_DLA_CTX_CLASS_ID_MAX		= 0x1FFF,
+
+	NV_DLA0_CTX0_CLASS_ID		= 0x1000,
+	NV_DLA0_CTX1_CLASS_ID		= 0x1001,
+	NV_DLA0_CTX2_CLASS_ID		= 0x1002,
+	NV_DLA0_CTX3_CLASS_ID		= 0x1003,
+
+	NV_DLA1_CTX0_CLASS_ID		= 0x1100,
+	NV_DLA1_CTX1_CLASS_ID		= 0x1101,
+	NV_DLA1_CTX2_CLASS_ID		= 0x1102,
+	NV_DLA1_CTX3_CLASS_ID		= 0x1103,
 };
+
+#define NV_DLA_CTX_ID_INVALID 0xFFFFFFFFU
+#define NV_DLA_CTX_ID_SHIFT 0
+#define NV_DLA_CTX_ID_MASK 0x7FU
 
 /**
  * DLA firmware file names
@@ -241,7 +274,43 @@ struct nvdla_cmd_mem {
 
 enum nvdla_submit_mode {
 	NVDLA_SUBMIT_MODE_MMIO		= 0,
-	NVDLA_SUBMIT_MODE_CHANNEL	= 1
+	NVDLA_SUBMIT_MODE_MTHD		= 0,
+	NVDLA_SUBMIT_MODE_CHANNEL	= 1,
+	NVDLA_SUBMIT_MODE_MNOC		= 2,
+
+	NVDLA_SUBMIT_MODE_MAX_NUM	= 3,
+};
+
+/**
+ * data structure to save the submission statistics
+ *
+ * @num_successes	Number of successful submissions
+ * @num_fails		Number of failed submissions(except timeouts)
+ * @num_timeouts	Number of submission timeouts.
+ * @last_error		Error status of the last submission.
+ * @timestamp_ns	Timestamp (in ns) at which stat is modified.
+ */
+struct nvdla_submit_stat {
+	uint64_t num_successes;
+	uint64_t num_fails;
+	uint64_t num_timeouts;
+	int32_t last_error;
+	uint64_t timestamp_ns;
+};
+
+enum nvdla_cmd_response_mode {
+	NVDLA_RESPONSE_MODE_SWGEN	= 0,
+	NVDLA_RESPONSE_MODE_MNOC	= 1
+};
+
+struct cmd_response_info {
+	u32 response_mode;
+	u32 num_interrupts_swgen;
+	u32 last_err_status_swgen;
+	u64 last_err_timestamp_swgen;
+	u32 num_interrupts_mnoc;
+	u32 last_err_status_mnoc;
+	u64 last_err_timestamp_mnoc;
 };
 
 /**
@@ -254,6 +323,7 @@ enum nvdla_submit_mode {
  * @en_trace			flag to enable kernel tracing
  * @submit_mode			flag to enable task submit mode, default is
  *						NVDLA_SUBMIT_MODE_MMIO
+ * @submit_stat			statistics on command submissions
  * @fw_version			saves current firmware version
  * @cmd_mem				structure to hold command memory pool
  * @trace_enable		to enable/disable the DLA firmware trace
@@ -272,6 +342,14 @@ enum nvdla_submit_mode {
  * @is_suspended	flag to check if module is in suspend state.
  * @ping_lock	lock to synchronize the ping operation requests.
  * @available		flag to check if device is available to use.
+ * @bitbang		bitbangs the registers for booting, if set.
+ * @sync_dev		synchronization device handle.
+ * @poweroff_work	power off work to be dispatched for autosuspend.
+ * @parent_pdev	pointer to parent dla device if exists.
+ * @ctx_list_lock	synchronize the access to context device list.
+ * @ctx_list_head	head of context devices list
+ * @ctx_list_node	node to link in the context device list.
+ * @ctx_id		channel id corresponding to context.
  */
 struct nvdla_device {
 	struct device *dev;
@@ -285,6 +363,7 @@ struct nvdla_device {
 	u32 dbg_mask;
 	u32 en_trace;
 	u32 submit_mode;
+	struct nvdla_submit_stat submit_stat[NVDLA_SUBMIT_MODE_MAX_NUM];
 	u32 fw_version;
 	struct nvdla_cmd_mem cmd_mem;
 	u32 trace_enable;
@@ -309,6 +388,12 @@ struct nvdla_device {
 	u32 bitbang;
 	struct nvdla_sync_device *sync_dev;
 	struct work_struct poweroff_work;
+	struct platform_device *parent_pdev;
+	struct mutex ctx_list_lock;
+	struct list_head ctx_list_head;
+	struct list_head ctx_list_node;
+	uint32_t ctx_id;
+	struct cmd_response_info response_info;
 };
 
 /**
@@ -512,6 +597,10 @@ void nvdla_put_task_mem(struct nvdla_task *task);
 size_t nvdla_get_max_task_size(void);
 int nvdla_alloc_gcov_region(struct platform_device *pdev);
 int nvdla_free_gcov_region(struct platform_device *pdev, bool update_region);
+int nvdla_alloc_dump_region(struct platform_device *pdev);
+void nvdla_free_dump_region(struct platform_device *pdev);
+int nvdla_alloc_trace_region(struct platform_device *pdev);
+void nvdla_free_trace_region(struct platform_device *pdev);
 
 int nvdla_emulator_submit(struct nvdla_queue *queue,
 				struct nvdla_emu_task *task);
@@ -532,5 +621,58 @@ int nvdla_error_inj_handler(unsigned int instance_id,
 #endif /* NVDLA_HAVE_CONFIG_HSIERRINJ */
 
 int nvdla_ping(struct platform_device *pdev, struct nvdla_ping_args *args);
+
+int32_t nvdla_device_data_init(struct platform_device *pdev);
+void nvdla_device_data_deinit(struct platform_device *pdev);
+
+static inline bool nvdla_is_ctx_device(struct platform_device *pdev)
+{
+#if defined(NVDLA_HAVE_CONFIG_AXI) && (NVDLA_HAVE_CONFIG_AXI == 1)
+	struct nvhost_device_data *pdata = platform_get_drvdata(pdev);
+
+	return ((pdata->class >= NV_DLA_CTX_CLASS_ID_MIN) &&
+			(pdata->class <= NV_DLA_CTX_CLASS_ID_MAX));
+#else
+	(void) pdev;
+	return false;
+#endif // NVDLA_HAVE_CONFIG_AXI
+}
+
+static inline bool nvdla_is_sim_device(struct platform_device *pdev)
+{
+	struct nvhost_device_data *pdata = platform_get_drvdata(pdev);
+
+	return ((pdata->class >= NV_DLA_SIM_CLASS_ID_MIN) &&
+			(pdata->class <= NV_DLA_SIM_CLASS_ID_MAX));
+}
+
+static inline bool nvdla_is_sim_or_ctx_device(struct platform_device *pdev)
+{
+	return (nvdla_is_sim_device(pdev) || nvdla_is_ctx_device(pdev));
+}
+
+static inline bool nvdla_is_vmctrl_device(struct platform_device *pdev)
+{
+#if defined(NVDLA_HAVE_CONFIG_AXI) && (NVDLA_HAVE_CONFIG_AXI == 1)
+	return (of_get_available_child_count(pdev->dev.of_node) > 0);
+#else
+	(void) pdev;
+	return false;
+#endif // NVDLA_HAVE_CONFIG_AXI
+}
+
+static inline uint32_t nvdla_device_get_ctx_id(struct platform_device *pdev)
+{
+	uint32_t ctx_id = NV_DLA_CTX_ID_INVALID;
+	struct nvhost_device_data *pdata = platform_get_drvdata(pdev);
+
+	if (!nvdla_is_ctx_device(pdev))
+		goto fail;
+
+	ctx_id = ((pdata->class >> NV_DLA_CTX_ID_SHIFT) & NV_DLA_CTX_ID_MASK);
+
+fail:
+	return ctx_id;
+}
 
 #endif /* End of __NVHOST_NVDLA_H__ */

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #include <linux/of.h>
 #include <linux/clk.h>
 #include <linux/reset.h>
@@ -21,6 +21,7 @@
 #include "pva_kmd_silicon_utils.h"
 #include "pva_kmd_silicon_boot.h"
 #include "pva_kmd_linux_device_api.h"
+#include "pva_kmd_shim_debugfs.h"
 
 #define HVC_NR_PVA_CONFIG_REGS_CALL 0x8136U
 
@@ -51,7 +52,7 @@ int pva_kmd_linux_host1x_init(struct pva_kmd_device *pva)
 	phys_addr_t syncpt_phys_base;
 	size_t all_syncpt_size;
 	int err = 0;
-	uint32_t stride, num_syncpts;
+	uint32_t syncpt_stride, num_syncpts;
 	uint32_t syncpt_page_size;
 	dma_addr_t sp_start;
 	struct nvpva_device_data *pdata = pva_kmd_linux_device_get_data(pva);
@@ -72,14 +73,14 @@ int pva_kmd_linux_host1x_init(struct pva_kmd_device *pva)
 	}
 
 	err = host1x_syncpt_get_shim_info(pdata->host1x, &syncpt_phys_base,
-					  &stride, &num_syncpts);
+					  &syncpt_stride, &num_syncpts);
 	if (err < 0) {
 		dev_err(dev, "Failed to get syncpt shim_info");
 		goto err_out;
 	}
 
-	all_syncpt_size = stride * num_syncpts;
-	syncpt_page_size = stride;
+	all_syncpt_size = syncpt_stride * num_syncpts;
+	syncpt_page_size = syncpt_stride;
 	sp_start = dma_map_resource(dev, syncpt_phys_base, all_syncpt_size,
 				    DMA_BIDIRECTIONAL, DMA_ATTR_SKIP_CPU_SYNC);
 	if (dma_mapping_error(dev, sp_start)) {
@@ -134,7 +135,7 @@ void pva_kmd_linux_host1x_deinit(struct pva_kmd_device *pva)
 	int err = 0;
 	phys_addr_t base;
 	size_t size;
-	uint32_t stride, num_syncpts;
+	uint32_t syncpt_stride, num_syncpts;
 	struct nvpva_device_data *pdata = pva_kmd_linux_device_get_data(pva);
 	struct device *dev = &pdata->smmu_contexts[PVA_R5_SMMU_CONTEXT_ID]->dev;
 
@@ -143,13 +144,13 @@ void pva_kmd_linux_host1x_deinit(struct pva_kmd_device *pva)
 		return;
 	}
 
-	err = host1x_syncpt_get_shim_info(pdata->host1x, &base, &stride,
+	err = host1x_syncpt_get_shim_info(pdata->host1x, &base, &syncpt_stride,
 					  &num_syncpts);
 	if (err < 0) {
 		dev_err(dev, "Failed to get syncpt shim_info when deiniting");
 		return;
 	}
-	size = stride * num_syncpts;
+	size = syncpt_stride * num_syncpts;
 
 	dma_unmap_resource(dev, pva->ro_syncpt_base_iova, size, DMA_TO_DEVICE,
 			   DMA_ATTR_SKIP_CPU_SYNC);

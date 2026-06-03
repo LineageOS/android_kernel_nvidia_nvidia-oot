@@ -34,7 +34,7 @@
 #define ECC_REQUEST_FAILED		0xFFFFFFFF
 
 #if (IS_ENABLED(CONFIG_TEGRA_HSIERRRPTINJ))
-#define HSI_QSPI_REPORT_ID(inst)	(0x805B + (inst))
+#define HSI_QSPI_REPORT_ID	0x805BU
 #define HSI_ERROR_MAGIC			0xDEADDEAD
 
 static uint32_t total_instance_id;
@@ -68,6 +68,20 @@ struct vmtd_dev {
 };
 
 #define IVC_RESET_RETRIES 30
+
+/**
+ * Average erase bandwidth of the QSPI device(Macronix).
+ * Considering 250KBps as the average erase bandwidth of the QSPI device(Macronix)
+ * for calculating the maximum erase size.
+ */
+#define AVG_ERASE_BW_BPS  (250U * 1024U)
+
+/**
+ * Maximum erase size that can be erased in one go.
+ * Since the timeout is set to 30 seconds, Erasing the amount of data that takes maximum
+ * 20 seconds so as not to timeout.
+ */
+#define MAX_ERASE_SIZE  (AVG_ERASE_BW_BPS * 20U)
 
 static inline struct vmtd_dev *mtd_to_vmtd(struct mtd_info *mtd)
 {
@@ -125,29 +139,21 @@ static irqreturn_t ivc_irq_handler(int irq, void *data)
  * @}
  */
 
-static int vmtd_send_cmd(struct vmtd_dev *vmtddev, struct vs_request *vs_req, bool use_timeout)
+static int vmtd_send_cmd(struct vmtd_dev *vmtddev, struct vs_request *vs_req)
 {
 	while (tegra_hv_ivc_channel_notified(vmtddev->ivck) != 0) {
-		if (use_timeout) {
-			if ((wait_for_completion_timeout(&vmtddev->msg_complete,
+		if ((wait_for_completion_timeout(&vmtddev->msg_complete,
 				msecs_to_jiffies(IVC_TIMEOUT_MS)) == 0)) {
-				dev_err(vmtddev->device, "Request sending timeout - 1!\n");
-				return -EIO;
-			}
-		} else {
-			wait_for_completion(&vmtddev->msg_complete);
+			dev_err(vmtddev->device, "Request sending timeout - 1!\n");
+			return -EIO;
 		}
 	}
 
 	while (!tegra_hv_ivc_can_write(vmtddev->ivck)) {
-		if (use_timeout) {
-			if ((wait_for_completion_timeout(&vmtddev->msg_complete,
+		if ((wait_for_completion_timeout(&vmtddev->msg_complete,
 			msecs_to_jiffies(IVC_TIMEOUT_MS)) == 0)) {
-				dev_err(vmtddev->device, "Request sending timeout - 2!\n");
-				return -EIO;
-			}
-		} else {
-			wait_for_completion(&vmtddev->msg_complete);
+			dev_err(vmtddev->device, "Request sending timeout - 2!\n");
+			return -EIO;
 		}
 	}
 
@@ -160,30 +166,22 @@ static int vmtd_send_cmd(struct vmtd_dev *vmtddev, struct vs_request *vs_req, bo
 	return 0;
 }
 
-static int vmtd_get_resp(struct vmtd_dev *vmtddev, struct vs_request *vs_req, bool use_timeout)
+static int vmtd_get_resp(struct vmtd_dev *vmtddev, struct vs_request *vs_req)
 {
 
 	while (tegra_hv_ivc_channel_notified(vmtddev->ivck) != 0) {
-		if (use_timeout) {
-			if ((wait_for_completion_timeout(&vmtddev->msg_complete,
-				msecs_to_jiffies(IVC_TIMEOUT_MS)) == 0)) {
-				dev_err(vmtddev->device, "Response fetching timeout - 1!\n");
-				return -EIO;
-			}
-		} else {
-			wait_for_completion(&vmtddev->msg_complete);
+		if ((wait_for_completion_timeout(&vmtddev->msg_complete,
+			msecs_to_jiffies(IVC_TIMEOUT_MS)) == 0)) {
+			dev_err(vmtddev->device, "Response fetching timeout - 1!\n");
+			return -EIO;
 		}
 	}
 
 	while (!tegra_hv_ivc_can_read(vmtddev->ivck)) {
-		if (use_timeout) {
-			if ((wait_for_completion_timeout(&vmtddev->msg_complete,
-				msecs_to_jiffies(IVC_TIMEOUT_MS)) == 0)) {
-				dev_err(vmtddev->device, "Response fetching timeout - 2!\n");
-				return -EIO;
-			}
-		} else {
-			wait_for_completion(&vmtddev->msg_complete);
+		if ((wait_for_completion_timeout(&vmtddev->msg_complete,
+			msecs_to_jiffies(IVC_TIMEOUT_MS)) == 0)) {
+			dev_err(vmtddev->device, "Response fetching timeout - 2!\n");
+			return -EIO;
 		}
 	}
 
@@ -197,7 +195,7 @@ static int vmtd_get_resp(struct vmtd_dev *vmtddev, struct vs_request *vs_req, bo
 }
 
 static int vmtd_process_request(struct vmtd_dev *vmtddev,
-	struct vs_request *vs_req, bool use_timeout)
+	struct vs_request *vs_req)
 {
 #if (IS_ENABLED(CONFIG_TEGRA_HSIERRRPTINJ))
 	uint32_t num_bytes;
@@ -215,7 +213,7 @@ static int vmtd_process_request(struct vmtd_dev *vmtddev,
 	}
 #endif
 
-	ret = vmtd_send_cmd(vmtddev, vs_req, use_timeout);
+	ret = vmtd_send_cmd(vmtddev, vs_req);
 	if (ret != 0) {
 		dev_err(vmtddev->device,
 			"Sending %d failed!\n",
@@ -224,7 +222,7 @@ static int vmtd_process_request(struct vmtd_dev *vmtddev,
 	}
 
 	vs_req = (struct vs_request *)vmtddev->cmd_frame;
-	ret = vmtd_get_resp(vmtddev, vs_req, use_timeout);
+	ret = vmtd_get_resp(vmtddev, vs_req);
 	if (ret != 0) {
 		dev_err(vmtddev->device,
 			"fetching response failed!\n");
@@ -342,12 +340,19 @@ static int vmtd_read(struct mtd_info *mtd, loff_t from, size_t len,
 	u_char *buf_addr = buf;
 	loff_t offset = from;
 	int32_t ret = 0;
+	size_t total_read_size = 0;
 
 	dev_dbg(vmtddev->device, "%s from 0x%llx, len %zd\n",
 		__func__, offset, remaining_size);
 
-	if (((offset + remaining_size) < offset) ||
-			((offset + remaining_size) > vmtddev->mtd.size)) {
+	if (check_add_overflow((size_t)offset, remaining_size, &total_read_size)) {
+		dev_err(vmtddev->device, "offset(%llx) + remaining_size(%zd) overflow!\n",
+			offset, remaining_size);
+		return -EPERM;
+	}
+
+	if ((total_read_size < offset) ||
+			(total_read_size > vmtddev->mtd.size)) {
 		dev_err(vmtddev->device,
 			"from %llx len %lx out of range!\n", offset,
 			remaining_size);
@@ -366,7 +371,7 @@ static int vmtd_read(struct mtd_info *mtd, loff_t from, size_t len,
 		vs_req->mtddev_req.mtd_req.data_offset = 0;
 		vs_req->req_id = 0;
 
-		ret = vmtd_process_request(vmtddev, vs_req, true);
+		ret = vmtd_process_request(vmtddev, vs_req);
 		if (ret != 0) {
 			dev_err(vmtddev->device,
 				"Read for offset %llx size %lx failed!\n",
@@ -435,12 +440,19 @@ static int vmtd_write(struct mtd_info *mtd, loff_t to, size_t len,
 	const u_char *buf_addr = buf;
 	loff_t offset = to;
 	int32_t ret = 0;
+	size_t total_write_size = 0;
 
 	dev_dbg(vmtddev->device, "%s from 0x%08x, len %zd\n",
 		__func__, (u32)offset, remaining_size);
 
-	if (((offset + remaining_size) < offset) ||
-		((offset + remaining_size) > vmtddev->mtd.size)) {
+	if (check_add_overflow((size_t)offset, remaining_size, &total_write_size)) {
+		dev_err(vmtddev->device, "offset(%llx) + remaining_size(%zd) overflow!\n",
+			offset, remaining_size);
+		return -EPERM;
+	}
+
+	if ((total_write_size < offset) ||
+		(total_write_size > vmtddev->mtd.size)) {
 		dev_err(vmtddev->device, "to %llx len %lx out of range!\n",
 			offset, remaining_size);
 		return -EPERM;
@@ -461,7 +473,7 @@ static int vmtd_write(struct mtd_info *mtd, loff_t to, size_t len,
 
 		memcpy(vmtddev->shared_buffer, buf_addr, write_size);
 
-		ret = vmtd_process_request(vmtddev, vs_req, true);
+		ret = vmtd_process_request(vmtddev, vs_req);
 		if (ret != 0) {
 			dev_err(vmtddev->device,
 				"write for offset %llx size %lx failed!\n",
@@ -481,17 +493,20 @@ fail:
 }
 
 /**
- * @brief Erases a region of the virtual MTD device
+ * @brief Erases a region of the virtual MTD device with timeout protection
  *
  * This function erases a specified region of the virtual MTD device by:
  * 1. Validating erase boundaries against device size
- * 2. Preparing VS_MTD_ERASE request with:
- *    - Starting address (instr->addr)
- *    - Length of region to erase (instr->len)
- * 3. Sending single erase command through IVC channel
- * 4. Waiting for erase completion confirmation
+ * 2. Verifying erase size alignment with device's erase block size
+ * 3. Breaking down large erases into smaller chunks to prevent timeout
+ *    - Maximum chunk size is calculated based on average erase bandwidth
+ *    - Each chunk is aligned to device's erase block size
+ * 4. For each chunk:
+ *    - Preparing VS_MTD_ERASE request with current address and size
+ *    - Sending request through IVC channel
+ *    - Waiting for erase completion confirmation
+ *    - Updating address and remaining size
  * 5. Maintaining thread safety through mutex locking
- * 6. Handling erase failures
  *
  * @param[in] mtd Pointer to MTD device information structure
  * @param[in] instr Erase instruction structure containing:
@@ -504,6 +519,12 @@ fail:
  * - IVC channel must be operational
  * - Device must not be in read-only mode
  * - Erase region must be aligned to erase block size
+ * - Total erase size must not exceed device size
+ *
+ * @note
+ * Large erase operations are automatically split into chunks of maximum
+ * MAX_ERASE_SIZE (based on 20-second timeout at 250KBps erase bandwidth)
+ * to prevent IVC timeout issues
  *
  * @usage
  * - Allowed context for the API call
@@ -522,39 +543,70 @@ static int vmtd_erase(struct mtd_info *mtd, struct erase_info *instr)
 	struct vmtd_dev *vmtddev = mtd_to_vmtd(mtd);
 	struct vs_request *vs_req;
 	int32_t ret = 0;
+	uint64_t erase_size;
+	uint64_t total_erase_size = 0U;
+	uint64_t erase_chunk_size = 0U;
+	uint64_t remaining_erase_size = 0U;
+	uint64_t max_erase_size_aligned_to_erasesize = 0U;
 
 	dev_dbg(vmtddev->device, "%s from 0x%08x, len %llx\n",
 		__func__, (u32)instr->addr, instr->len);
 
-	if (((instr->addr + instr->len) < instr->addr) ||
-			((instr->addr + instr->len) > vmtddev->mtd.size)) {
+	if (check_add_overflow(instr->addr, instr->len, &total_erase_size)) {
 		dev_err(vmtddev->device, "addr %llx len %llx out of range!\n",
 			instr->addr, instr->len);
 		return -EPERM;
 	}
 
-	mutex_lock(&vmtddev->lock);
-	vs_req = (struct vs_request *)vmtddev->cmd_frame;
-
-	vs_req->type = VS_DATA_REQ;
-	vs_req->mtddev_req.req_op = VS_MTD_ERASE;
-	vs_req->mtddev_req.mtd_req.offset = instr->addr;
-	vs_req->mtddev_req.mtd_req.size = instr->len;
-	vs_req->mtddev_req.mtd_req.data_offset = 0;
-	vs_req->req_id = 0;
-
-	/* FIXME: Erase timeout is not needed as the User is expected to have timeout for operations
-	 *  To have timeout for erase, there should be a max_erase_bytes attribute in vs_mtd_info
-	 *  and the timeout should be tuned to match this attribute value.
-	 */
-	ret = vmtd_process_request(vmtddev, vs_req, false);
-	if (ret != 0) {
-		dev_err(vmtddev->device,
-			"Erase for offset %llx size %llx failed!\n",
+	if ((total_erase_size < instr->addr) ||
+			(total_erase_size > vmtddev->mtd.size)) {
+		dev_err(vmtddev->device, "addr %llx len %llx out of range!\n",
 			instr->addr, instr->len);
-		mutex_unlock(&vmtddev->lock);
-		goto fail;
+		return -EPERM;
 	}
+
+	/* Check if the erase size is aligned to the erase block size */
+	if ((instr->len % vmtddev->mtd.erasesize) != 0) {
+		dev_err(vmtddev->device, "erase size %llx is not aligned to erase block size %x!\n",
+			instr->len, vmtddev->mtd.erasesize);
+		return -EPERM;
+	}
+
+	/* Calculate the maximum erase size aligned to the erase block size */
+	max_erase_size_aligned_to_erasesize = ((MAX_ERASE_SIZE / (vmtddev->mtd.erasesize)) * vmtddev->mtd.erasesize);
+
+	if (instr->len < max_erase_size_aligned_to_erasesize)
+		erase_chunk_size = instr->len;
+	else
+		erase_chunk_size = max_erase_size_aligned_to_erasesize;
+
+	remaining_erase_size = instr->len;
+	mutex_lock(&vmtddev->lock);
+
+	while (remaining_erase_size) {
+		erase_size = min_t(uint64_t, erase_chunk_size,
+				remaining_erase_size);
+		vs_req = (struct vs_request *)vmtddev->cmd_frame;
+
+		vs_req->type = VS_DATA_REQ;
+		vs_req->mtddev_req.req_op = VS_MTD_ERASE;
+		vs_req->mtddev_req.mtd_req.offset = instr->addr;
+		vs_req->mtddev_req.mtd_req.size = erase_size;
+		vs_req->mtddev_req.mtd_req.data_offset = 0;
+		vs_req->req_id = 0;
+
+		ret = vmtd_process_request(vmtddev, vs_req);
+		if (ret != 0) {
+			dev_err(vmtddev->device,
+				"Erase for offset %llx size %llx failed!\n",
+				instr->addr, instr->len);
+			goto fail;
+		}
+
+		instr->addr += erase_size;
+		remaining_erase_size -= erase_size;
+	}
+
 	mutex_unlock(&vmtddev->lock);
 
 fail:
@@ -966,7 +1018,7 @@ static ssize_t ecc_status_show(struct device *dev,
 	/* FIXME: Need to choose request id based on some logic instead of 0 */
 	vs_req->req_id = 0;
 
-	ret = vmtd_process_request(vmtddev, vs_req, true);
+	ret = vmtd_process_request(vmtddev, vs_req);
 	if (ret != 0) {
 		dev_err(vmtddev->device, "Read ECC Failed\n");
 		return sprintf(buf, "0x%x\n", ECC_REQUEST_FAILED);
@@ -1076,7 +1128,7 @@ static int vmtd_inject_err_fsi(unsigned int inst_id, struct epl_error_report_fra
 	vs_req->type = VS_ERR_INJECT;
 	vs_req->error_inject_req.error_id = err_rpt_frame.error_code;
 
-	ret = vmtd_process_request(vmtddev, vs_req, true);
+	ret = vmtd_process_request(vmtddev, vs_req);
 	if (ret != 0)
 		dev_err(vmtddev->device,
 			"Error injection failed for mtd device\n");
@@ -1120,7 +1172,7 @@ static void  vmtd_init_device(struct work_struct *ws)
 	dev_info(vmtddev->device, "send config cmd to ivc #%d\n",
 		vmtddev->ivc_id);
 
-	ret = vmtd_send_cmd(vmtddev, vs_req, true);
+	ret = vmtd_send_cmd(vmtddev, vs_req);
 	if (ret != 0) {
 		dev_err(vmtddev->device, "Sending %d failed!\n",
 				vs_req->type);
@@ -1160,7 +1212,11 @@ static void  vmtd_init_device(struct work_struct *ws)
 #if (IS_ENABLED(CONFIG_TEGRA_HSIERRRPTINJ))
 	if (vmtddev->config.type == VS_MTD_DEV) {
 		vmtddev->epl_id = IP_QSPI;
-		vmtddev->epl_reporter_id = HSI_QSPI_REPORT_ID(total_instance_id);
+		if (check_add_overflow(total_instance_id, HSI_QSPI_REPORT_ID,
+			&vmtddev->epl_reporter_id)) {
+			dev_err(vmtddev->device, "total_instance_id overflow!\n");
+			return;
+		}
 		vmtddev->instance_id = total_instance_id++;
 	}
 

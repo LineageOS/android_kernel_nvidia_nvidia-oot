@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2022-2024, NVIDIA CORPORATION & AFFILIATES.
+ * SPDX-FileCopyrightText: Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES.
  * All rights reserved.
  */
 
@@ -329,7 +329,7 @@ syncobj_unpin(struct vmap_ctx_t *vmap_ctx,
 		syncobj_clientmngd_unpin(vmap_ctx, pin);
 	}
 
-	if (pin->sp) {
+	if (!IS_ERR_OR_NULL(pin->sp)) {
 		host1x_syncpt_put(pin->sp);
 		pin->sp = NULL;
 	}
@@ -340,6 +340,9 @@ syncobj_pin(struct vmap_ctx_t *vmap_ctx,
 	    struct syncobj_pin_t *pin)
 {
 	int ret = 0;
+	phys_addr_t base = 0;
+	uint32_t stride = 0U;
+	uint32_t num_syncpts = 0U;
 	struct host1x *host1x = NULL;
 
 	host1x = platform_get_drvdata(vmap_ctx->host1x_pdev);
@@ -363,7 +366,14 @@ syncobj_pin(struct vmap_ctx_t *vmap_ctx,
 	pin->attrib.syncpt_id = pin->syncpt_id;
 	pin->attrib.size = SP_MAP_SIZE;
 	if (pin->pin_reqd) {
-		pin->phy_addr = get_syncpt_shim_offset(pin->syncpt_id, vmap_ctx->chip_id);
+		ret = host1x_syncpt_get_shim_info(host1x, &base, &stride, &num_syncpts);
+		if (ret < 0) {
+			pr_err("Failed to fetch shim info\n");
+			goto err;
+		}
+
+		pin->phy_addr = (base + ((u64)pin->syncpt_id * stride));
+		(void)num_syncpts;
 		/*
 		 * remote/export sync obj are mapped to an iova of client
 		 * choice always and we should not come here for local sync objs

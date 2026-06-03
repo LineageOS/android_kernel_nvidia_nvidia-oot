@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* SPDX-FileCopyrightText: Copyright (c) 2017-2025 NVIDIA CORPORATION & AFFILIATES.
- * All rights reserved.
- *
- *
+// SPDX-FileCopyrightText: Copyright (c) 2017-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+/*
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
  * version 2, as published by the Free Software Foundation.
@@ -51,6 +49,7 @@
 #include "soc/tegra/camrtc-capture-messages.h"
 #include <media/fusa-capture/capture-isp-channel.h>
 #include <media/fusa-capture/capture-common.h>
+#include <media/fusa-capture/capture-logging.h>
 #include <media/fusa-capture/capture-isp.h>
 #include <linux/arm64-barrier.h>
 #include <linux/tegra-rtcpu-trace.h>
@@ -147,11 +146,6 @@ struct isp_capture {
 	bool is_progress_status_notifier_set;
 		/**< Whether progress_status_notifer has been initialized */
 
-#ifdef HAVE_ISP_GOS_TABLES
-	uint32_t num_gos_tables; /**< No. of cv devices in gos_tables */
-	const dma_addr_t *gos_tables; /**< IOVA addresses of all GoS devices */
-#endif
-
 	struct syncpoint_info progress_sp; /**< Syncpoint for frame progress */
 	struct syncpoint_info stats_progress_sp;
 		/**< Syncpoint for stats progress */
@@ -185,7 +179,7 @@ struct isp_capture {
 };
 
 /**
- * @brief Initialize an ISP syncpoint and get its GoS backing.
+ * @brief Initialize an ISP syncpoint and get its shim address.
  *
  * This function performs the following operations:
  * - Initializes the @a sp structure to zeroes.
@@ -194,9 +188,8 @@ struct isp_capture {
  *   @ref struct tegra_isp_channel::ops::alloc_syncpt().
  * - Gets the syncpoint handle using @ref host1x_syncpt_get_by_id_noref().
  * - Reads the syncpoint value using @ref host1x_syncpt_read().
- * - Retrieves GOS backing information by calling
- *   @ref struct tegra_isp_channel::ops::get_syncpt_gos_backing().
- * - Sets the GOS index and offset in the @a sp structure.
+ * - Retrieves syncpoint shim address by calling
+ *   @ref struct tegra_isp_channel::ops::get_syncpt_addr().
  * - On failure after allocation, releases the synchronization point with
  *   @ref struct tegra_isp_channel::ops::release_syncpt() and re-initializes the @a sp
  *   structure.
@@ -213,7 +206,7 @@ struct isp_capture {
  * @retval 0              On successful setup or if @a enable is false.
  * @retval -EINVAL        If @ref host1x_syncpt_get_by_id_noref() fails.
  * @retval (int)          If @ref struct tegra_isp_channel::ops::alloc_syncpt() or
- *                        @ref struct tegra_isp_channel::ops::get_syncpt_gos_backing() fails.
+ *                        @ref struct tegra_isp_channel::ops::get_syncpt_addr() fails.
  */
 static int isp_capture_setup_syncpt(
 	struct tegra_isp_channel *chan,
@@ -224,15 +217,12 @@ static int isp_capture_setup_syncpt(
 	struct platform_device *pdev = chan->ndev;
 	struct nvhost_device_data *pdata = platform_get_drvdata(pdev);
 	struct host1x_syncpt *host1x_sp;
-	uint32_t gos_index = GOS_INDEX_INVALID;
-	uint32_t gos_offset = 0;
 	int err;
 
 	memset(sp, 0, sizeof(*sp));
 
 	if (!enable)
 		return 0;
-
 
 	err = chan->ops->alloc_syncpt(pdev, name, &sp->id);
 	if (err)
@@ -246,13 +236,9 @@ static int isp_capture_setup_syncpt(
 
 	sp->threshold = host1x_syncpt_read(host1x_sp);
 
-	err = chan->ops->get_syncpt_gos_backing(pdev, sp->id, &sp->shim_addr,
-				&gos_index, &gos_offset);
+	err = chan->ops->get_syncpt_addr(pdev, sp->id, &sp->shim_addr);
 	if (err)
 		goto cleanup;
-
-	sp->gos_index = gos_index;
-	sp->gos_offset = gos_offset;
 
 	return 0;
 
@@ -365,8 +351,6 @@ static void isp_capture_release_syncpts(
  *
  * This function performs the following operations:
  * - Validates the capture data associated with the ISP channel.
- * - If @ref HAVE_ISP_GOS_TABLES is defined, retrieves the GOS tables by calling
- *   @ref struct tegra_isp_channel::ops::get_gos_table().
  * - Calls @ref isp_capture_setup_syncpt() to set up the "progress" synchronization
  *   point.
  * - Calls @ref isp_capture_setup_syncpt() to set up the "stats_progress" synchronization
@@ -393,11 +377,6 @@ static int isp_capture_setup_syncpts(
 			"%s: isp capture uninitialized\n", __func__);
 		return -ENODEV;
 	}
-
-#ifdef HAVE_ISP_GOS_TABLES
-	capture->num_gos_tables = chan->ops->get_gos_table(chan->ndev,
-							&capture->gos_tables);
-#endif
 
 	err = isp_capture_setup_syncpt(chan, "progress", true,
 			&capture->progress_sp);
@@ -469,12 +448,8 @@ static int isp_capture_read_syncpt(
  * - Reads the raw synchronization point value from the ISP IOVA-mapped relocation address using
  *   @ref __raw_readq().
  * - Extracts the synchronization point ID from the raw syncpoint.
- * - Calls @ref struct tegra_isp_channel::ops::get_syncpt_gos_backing() with the channel device,
- *   synchronization point ID, and retrieves synchronization point address, GoS index,
- *   and GoS offset.
- * - Combines GoS index and GoS offset in a GoS information buffer.
- * - Updates the relocation page address for GoS information.
- * - Writes the GoS information to the updated relocation page address using @ref __raw_writeq().
+ * - Calls @ref struct tegra_isp_channel::ops::get_syncpt_addr() with the channel device and
+ *   synchronization point ID to retrieve the synchronization point shim address.
  * - Updates the relocation page address for synchronization point information.
  * - Writes the synchronization point address to the updated relocation page address using
  *   @ref __raw_writeq().
@@ -483,8 +458,6 @@ static int isp_capture_read_syncpt(
  *                              Valid value: non-NULL.
  * @param[in]  fence_offset     Offset value for the fence.
  *                              Valid range: [0 .. UINT16_MAX].
- * @param[in]  gos_relative     Relative byte offset for GoS.
- *                              Valid range: non-negative.
  * @param[in]  sp_relative      Relative byte offset for synchronization point.
  *                              Valid range: non-negative.
  * @param[in]  reloc_page_addr  Pointer to the relocation page address.
@@ -493,12 +466,11 @@ static int isp_capture_read_syncpt(
  * @retval 0          On successful completion.
  * @retval -ENOMEM    If the relocation page address is invalid.
  * @retval (int)      Errors returned from invocation of
- *                    @ref struct tegra_isp_channel::ops::get_syncpt_gos_backing().
+ *                    @ref struct tegra_isp_channel::ops::get_syncpt_addr().
  */
 static int isp_capture_populate_fence_info(
 	struct tegra_isp_channel *chan,
 	int fence_offset,
-	uint32_t gos_relative,
 	uint32_t sp_relative,
 	void *reloc_page_addr)
 {
@@ -506,9 +478,6 @@ static int isp_capture_populate_fence_info(
 	uint64_t sp_raw;
 	uint32_t sp_id;
 	dma_addr_t syncpt_addr;
-	uint32_t gos_index;
-	uint32_t gos_offset;
-	uint64_t gos_info = 0;
 	reloc_page_addr += fence_offset & PAGE_MASK;
 
 	if (unlikely(reloc_page_addr == NULL)) {
@@ -521,23 +490,14 @@ static int isp_capture_populate_fence_info(
 			(fence_offset & ~PAGE_MASK)));
 	sp_id = sp_raw & 0xFFFFFFFF;
 
-	err = chan->ops->get_syncpt_gos_backing(chan->ndev, sp_id, &syncpt_addr,
-			&gos_index, &gos_offset);
+	err = chan->ops->get_syncpt_addr(chan->ndev, sp_id, &syncpt_addr);
 	if (err) {
 		dev_err(chan->isp_dev,
-			"%s: get GoS backing failed\n", __func__);
+			"%s: get syncpt addr failed\n", __func__);
 		goto ret;
 	}
 
-	gos_info = ((((uint16_t)gos_offset << 16) | ((uint8_t)gos_index) << 8)
-			& 0xFFFFFFFF);
-
-	reloc_page_addr += (((fence_offset + gos_relative) & PAGE_MASK) - (fence_offset & PAGE_MASK));
-
-	__raw_writeq(gos_info, (void __iomem *)(reloc_page_addr +
-			((fence_offset + gos_relative) & ~PAGE_MASK)));
-
-	reloc_page_addr += (((fence_offset + sp_relative) & PAGE_MASK) - ((fence_offset + gos_relative) & PAGE_MASK));
+	reloc_page_addr += (((fence_offset + sp_relative) & PAGE_MASK) - (fence_offset & PAGE_MASK));
 
 	__raw_writeq((uint64_t)syncpt_addr, (void __iomem *)(reloc_page_addr +
 			((fence_offset + sp_relative) & ~PAGE_MASK)));
@@ -558,8 +518,7 @@ ret:
  * - Iterates through each input fence relocation:
  *   - Calculates the input fence offset, handling overflow using @ref check_add_overflow().
  *   - Calls @ref isp_capture_populate_fence_info() with the channel, calculated
- *     offset, GoS relative offset, synchronization point relative offset, and
- *     relocation page address.
+ *     offset, synchronization point relative offset, and relocation page address.
  * - Unmaps the DMA buffer using @ref dma_buf_vunmap() and frees allocated memory
  *   in case of failure.
  *
@@ -650,7 +609,7 @@ static int isp_capture_setup_inputfences(
 		}
 
 		err = isp_capture_populate_fence_info(chan, inputfences_offset,
-				req->gos_relative, req->sp_relative, reloc_page_addr);
+				req->sp_relative, reloc_page_addr);
 		if (err < 0) {
 			dev_err(chan->isp_dev,
 				"Populate inputfences info failed\n");
@@ -681,8 +640,7 @@ fail:
  * - Iterates through each prefence relocation entry:
  *   - Calculates the prefence offset, handling overflow using @ref check_add_overflow().
  *   - Calls @ref isp_capture_populate_fence_info() with the channel, calculated
- *     offset, GoS relative offset, synchronization point relative offset, and
- *     relocation page address.
+ *     offset, synchronization point relative offset, and relocation page address.
  * - Implements a speculative barrier using @ref spec_bar().
  * - On failure, unmaps the DMA buffer using @ref dma_buf_vunmap() and frees allocated
  *   memory.
@@ -780,7 +738,7 @@ static int isp_capture_setup_prefences(
 		}
 
 		err = isp_capture_populate_fence_info(chan, prefence_offset,
-				req->gos_relative, req->sp_relative, reloc_page_addr);
+				req->sp_relative, reloc_page_addr);
 		if (err < 0) {
 			dev_err(chan->isp_dev, "Populate prefences info failed\n");
 			goto fail;
@@ -808,7 +766,7 @@ fail:
  *   If invalid, returns immediately.
  * - Retrieves the list of unpins for the specified buffer index.
  * - If there are unpins, iterates through them:
- *   - Calls @ref put_mapping() for each unpin entry.
+ *   - Calls @ref capture_common_put_mapping() for each unpin entry.
  *   - Resets the unpins list using @ref memset().
  * - Releases the unpins list lock using @ref mutex_unlock().
  *
@@ -840,7 +798,7 @@ static void isp_capture_request_unpin(
 	unpins = &capture->capture_desc_ctx.unpins_list[buffer_index];
 	if (unpins->num_unpins != 0U) {
 		for (i = 0; i < unpins->num_unpins; i++)
-			put_mapping(capture->buffer_ctx, unpins->data[i]);
+			capture_common_put_mapping(capture->buffer_ctx, unpins->data[i]);
 		(void)memset(unpins, 0U, sizeof(*unpins));
 	}
 	mutex_unlock(&capture->capture_desc_ctx.unpins_list_lock);
@@ -857,7 +815,7 @@ static void isp_capture_request_unpin(
  *   If invalid, returns immediately.
  * - Retrieves the list of unpins for the specified buffer index.
  * - If there are unpins, iterates through them:
- *   - Calls @ref put_mapping() for each unpin entry.
+ *   - Calls @ref capture_common_put_mapping() for each unpin entry.
  *   - Resets the unpins list using @ref memset().
  * - Releases the unpins list lock using @ref mutex_unlock().
  *
@@ -889,7 +847,7 @@ static void isp_capture_program_request_unpin(
 	unpins = &capture->program_desc_ctx.unpins_list[buffer_index];
 	if (unpins->num_unpins != 0U) {
 		for (i = 0; i < unpins->num_unpins; i++)
-			put_mapping(capture->buffer_ctx, unpins->data[i]);
+			capture_common_put_mapping(capture->buffer_ctx, unpins->data[i]);
 		(void)memset(unpins, 0U, sizeof(*unpins));
 	}
 	mutex_unlock(&capture->program_desc_ctx.unpins_list_lock);
@@ -1064,7 +1022,8 @@ static int isp_capture_program_prepare(
 		mem_offset, /* offset */
 		&meminfo->base_address,
 		&meminfo->size,
-		&capture->program_desc_ctx.unpins_list[req->buffer_index]);
+		&capture->program_desc_ctx.unpins_list[req->buffer_index],
+		BUFFER_RDWR);
 
 	mutex_unlock(&capture->program_desc_ctx.unpins_list_lock);
 
@@ -1802,7 +1761,7 @@ void isp_get_nvhost_device(
  * - Pins the process descriptor ring buffer to RTCPU by calling
  *   @ref capture_common_pin_memory().
  * - Pins the process descriptor ring buffer to ISP by calling
- *   @ref capture_buffer_add().
+ *   @ref capture_buffer_request().
  * - Caches ISP capture descriptor ring buffer details.
  * - Allocates the unpins list based on the queue depth using @ref vzalloc().
  *   - If allocation fails, unpins the memory using @ref capture_common_unpin_memory()
@@ -1825,7 +1784,7 @@ void isp_get_nvhost_device(
  * @retval -ENOMEM          If memory allocation with @ref vzalloc() or
  *                          @ref dma_alloc_coherent() fails.
  * @retval (int)            If @ref capture_common_pin_memory() or
- *                          @ref capture_buffer_add() fails.
+ *                          @ref capture_buffer_request() fails.
  */
 static int setup_capture_descriptors(
 	struct tegra_isp_channel *chan,
@@ -1845,9 +1804,10 @@ static int setup_capture_descriptors(
 	}
 
 	/* pin the process descriptor ring buffer to ISP */
-	err = capture_buffer_add(buffer_ctx, setup->mem);
+	err = capture_buffer_request(buffer_ctx, setup->mem, (BUFFER_ADD | BUFFER_RDWR));
 	if (err < 0) {
-		dev_err(chan->isp_dev, "%s: memory setup failed\n", __func__);
+		dev_err(chan->isp_dev, "%s: failed to pin process descriptors to ISP\n",
+			__func__);
 		return err;
 	}
 
@@ -1894,7 +1854,7 @@ static int setup_capture_descriptors(
  * - Pins the ISP program descriptor ring buffer to RTCPU by calling
  *   @ref capture_common_pin_memory().
  * - Pins the ISP program descriptor ring buffer to ISP by calling
- *   @ref capture_buffer_add().
+ *   @ref capture_buffer_request().
  *   - If the memory setup fails, unpins memory using
  *     @ref capture_common_unpin_memory().
  * - Caches ISP program descriptor ring buffer details to ISP channel capture context.
@@ -1922,7 +1882,7 @@ static int setup_capture_descriptors(
  * @retval -ENOMEM          If memory allocation with @ref vzalloc() or
  *                          @ref dma_alloc_coherent() fails.
  * @retval (int)            If @ref capture_common_pin_memory() or
- *                          @ref capture_buffer_add() fails.
+ *                          @ref capture_buffer_request() fails.
  */
 static int setup_program_descriptors(
 	struct tegra_isp_channel *chan,
@@ -1944,9 +1904,11 @@ static int setup_program_descriptors(
 	}
 
 	/* pin the isp program descriptor ring buffer to ISP */
-	err = capture_buffer_add(buffer_ctx, setup->isp_program_mem);
+	err = capture_buffer_request(buffer_ctx, setup->isp_program_mem,
+		(BUFFER_ADD | BUFFER_RDWR));
 	if (err < 0) {
-		dev_err(chan->isp_dev, "%s: isp_program memory setup failed\n", __func__);
+		dev_err(chan->isp_dev, "%s: failed to pin program descriptors to ISP\n",
+			__func__);
 		capture_common_unpin_memory(&capture->program_desc_ctx.requests);
 		return err;
 	}
@@ -2172,9 +2134,6 @@ cleanup:
  * - Initializes the control message structure.
  * - Populates a @ref capture_channel_isp_config configuration structure using properties of
  *   input @ref isp_capture_setup structure.
- * - If ISP GOS tables are enabled, configures them accordingly.
- *   - Iterates through configured GOS tables and assigns ISP GOS tables in the capture channel
- *     to ISP GOS tables in the channel configuration structure.
  * - Sends the control message by calling @ref isp_capture_ivc_send_control().
  * - Checks the response message is successful.
  * - Sets the channel ID based on the response message.
@@ -2208,7 +2167,7 @@ cleanup:
  *                          @ref isp_capture_ivc_send_control().
  * @retval (int)            Errors returned from external functions such as
  *                          @ref capture_common_pin_memory(),
- *                          @ref capture_buffer_add(),
+ *                          @ref capture_buffer_request(),
  *                          @ref setup_capture_descriptors(),
  *                          @ref setup_program_descriptors(),
  *                          @ref isp_capture_setup_syncpts(),
@@ -2227,9 +2186,6 @@ int isp_capture_setup(
 	struct CAPTURE_CONTROL_MSG *resp_msg;
 	struct capture_channel_isp_config *config;
 	int err = 0;
-#ifdef HAVE_ISP_GOS_TABLES
-	int i;
-#endif
 
 	struct tegra_capture_isp_data *info =
 			platform_get_drvdata(chan->isp_capture_pdev);
@@ -2332,17 +2288,6 @@ int isp_capture_setup(
 	config->progress_sp = capture->progress_sp;
 	config->stats_progress_sp = capture->stats_progress_sp;
 
-#ifdef HAVE_ISP_GOS_TABLES
-	dev_dbg(chan->isp_dev, "%u GoS tables configured.\n",
-		capture->num_gos_tables);
-	for (i = 0; i < capture->num_gos_tables; i++) {
-		config->isp_gos_tables[i] = (iova_t)capture->gos_tables[i];
-		dev_dbg(chan->isp_dev, "gos[%d] = 0x%08llx\n",
-			i, (u64)capture->gos_tables[i]);
-	}
-	config->num_isp_gos_tables = capture->num_gos_tables;
-#endif
-
 	err = isp_capture_ivc_send_control(chan, &control_msg,
 			sizeof(control_msg), CAPTURE_CHANNEL_ISP_SETUP_RESP);
 	if (err < 0)
@@ -2374,6 +2319,10 @@ int isp_capture_setup(
 
 	capture->buffer_ctx = buffer_ctx;
 
+	/* Log successful setup with pipeline ID */
+	isp_chan_info(chan, "ISP capture setup complete (channel_id=%u)\n",
+		      capture->channel_id);
+
 	return 0;
 
 cb_fail:
@@ -2385,6 +2334,9 @@ submit_fail:
 control_cb_fail:
 	isp_capture_release_syncpts(chan);
 program_meminfo_alloc_fail:
+	memset(capture->program_desc_ctx.requests_memoryinfo, 0,
+		capture->program_desc_ctx.queue_depth *
+		sizeof(struct memoryinfo_surface));
 	dma_free_coherent(capture->rtcpu_dev,
 		capture->program_desc_ctx.queue_depth *
 			sizeof(struct memoryinfo_surface),
@@ -2393,6 +2345,9 @@ program_meminfo_alloc_fail:
 	vfree(capture->program_desc_ctx.unpins_list);
 	capture_common_unpin_memory(&capture->program_desc_ctx.requests);
 capture_meminfo_alloc_fail:
+	memset(capture->capture_desc_ctx.requests_memoryinfo, 0,
+		capture->capture_desc_ctx.queue_depth *
+		sizeof(struct isp_capture_descriptor_memoryinfo));
 	dma_free_coherent(capture->rtcpu_dev,
 		capture->capture_desc_ctx.queue_depth *
 			sizeof(struct isp_capture_descriptor_memoryinfo),
@@ -2475,7 +2430,8 @@ int isp_capture_release(
 	struct CAPTURE_CONTROL_MSG *resp_msg;
 	int err = 0;
 	int ret = 0;
-	int i;
+	int i = 0;
+	size_t size = 0;
 
 	if (chan == NULL) {
 		pr_err("%s: invalid context\n", __func__);
@@ -2560,15 +2516,15 @@ int isp_capture_release(
 	vfree(capture->capture_desc_ctx.unpins_list);
 	capture->capture_desc_ctx.unpins_list = NULL;
 
-	dma_free_coherent(capture->rtcpu_dev,
-		capture->program_desc_ctx.queue_depth *
-			sizeof(struct memoryinfo_surface),
+	size = capture->program_desc_ctx.queue_depth * sizeof(struct memoryinfo_surface);
+	memset(capture->program_desc_ctx.requests_memoryinfo, 0, size);
+	dma_free_coherent(capture->rtcpu_dev, size,
 		capture->program_desc_ctx.requests_memoryinfo,
 		capture->program_desc_ctx.requests_memoryinfo_iova);
 
-	dma_free_coherent(capture->rtcpu_dev,
-		capture->capture_desc_ctx.queue_depth *
-			sizeof(struct isp_capture_descriptor_memoryinfo),
+	size = capture->capture_desc_ctx.queue_depth * sizeof(struct isp_capture_descriptor_memoryinfo);
+	memset(capture->capture_desc_ctx.requests_memoryinfo, 0, size);
+	dma_free_coherent(capture->rtcpu_dev, size,
 		capture->capture_desc_ctx.requests_memoryinfo,
 		capture->capture_desc_ctx.requests_memoryinfo_iova);
 
@@ -2970,7 +2926,8 @@ static int pin_isp_capture_request_buffers_locked(
 			isp_pb2_mem_offset,
 			&desc_mem->isp_pb2_mem.base_address,
 			&desc_mem->isp_pb2_mem.size,
-			request_unpins);
+			request_unpins,
+			BUFFER_RDWR);
 
 	if (err) {
 		dev_err(chan->isp_dev, "%s: get pushbuffer2 iova failed\n",
@@ -2984,7 +2941,8 @@ static int pin_isp_capture_request_buffers_locked(
 			desc->input_mr_surfaces[i].offset,
 			&desc_mem->input_mr_surfaces[i].base_address,
 			&desc_mem->input_mr_surfaces[i].size,
-			request_unpins);
+			request_unpins,
+			BUFFER_READ);
 
 		if (err) {
 			dev_err(chan->isp_dev,
@@ -3001,7 +2959,8 @@ static int pin_isp_capture_request_buffers_locked(
 				desc->outputs_mw[i].surfaces[j].offset,
 				&desc_mem->outputs_mw[i].surfaces[j].base_address,
 				&desc_mem->outputs_mw[i].surfaces[j].size,
-				request_unpins);
+				request_unpins,
+				BUFFER_WRITE);
 
 			if (err) {
 				dev_err(chan->isp_dev,
@@ -3041,7 +3000,8 @@ static int pin_isp_capture_request_buffers_locked(
 					stats_surfaces[i]->offset,
 					&meminfo_surfaces[i]->base_address,
 					&meminfo_surfaces[i]->size,
-					request_unpins);
+					request_unpins,
+					BUFFER_WRITE);
 			if (err)
 				goto fail;
 		}
@@ -3053,7 +3013,8 @@ static int pin_isp_capture_request_buffers_locked(
 			desc->engine_status.offset,
 			&desc_mem->engine_status.base_address,
 			&desc_mem->engine_status.size,
-			request_unpins);
+			request_unpins,
+			BUFFER_WRITE);
 fail:
 	/* Unpin cleanup is done in isp_capture_request_unpin() */
 	return err;

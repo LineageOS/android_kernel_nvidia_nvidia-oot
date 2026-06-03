@@ -12,6 +12,8 @@
 #define MAX_SE_DMA_BUFS	4
 #define TEGRA_HV_VSE_AES_IV_LEN		16U
 #define MAX_ZERO_COPY_BUFS		6U
+#define MAX_NUMBER_MISC_DEVICES		75U
+#define MAX_NUMBER_SOC_PARAMS		10U
 
 struct tegra_vse_soc_info {
 	bool cmac_hw_verify_supported;
@@ -64,18 +66,20 @@ struct tegra_vse_node_dma {
 };
 
 struct crypto_dev_to_ivc_map {
-	uint32_t ivc_id;
-	/* Engine ID - Specific HW engine instance used for performing crypto operations */
-	uint32_t engine_id;
 	/* Node ID - Global ID, used for internal mapping between Cryptodev and VSE driver */
 	uint32_t node_id;
-	/* Instance ID - Device node index for a particular engine instance, read from DT */
-	uint32_t instance_id;
+	uint32_t se_comm_id;
+	uint32_t se_engine_domain;
+	uint32_t se_engine_domain_instanceId;
+	uint32_t se_port;
+	uint32_t virtualized_instanceId;
+	uint32_t stream_id;
+	uint32_t gid;
 	uint32_t priority;
 	uint32_t max_buffer_size;
-	uint32_t channel_grp_id;
 	enum tegra_gcm_dec_supported gcm_dec_supported;
-	uint32_t gcm_dec_buffer_size;
+	uint32_t soc_params[MAX_NUMBER_SOC_PARAMS];
+	uint32_t soc_params_size;
 	uint32_t mempool_id;
 	struct tegra_hv_ivc_cookie *ivck;
 	struct tegra_hv_ivm_cookie *ivmk;
@@ -101,8 +105,9 @@ struct crypto_dev_to_ivc_map {
 
 struct tegra_virtual_se_dev {
 	struct device *dev;
-	/* Engine id */
-	unsigned int engine_id;
+	uint32_t se_comm_id;
+	uint32_t se_port;
+	uint32_t se_engine_domain_instanceId;
 	/* Engine suspend state */
 	atomic_t se_suspended;
 	const struct tegra_vse_soc_info *chipdata;

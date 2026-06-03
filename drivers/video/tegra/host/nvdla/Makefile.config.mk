@@ -15,6 +15,7 @@ ccflags-y += -DCONFIG_TEGRA_HOST1X
 NVDLA_COMMON_OBJS := \
 		nvdla.o \
 		nvdla_buffer.o \
+		nvdla_ctx.o \
 		nvdla_ioctl.o \
 		dla_queue.o \
 		nvdla_queue.o \

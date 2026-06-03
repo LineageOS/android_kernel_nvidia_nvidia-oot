@@ -1,21 +1,21 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
+/* SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
 
 #ifndef __NVMAP_ALLOC_H
 #define __NVMAP_ALLOC_H
 
 #define DMA_MEMORY_NOMAP	0x02
 
-/* bit 31-29: IVM peer
- * bit 28-16: offset (aligned to 32K)
- * bit 15-00: len (aligned to page_size)
+/* bit 63-61: IVM peer
+ * bit 60-27: offset (aligned to 32K)
+ * bit 26-00: len (aligned to page_size)
  */
 #define NVMAP_IVM_LENGTH_SHIFT (0)
-#define NVMAP_IVM_LENGTH_WIDTH (16)
+#define NVMAP_IVM_LENGTH_WIDTH (27)
 #define NVMAP_IVM_LENGTH_MASK  ((1 << NVMAP_IVM_LENGTH_WIDTH) - 1)
 #define NVMAP_IVM_OFFSET_SHIFT (NVMAP_IVM_LENGTH_SHIFT + NVMAP_IVM_LENGTH_WIDTH)
-#define NVMAP_IVM_OFFSET_WIDTH (13)
-#define NVMAP_IVM_OFFSET_MASK  ((1 << NVMAP_IVM_OFFSET_WIDTH) - 1)
+#define NVMAP_IVM_OFFSET_WIDTH (34)
+#define NVMAP_IVM_OFFSET_MASK  ((1ULL << NVMAP_IVM_OFFSET_WIDTH) - 1)
 #define NVMAP_IVM_IVMID_SHIFT  (NVMAP_IVM_OFFSET_SHIFT + NVMAP_IVM_OFFSET_WIDTH)
 #define NVMAP_IVM_IVMID_WIDTH  (3)
 #define NVMAP_IVM_IVMID_MASK   ((1 << NVMAP_IVM_IVMID_WIDTH) - 1)
@@ -58,7 +58,7 @@ int nvmap_get_user_pages(ulong vaddr,
 phys_addr_t nvmap_alloc_get_co_base(struct nvmap_handle *h);
 
 void nvmap_alloc_free(struct page **pages, unsigned int nr_page, bool from_va,
-		      bool is_subhandle);
+		      bool is_subhandle, bool from_hugetlbfs);
 
 int __nvmap_cache_maint(struct nvmap_client *client,
 			       struct nvmap_cache_op_64 *op);

@@ -1,9 +1,7 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-FileCopyrightText: Copyright (c) 2013-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 /*
- * Copyright (c) 2013-2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- *
  * nv_ov5693.c - ov5693 sensor driver
- *
  */
 
 #include <nvidia/conftest.h>
@@ -13,7 +11,6 @@
 #include <linux/gpio.h>
 #include <linux/module.h>
 #include <linux/debugfs.h>
-#include <linux/version.h>
 
 #include <linux/seq_file.h>
 #include <linux/of.h>

@@ -19012,11 +19012,6 @@ _rtl8125_wait_for_quiescence(struct net_device *dev)
         rtl8125_disable_napi(tp);
 #endif//CONFIG_R8125_NAPI
 
-#if LINUX_VERSION_CODE > KERNEL_VERSION(2,5,67)
-        /* Give a racing hard_start_xmit a few cycles to complete. */
-        synchronize_net();
-#endif
-
         rtl8125_irq_mask_and_ack(tp);
 
         rtl8125_wait_for_irq_complete(tp);
@@ -20813,6 +20808,8 @@ static void rtl8125_shutdown(struct pci_dev *pdev)
         struct net_device *dev = pci_get_drvdata(pdev);
         struct rtl8125_private *tp = netdev_priv(dev);
 
+        rtl8125_cancel_all_schedule_work(tp);
+
         rtnl_lock();
 
         if (HW_DASH_SUPPORT_DASH(tp))
@@ -20827,13 +20824,13 @@ static void rtl8125_shutdown(struct pci_dev *pdev)
         rtl8125_close(dev);
         rtl8125_disable_msi(pdev, tp);
 
-        rtnl_unlock();
-
         if (system_state == SYSTEM_POWER_OFF) {
                 pci_clear_master(tp->pci_dev);
                 pci_wake_from_d3(pdev, tp->wol_enabled);
                 pci_set_power_state(pdev, PCI_D3hot);
         }
+
+        rtnl_unlock();
 }
 #endif
 

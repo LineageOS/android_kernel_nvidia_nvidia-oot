@@ -31,29 +31,4 @@
  */
 void pva_kmd_handle_hyp_msg(void *pva_dev, uint32_t const *data, uint8_t len);
 
-/**
- * @brief Handle messages from FW to KMD.
- *
- * @details This function performs the following operations:
- * - Receives message data from firmware via CCQ0 status registers
- * - Parses the message header to determine message type and routing
- * - Dispatches messages to appropriate KMD subsystem handlers
- * - Processes firmware status updates, error notifications, and responses
- * - Handles resource management messages and completion notifications
- * - Updates internal KMD state based on firmware messages
- * - Manages communication flow control with firmware
- *
- * These messages come from CCQ0 status registers and represent the primary
- * communication channel between firmware and KMD for system-level operations.
- * The function ensures proper message processing and maintains synchronization
- * between firmware and KMD state.
- *
- * @param[in] pva_dev  Pointer to PVA device structure
- *                     Valid value: non-null
- * @param[in] data     Pointer to message data array received from firmware
- *                     Valid value: non-null
- * @param[in] len      Length of the message data in 32-bit words
- *                     Valid range: [1 .. 255]
- */
-void pva_kmd_handle_msg(void *pva_dev, uint32_t const *data, uint8_t len);
 #endif // PVA_KMD_MSG_H

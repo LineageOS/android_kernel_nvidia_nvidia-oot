@@ -1,8 +1,8 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
-/*
- * Capture support for syncpoint and GoS management
+/* SPDX-License-Identifier: GPL-2.0-only
  *
- * Copyright (c) 2017-2022, NVIDIA Corporation.  All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2017-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ *
+ * Capture support for syncpoint management
  */
 
 #ifndef _CAPTURE_SUPPORT_H_
@@ -17,14 +17,8 @@ int capture_alloc_syncpt(struct platform_device *pdev,
 
 void capture_release_syncpt(struct platform_device *pdev, uint32_t id);
 
-void capture_get_gos_table(struct platform_device *pdev,
-			int *gos_count,
-			const dma_addr_t **gos_table);
-
-int capture_get_syncpt_gos_backing(struct platform_device *pdev,
+int capture_get_syncpt_addr(struct platform_device *pdev,
 			uint32_t id,
-			dma_addr_t *syncpt_addr,
-			uint32_t *gos_index,
-			uint32_t *gos_offset);
+			dma_addr_t *syncpt_addr);
 
 #endif /* _CAPTURE_SUPPORT_H_ */

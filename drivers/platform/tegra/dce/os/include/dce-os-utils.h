@@ -44,7 +44,7 @@ bool dce_os_io_exists(struct tegra_dce *d);
 bool dce_os_io_valid_reg(struct tegra_dce *d, u32 r);
 
 struct dce_firmware *dce_os_request_firmware(struct tegra_dce *d,
-					  const char *fw_name);
+					const char *fw_name);
 
 void dce_os_release_fw(struct tegra_dce *d, struct dce_firmware *fw);
 

@@ -45,6 +45,11 @@
 #define NV_BLOCK_USE_QUEUE_LIMITS_SET
 #endif
 
+/* Static lock class keys for different tegra vblk disk types */
+static struct lock_class_key tegra_vblk_disk_key;
+static struct lock_class_key tegra_vblk_ioctl_disk_key;
+static struct lock_class_key tegra_vblk_ffu_disk_key;
+
 #define DISCARD_ERASE_SECERASE_MASK	(VS_BLK_DISCARD_OP_F | \
 					VS_BLK_SECURE_ERASE_OP_F | \
 					VS_BLK_ERASE_OP_F)
@@ -104,8 +109,12 @@ static struct vsc_request *vblk_get_req(struct vblk_dev *vblkdev)
 	unsigned long timeout = 30*HZ;
 	unsigned long new_jiffies;
 
-	if (vblkdev->queue_state != VBLK_QUEUE_ACTIVE)
+	spin_lock(&vblkdev->lock);
+	if (vblkdev->queue_state != VBLK_QUEUE_ACTIVE) {
+		spin_unlock(&vblkdev->lock);
 		goto exit;
+	}
+	spin_unlock(&vblkdev->lock);
 
 	bit = find_first_zero_bit(vblkdev->pending_reqs, vblkdev->max_requests);
 	if (bit < vblkdev->max_requests) {
@@ -189,10 +198,12 @@ static void vblk_put_req(struct vsc_request *req)
 		memset(&req->iter, 0, sizeof(struct req_iterator));
 		vblkdev->inflight_reqs--;
 
+		spin_lock(&vblkdev->lock);
 		if ((vblkdev->inflight_reqs == 0) &&
 			(vblkdev->queue_state == VBLK_QUEUE_SUSPENDED)) {
 			complete(&vblkdev->req_queue_empty);
 		}
+		spin_unlock(&vblkdev->lock);
 #if defined(NV_TIMER_DELETE_PRESENT) /* Linux v6.15 */
 		timer_delete(&req->timer);
 #else
@@ -423,40 +434,49 @@ static bool complete_bio_req(struct vblk_dev *vblkdev)
 	bio_req = vsc_req->req;
 	vs_req = &vsc_req->vs_req;
 
-	if ((bio_req != NULL) && (status == 0)) {
-		if ((vblkdev->config.blk_config.req_ops_supported & VS_BLK_IOCTL_OP_F)
-			&& (req_op(bio_req) == REQ_OP_DRV_IN)) {
-			vblk_complete_ioctl_req(vblkdev, vsc_req,
-					req_resp.blkdev_resp.
-					ioctl_resp.status);
-			vblkdev->inflight_ioctl_reqs--;
-			blk_mq_end_request(bio_req, BLK_STS_OK);
-		}  else if (req_op(bio_req) != REQ_OP_DRV_IN) {
-			handle_non_ioctl_resp(vblkdev, vsc_req,
-				&(req_resp.blkdev_resp.blk_resp));
-		} else {
-			dev_info(vblkdev->device, "ioctl(pass through) command not supported\n");
-		}
-
-	} else if ((bio_req != NULL) && (status != 0)) {
-		if (!(vblkdev->config.blk_config.req_ops_supported & VS_BLK_IOCTL_OP_F)
-			&& req_op(bio_req) == REQ_OP_DRV_IN) {
-			dev_info(vblkdev->device, "ioctl(pass through) command not supported\n");
-		} else {
-			if ((vblkdev->config.blk_config.req_ops_supported & VS_BLK_IOCTL_OP_F)
-				&& (req_op(bio_req) == REQ_OP_DRV_IN))
-				vblkdev->inflight_ioctl_reqs--;
-			req_error_handler(vblkdev, bio_req);
-		}
-
-		if (req_op(bio_req) == REQ_OP_DRV_IN)
-			vblkdev->inflight_ioctl_reqs--;
-		req_error_handler(vblkdev, bio_req);
-	} else {
+	if (bio_req == NULL) {
 		dev_err(vblkdev->device,
 			"VSC request %d has null bio request!\n",
 			vsc_req->id);
 		goto bio_null;
+	}
+
+	if (status != 0) {
+		if (req_op(bio_req) == REQ_OP_DRV_IN) {
+			if (!((vblkdev->config.blk_config.req_ops_supported & VS_BLK_IOCTL_OP_F) ||
+			!(vblkdev->config.blk_config.req_ops_supported & VS_BLK_RPMB_OP_F))) {
+				dev_info(vblkdev->device, "ioctl(pass through)/rpmb command not supported\n");
+				vblkdev->inflight_ioctl_reqs--;
+			} else if (((vblkdev->config.blk_config.req_ops_supported & VS_BLK_IOCTL_OP_F) ||
+				(vblkdev->config.blk_config.req_ops_supported & VS_BLK_RPMB_OP_F))) {
+				dev_err(vblkdev->device, "ioctl(pass through)/rpmb command returned error\n");
+				vblkdev->inflight_ioctl_reqs--;
+			} else {
+				dev_err(vblkdev->device, "Got error for request\n");
+			}
+		} else {
+			dev_err(vblkdev->device, "Got error for request\n");
+		}
+		req_error_handler(vblkdev, bio_req);
+	} else {
+		if (req_op(bio_req) == REQ_OP_DRV_IN) {
+			if (vblkdev->config.blk_config.req_ops_supported & VS_BLK_IOCTL_OP_F) {
+				vblk_complete_ioctl_req(vblkdev, vsc_req,
+					req_resp.blkdev_resp.ioctl_resp.status);
+				vblkdev->inflight_ioctl_reqs--;
+				blk_mq_end_request(bio_req, BLK_STS_OK);
+			} else if (vblkdev->config.blk_config.req_ops_supported & VS_BLK_RPMB_OP_F) {
+				vblk_complete_rpmb_req(vblkdev, vsc_req,
+					req_resp.blkdev_resp.rpmb_resp.status);
+				vblkdev->inflight_ioctl_reqs--;
+				blk_mq_end_request(bio_req, BLK_STS_OK);
+			} else {
+				dev_info(vblkdev->device, "ioctl(pass through) command not supported\n");
+			}
+		} else {
+			handle_non_ioctl_resp(vblkdev, vsc_req,
+				&(req_resp.blkdev_resp.blk_resp));
+		}
 	}
 
 bio_null:
@@ -564,8 +584,16 @@ static bool submit_bio_req(struct vblk_dev *vblkdev)
 	if (!tegra_hv_ivc_can_write(vblkdev->ivck))
 		goto bio_exit;
 
-	if (vblkdev->queue == NULL)
+	/* Check if either ioctl_queue(in case of RPMB  partition) or queue(in case of normal partition) is NULL */
+	if ((vblkdev->ioctl_queue == NULL) &&
+		(vblkdev->config.blk_config.req_ops_supported & VS_BLK_RPMB_OP_F)) {
+		dev_err(vblkdev->device, "IOCTL Queue is NULL or RPMB is not supported\n");
 		goto bio_exit;
+	} else {
+		if (vblkdev->queue == NULL) {
+			goto bio_exit;
+		}
+	}
 
 	vsc_req = vblk_get_req(vblkdev);
 	if (vsc_req == NULL)
@@ -575,11 +603,13 @@ static bool submit_bio_req(struct vblk_dev *vblkdev)
 	if(!list_empty(&vblkdev->req_list)) {
 		entry = list_first_entry(&vblkdev->req_list, struct req_entry,
 						list_entry);
-		if ((vblkdev->config.blk_config.req_ops_supported & VS_BLK_IOCTL_OP_F) &&
+		if (((vblkdev->config.blk_config.req_ops_supported & VS_BLK_IOCTL_OP_F) ||
+		(vblkdev->config.blk_config.req_ops_supported & VS_BLK_RPMB_OP_F)) &&
 				(req_op(entry->req) == REQ_OP_DRV_IN) &&
 				(vblkdev->config.blk_config.use_vm_address) &&
 				(vblkdev->inflight_ioctl_reqs >= vblkdev->max_ioctl_requests)) {
 			spin_unlock(&vblkdev->queue_lock);
+			dev_err(vblkdev->device, "Max ioctl/rpmb requests reached\n");
 			goto bio_exit;
 		}
 		list_del(&entry->list_entry);
@@ -588,8 +618,9 @@ static bool submit_bio_req(struct vblk_dev *vblkdev)
 	}
 	spin_unlock(&vblkdev->queue_lock);
 
-	if (bio_req == NULL)
+	if (bio_req == NULL) {
 		goto bio_exit;
+	}
 
 	if ((vblkdev->config.blk_config.use_vm_address) &&
 		((req_op(bio_req) == REQ_OP_READ) ||
@@ -721,8 +752,14 @@ static bool submit_bio_req(struct vblk_dev *vblkdev)
 			vblkdev->ioctl_req,
 			vsc_req)) {
 			vblkdev->inflight_ioctl_reqs++;
-		} else if (!(vblkdev->config.blk_config.req_ops_supported & VS_BLK_IOCTL_OP_F)) {
-			dev_info(vblkdev->device, "ioctl(pass through) command not supported\n");
+		} else if (vblkdev->config.blk_config.req_ops_supported & VS_BLK_RPMB_OP_F
+			&& !vblk_prep_rpmb_req(vblkdev,
+			vblkdev->ioctl_req,
+			vsc_req)) {
+			vblkdev->inflight_ioctl_reqs++;
+		} else if ((!(vblkdev->config.blk_config.req_ops_supported & VS_BLK_IOCTL_OP_F)) &&
+			(!(vblkdev->config.blk_config.req_ops_supported & VS_BLK_RPMB_OP_F))) {
+			dev_info(vblkdev->device, "ioctl(pass through)/rpmb command not supported\n");
 			goto bio_exit;
 		} else {
 			dev_err(vblkdev->device,
@@ -997,7 +1034,6 @@ static int vblk_ioctl_open(struct block_device *device, fmode_t mode)
 #endif
 	}
 	vblkdev->ioctl_users++;
-	vblkdev->allow_ffu_passthrough_cmds = false;
 
 	spin_unlock(&vblkdev->lock);
 	return 0;
@@ -1048,7 +1084,6 @@ static int vblk_ffu_open(struct block_device *device, fmode_t mode)
 #endif
 	}
 	vblkdev->ffu_users++;
-	vblkdev->allow_ffu_passthrough_cmds = false;
 	spin_unlock(&vblkdev->lock);
 	return 0;
 }
@@ -1214,12 +1249,18 @@ static void vblk_release(struct gendisk *disk, fmode_t mode)
  *   - Runtime: Yes
  *   - De-Init: No
  */
+#if defined(NV_BLOCK_DEVICE_OPERATIONS_GETGEO_HAS_GENDISK_ARG) /* Linux v6.18 */
+static int vblk_getgeo(struct gendisk *disk, struct hd_geometry *geo)
+{
+#else
 static int vblk_getgeo(struct block_device *device, struct hd_geometry *geo)
 {
+	struct gendisk *disk = device->bd_disk;
+#endif
+
 	geo->heads = VS_LOG_HEADS;
 	geo->sectors = VS_LOG_SECTS;
-	geo->cylinders = get_capacity(device->bd_disk) /
-		(geo->heads * geo->sectors);
+	geo->cylinders = get_capacity(disk) / (geo->heads * geo->sectors);
 
 	return 0;
 }
@@ -1448,6 +1489,44 @@ static ssize_t vblk_speed_mode_show(struct device *dev,
 	return snprintf(buf, 32, "%s\n", vblk->config.speed_mode);
 }
 
+/**
+ * @brief Shows the size of the storage device in sectors
+ *
+ * This function implements the sysfs show function for the "size" attribute.
+ * It reads the device size from the vblk device and returns it in sectors.
+ * The size is calculated as the total device size divided by SECTOR_SIZE.
+ *
+ * @param[in] dev Pointer to the device structure
+ * @param[in] attr Pointer to the device attribute structure
+ * @param[out] buf Buffer to store the attribute value string
+ *
+ * @return Number of bytes written to buffer on success, negative errno on failure
+ *
+ * @pre
+ * - Device must be initialized
+ * - Configuration must be valid
+ *
+ * @usage
+ * - Allowed context for the API call
+ *   - Interrupt handler: No
+ *   - Signal handler: No
+ *   - Thread-safe: Yes
+ *   - Async/Sync: Sync
+ *   - Re-entrant: Yes
+ * - API Group
+ *   - Init: No
+ *   - Runtime: Yes
+ *   - De-Init: No
+ */
+static ssize_t vblk_size_show(struct device *dev,
+		struct device_attribute *attr,
+		char *buf)
+{
+	struct gendisk *disk = dev_to_disk(dev);
+	struct vblk_dev *vblk = disk->private_data;
+	return snprintf(buf, 32, "%llu\n", vblk->size / SECTOR_SIZE);
+}
+
 static const struct device_attribute dev_attr_phys_dev_ro =
 	__ATTR(phys_dev, 0444,
 	       vblk_phys_dev_show, NULL);
@@ -1463,6 +1542,10 @@ static const struct device_attribute dev_attr_storage_type_ro =
 static const struct device_attribute dev_attr_speed_mode_ro =
 	__ATTR(speed_mode, 0444,
 	       vblk_speed_mode_show, NULL);
+
+static const struct device_attribute dev_attr_vblk_size_ro =
+	__ATTR(vblk_size, 0444,
+	       vblk_size_show, NULL);
 
 static const struct blk_mq_ops vblk_mq_ops = {
 	.queue_rq	= vblk_request,
@@ -1593,7 +1676,7 @@ static int setup_ffu_device(struct vblk_dev *vblkdev)
 #endif
 
 #if defined(NV_BLK_MQ_ALLOC_DISK_FOR_QUEUE_PRESENT)
-	vblkdev->ffu_gd = blk_mq_alloc_disk_for_queue(vblkdev->ffu_queue, NULL);
+	vblkdev->ffu_gd = blk_mq_alloc_disk_for_queue(vblkdev->ffu_queue, &tegra_vblk_ffu_disk_key);
 #elif defined(NV___ALLOC_DISK_NODE_HAS_LKCLASS_ARG)
 	vblkdev->ffu_gd = __alloc_disk_node(vblkdev->ffu_queue, NUMA_NO_NODE, NULL);
 #else
@@ -1647,7 +1730,7 @@ cleanup_queue:
 }
 
 /* Set up ioctl virtual device. */
-static int setup_ioctl_device(struct vblk_dev *vblkdev)
+static int setup_ioctl_device(struct vblk_dev *vblkdev, bool is_rpmb)
 {
 	int ret;
 
@@ -1703,7 +1786,7 @@ static int setup_ioctl_device(struct vblk_dev *vblkdev)
 
 	/* And the gendisk structure. */
 #if defined(NV_BLK_MQ_ALLOC_DISK_FOR_QUEUE_PRESENT) /* Linux v6.0 */
-	vblkdev->ioctl_gd = blk_mq_alloc_disk_for_queue(vblkdev->ioctl_queue, NULL);
+	vblkdev->ioctl_gd = blk_mq_alloc_disk_for_queue(vblkdev->ioctl_queue, &tegra_vblk_ioctl_disk_key);
 #elif defined(NV___ALLOC_DISK_NODE_HAS_LKCLASS_ARG) /* Linux v5.15 */
 	vblkdev->ioctl_gd = __alloc_disk_node(vblkdev->ioctl_queue, NUMA_NO_NODE, NULL);
 #else
@@ -1725,11 +1808,21 @@ static int setup_ioctl_device(struct vblk_dev *vblkdev)
 	vblkdev->ioctl_gd->flags |= GENHD_FL_EXT_DEVT;
 #endif
 
-	if (snprintf(vblkdev->ioctl_gd->disk_name, 32, "vblkdev%d.ctl",
-				vblkdev->devnum) < 0) {
-		dev_err(vblkdev->device, "Error while updating disk_name for ioctl!\n");
-		ret = -EINVAL;
-		goto cleanup_disk;
+	if (is_rpmb) {
+		if (snprintf(vblkdev->ioctl_gd->disk_name, 32, "vblkrpmb%d",
+					vblkdev->devnum) < 0) {
+			dev_err(vblkdev->device, "Error while updating disk_name for rpmb ioctl!\n");
+			ret = -EINVAL;
+			goto cleanup_disk;
+		}
+		vblkdev->ioctl_gd->flags |= GENHD_FL_NO_PART;
+	} else {
+		if (snprintf(vblkdev->ioctl_gd->disk_name, 32, "vblkdev%d.ctl",
+					vblkdev->devnum) < 0) {
+			dev_err(vblkdev->device, "Error while updating disk_name for ioctl!\n");
+			ret = -EINVAL;
+			goto cleanup_disk;
+		}
 	}
 
 #if defined(NV_DEVICE_ADD_DISK_HAS_INT_RETURN_TYPE) /* Linux v5.15 */
@@ -2028,8 +2121,9 @@ static void setup_device(struct vblk_dev *vblkdev)
 		if (vblkdev->config.blk_config.req_ops_supported &
 				(VS_BLK_READ_OP_F |
 				 VS_BLK_WRITE_OP_F |
-				 VS_BLK_IOCTL_OP_F)) {
-			panic("hv_vblk: IVC Channel:%u IVC frames %d less than possible max requests %d!\n",
+				 VS_BLK_IOCTL_OP_F |
+				 VS_BLK_RPMB_OP_F)) {
+			dev_info(vblkdev->device, "hv_vblk: IVC Channel:%u IVC frames %d less than possible max requests %d!\n",
 				vblkdev->ivc_id, vblkdev->ivck->nframes,
 				max_requests);
 			return;
@@ -2072,129 +2166,200 @@ static void setup_device(struct vblk_dev *vblkdev)
 	vblkdev->max_requests = max_requests;
 	vblkdev->max_ioctl_requests = max_ioctl_requests;
 
-	/* And the gendisk structure. */
-#if defined(NV_BLK_MQ_ALLOC_DISK_FOR_QUEUE_PRESENT) /* Linux v6.0 */
-	vblkdev->gd = blk_mq_alloc_disk_for_queue(vblkdev->queue, NULL);
-#elif defined(NV___ALLOC_DISK_NODE_HAS_LKCLASS_ARG) /* Linux v5.15 */
-	vblkdev->gd = __alloc_disk_node(vblkdev->queue, NUMA_NO_NODE, NULL);
-#else
-	vblkdev->gd = __alloc_disk_node(VBLK_MINORS, NUMA_NO_NODE);
-#endif
-	if (!vblkdev->gd) {
-		dev_err(vblkdev->device, "alloc_disk failure\n");
-		return;
-	}
-	vblkdev->gd->major = vblk_major;
-	vblkdev->gd->first_minor = vblkdev->devnum * VBLK_MINORS;
-	vblkdev->gd->minors = VBLK_MINORS;
-	vblkdev->gd->fops = &vblk_ops_no_ioctl;
-	vblkdev->gd->queue = vblkdev->queue;
-	vblkdev->gd->private_data = vblkdev;
-#if defined(GENHD_FL_EXT_DEVT) /* Removed in Linux v5.17 */
-	vblkdev->gd->flags |= GENHD_FL_EXT_DEVT;
-#endif
-
-	/* Don't allow scanning of the device when block
-	 * requests are not supported */
-	if (!(vblkdev->config.blk_config.req_ops_supported &
-				VS_BLK_READ_OP_F)) {
-#if defined(GENHD_FL_NO_PART_SCAN) /* Removed in Linux v5.17 */
-		vblkdev->gd->flags |= GENHD_FL_NO_PART_SCAN;
-#endif
-	}
-
-	/* Set disk read-only if config response say so */
-	if (!(vblkdev->config.blk_config.req_ops_supported &
-				VS_BLK_READ_ONLY_MASK)) {
-		dev_info(vblkdev->device, "setting device read-only\n");
-		set_disk_ro(vblkdev->gd, 1);
-	}
-
-	if (vblkdev->config.storage_type == VSC_STORAGE_RPMB) {
-		if (snprintf(vblkdev->gd->disk_name, 32, "vblkrpmb%d",
-				vblkdev->devnum) < 0) {
-			dev_err(vblkdev->device, "Error while updating disk_name!\n");
+	if (vblkdev->config.blk_config.req_ops_supported == VS_BLK_RPMB_OP_F) {
+		ret = setup_ioctl_device(vblkdev, true);
+		if (ret) {
+			dev_err(vblkdev->device, "Failed to setup ioctl device\n");
 			return;
 		}
+
+		if (device_create_file(disk_to_dev(vblkdev->ioctl_gd),
+			&dev_attr_phys_dev_ro)) {
+			dev_warn(vblkdev->device, "Error adding phys dev file!\n");
+			return;
+		}
+
+		if (device_create_file(disk_to_dev(vblkdev->ioctl_gd),
+			&dev_attr_phys_base_ro)) {
+			dev_warn(vblkdev->device, "Error adding phys base file!\n");
+			return;
+		}
+
+		if (device_create_file(disk_to_dev(vblkdev->ioctl_gd),
+			&dev_attr_storage_type_ro)) {
+			dev_warn(vblkdev->device, "Error adding storage type file!\n");
+			return;
+		}
+
+		if (device_create_file(disk_to_dev(vblkdev->ioctl_gd),
+			&dev_attr_speed_mode_ro)) {
+			dev_warn(vblkdev->device, "Error adding speed_mode file!\n");
+			return;
+		}
+
+		if (device_create_file(disk_to_dev(vblkdev->ioctl_gd),
+			&dev_attr_vblk_size_ro)) {
+			dev_warn(vblkdev->device, "Error adding vblk_size file!\n");
+			return;
+		}
+
 	} else {
+		/* And the gendisk structure. */
+	#if defined(NV_BLK_MQ_ALLOC_DISK_FOR_QUEUE_PRESENT) /* Linux v6.0 */
+		vblkdev->gd = blk_mq_alloc_disk_for_queue(vblkdev->queue, &tegra_vblk_disk_key);
+	#elif defined(NV___ALLOC_DISK_NODE_HAS_LKCLASS_ARG) /* Linux v5.15 */
+		vblkdev->gd = __alloc_disk_node(vblkdev->queue, NUMA_NO_NODE, NULL);
+	#else
+		vblkdev->gd = __alloc_disk_node(VBLK_MINORS, NUMA_NO_NODE);
+	#endif
+		if (!vblkdev->gd) {
+			dev_err(vblkdev->device, "alloc_disk failure\n");
+			return;
+		}
+		vblkdev->gd->major = vblk_major;
+		vblkdev->gd->first_minor = vblkdev->devnum * VBLK_MINORS;
+		vblkdev->gd->minors = VBLK_MINORS;
+		vblkdev->gd->fops = &vblk_ops_no_ioctl;
+		vblkdev->gd->queue = vblkdev->queue;
+		vblkdev->gd->private_data = vblkdev;
+	#if defined(GENHD_FL_EXT_DEVT) /* Removed in Linux v5.17 */
+		vblkdev->gd->flags |= GENHD_FL_EXT_DEVT;
+	#endif
+
+		/* Don't allow scanning of the device when block
+		 * requests are not supported.
+		 */
+		if (!(vblkdev->config.blk_config.req_ops_supported &
+					VS_BLK_READ_OP_F)) {
+			vblkdev->gd->flags |= GENHD_FL_NO_PART;
+		}
+
+		/* Set disk read-only if config response say so */
+		if (!(vblkdev->config.blk_config.req_ops_supported &
+					VS_BLK_READ_ONLY_MASK)) {
+			dev_info(vblkdev->device, "setting device read-only\n");
+			set_disk_ro(vblkdev->gd, 1);
+		}
+
 		if (snprintf(vblkdev->gd->disk_name, 32, "vblkdev%d",
 				vblkdev->devnum) < 0) {
 			dev_err(vblkdev->device, "Error while updating disk_name!\n");
 			return;
 		}
-	}
 
-	dev_info(vblkdev->device, "device name is %s\n", vblkdev->gd->disk_name);
-	set_capacity(vblkdev->gd, (vblkdev->size / SECTOR_SIZE));
-#if defined(NV_DEVICE_ADD_DISK_HAS_INT_RETURN_TYPE) /* Linux v5.15 */
-	if (device_add_disk(vblkdev->device, vblkdev->gd, NULL)) {
-		dev_err(vblkdev->device, "Error adding disk!\n");
-		return;
-	}
-#else
-	device_add_disk(vblkdev->device, vblkdev->gd, NULL);
-#endif
-
-	if (device_create_file(disk_to_dev(vblkdev->gd),
-		&dev_attr_phys_dev_ro)) {
-		dev_warn(vblkdev->device, "Error adding phys dev file!\n");
-		return;
-	}
-
-	if (device_create_file(disk_to_dev(vblkdev->gd),
-		&dev_attr_phys_base_ro)) {
-		dev_warn(vblkdev->device, "Error adding phys base file!\n");
-		return;
-	}
-
-	if (device_create_file(disk_to_dev(vblkdev->gd),
-		&dev_attr_storage_type_ro)) {
-		dev_warn(vblkdev->device, "Error adding storage type file!\n");
-		return;
-	}
-
-	if (device_create_file(disk_to_dev(vblkdev->gd),
-		&dev_attr_speed_mode_ro)) {
-		dev_warn(vblkdev->device, "Error adding speed_mode file!\n");
-		return;
-	}
-
-
-#if (IS_ENABLED(CONFIG_TEGRA_HSIERRRPTINJ))
-	if (vblkdev->config.phys_dev == VSC_DEV_EMMC) {
-		vblkdev->epl_id = IP_SDMMC;
-		vblkdev->epl_reporter_id = HSI_SDMMC4_REPORT_ID;
-		/* Check for overflow before incrementing */
-		if ((check_add_overflow(total_instance_id, 1U, &total_instance_id)) == true) {
-			dev_err(vblkdev->device, "Instance ID counter overflow!\n");
-			return;  /* Fail device setup */
-		}
-		vblkdev->instance_id = total_instance_id;
-	}
-
-	if (vblkdev->epl_id == IP_SDMMC) {
-		/* Register error reporting callback */
-		err = hsierrrpt_reg_cb(vblkdev->epl_id, vblkdev->instance_id,
-							vblk_inject_err_fsi, vblkdev);
-		if (err != 0)
-			dev_info(vblkdev->device, "Err inj callback registration failed: %d", err);
-	}
-#endif
-
-	if (vblkdev->config.blk_config.req_ops_supported & VS_BLK_IOCTL_OP_F) {
-		ret = setup_ioctl_device(vblkdev);
-		if (ret) {
-			dev_err(vblkdev->device, "Failed to setup ioctl device\n");
+		dev_info(vblkdev->device, "device name is %s\n", vblkdev->gd->disk_name);
+		set_capacity(vblkdev->gd, (vblkdev->size / SECTOR_SIZE));
+	#if defined(NV_DEVICE_ADD_DISK_HAS_INT_RETURN_TYPE) /* Linux v5.15 */
+		if (device_add_disk(vblkdev->device, vblkdev->gd, NULL)) {
+			dev_err(vblkdev->device, "Error adding disk!\n");
 			return;
 		}
-		ret = setup_ffu_device(vblkdev);
-		if (ret) {
-			dev_err(vblkdev->device, "Failed to setup ffu device\n");
+	#else
+		device_add_disk(vblkdev->device, vblkdev->gd, NULL);
+	#endif
+
+		if (device_create_file(disk_to_dev(vblkdev->gd),
+			&dev_attr_phys_dev_ro)) {
+			dev_warn(vblkdev->device, "Error adding phys dev file!\n");
 			return;
+		}
+
+		if (device_create_file(disk_to_dev(vblkdev->gd),
+			&dev_attr_phys_base_ro)) {
+			dev_warn(vblkdev->device, "Error adding phys base file!\n");
+			return;
+		}
+
+		if (device_create_file(disk_to_dev(vblkdev->gd),
+			&dev_attr_storage_type_ro)) {
+			dev_warn(vblkdev->device, "Error adding storage type file!\n");
+			return;
+		}
+
+		if (device_create_file(disk_to_dev(vblkdev->gd),
+			&dev_attr_speed_mode_ro)) {
+			dev_warn(vblkdev->device, "Error adding speed_mode file!\n");
+			return;
+		}
+
+
+	#if (IS_ENABLED(CONFIG_TEGRA_HSIERRRPTINJ))
+		if (vblkdev->config.phys_dev == VSC_DEV_EMMC) {
+			vblkdev->epl_id = IP_SDMMC;
+			vblkdev->epl_reporter_id = HSI_SDMMC4_REPORT_ID;
+			/* Check for overflow before incrementing */
+			if ((check_add_overflow(total_instance_id, 1U, &total_instance_id)) == true) {
+				dev_err(vblkdev->device, "Instance ID counter overflow!\n");
+				return;  /* Fail device setup */
+			}
+			vblkdev->instance_id = total_instance_id;
+		}
+
+		if (vblkdev->epl_id == IP_SDMMC) {
+			/* Register error reporting callback */
+			err = hsierrrpt_reg_cb(vblkdev->epl_id, vblkdev->instance_id,
+								vblk_inject_err_fsi, vblkdev);
+			if (err != 0)
+				dev_info(vblkdev->device, "Err inj callback registration failed: %d",
+				err);
+		}
+	#endif
+		if (vblkdev->config.blk_config.req_ops_supported & VS_BLK_IOCTL_OP_F) {
+			ret = setup_ioctl_device(vblkdev, false);
+			if (ret) {
+				dev_err(vblkdev->device, "Failed to setup ioctl device\n");
+				return;
+			}
+			ret = setup_ffu_device(vblkdev);
+			if (ret) {
+				dev_err(vblkdev->device, "Failed to setup ffu device\n");
+				return;
+			}
 		}
 	}
 }
+/**
+ * @defgroup vscd_irq_timer LinuxVSCD::IRQ/Timer/Init
+ *
+ * @ingroup vscd_irq_timer
+ * @{
+ */
 
+/**
+ * @brief Work queue function to initialize virtual block device and worker thread
+ *
+ * This function is called as a work queue item to complete the initialization of the
+ * virtual block device after the IVC channel has been established. It performs the
+ * following key tasks:
+ * 1. Retrieves configuration information from the virtual storage server
+ * 2. Creates a kernel worker thread for processing block I/O requests
+ * 3. Sets thread scheduling attributes and priority based on device configuration
+ * 4. Binds the worker thread to a specific CPU if configured
+ * 5. Initializes completion mechanism for worker thread synchronization
+ * 6. Calls setup_device() to create block device nodes and queues
+ *
+ * The function ensures proper initialization of the virtual block device including
+ * the worker thread that will handle all I/O operations through the IVC channel.
+ *
+ * @param[in] ws Pointer to the work_struct that contains the vblk_dev structure
+ *
+ * @pre
+ * - Device structure must be allocated and basic initialization done
+ * - IVC channel must be established and configured
+ * - Device must not be already initialized
+ *
+ * @usage
+ * - Allowed context for the API call
+ *   - Interrupt handler: No
+ *   - Signal handler: No
+ *   - Thread-safe: Yes
+ *   - Async/Sync: Async
+ *   - Re-entrant: No
+ * - API Group
+ *   - Init: Yes
+ *   - Runtime: No
+ *   - De-Init: No
+ */
 static void vblk_init_device(struct work_struct *ws)
 {
 	struct vblk_dev *vblkdev = container_of(ws, struct vblk_dev, init);
@@ -2275,12 +2440,6 @@ static void vblk_init_device(struct work_struct *ws)
 	mutex_unlock(&vblkdev->ivc_lock);
 }
 
-/**
- * @defgroup vscd_irq_timer LinuxVSCD::IRQ/Timer
- *
- * @ingroup vscd_irq_timer
- * @{
- */
 
 /**
  * @brief Interrupt handler for IVC (Inter-VM Communication) events
@@ -2380,8 +2539,40 @@ static void bio_request_timeout_callback(struct timer_list *timer)
 
 }
 
-/** @} */
 
+/**
+ * @brief Work queue function to initialize IVC channel and request configuration
+ *
+ * This function is called as a work queue item to set up the IVC (Inter-VM Communication)
+ * channel for the virtual block device. It performs the following key tasks:
+ * 1. Reserves the IVC channel using the device's IVC ID
+ * 2. Requests an interrupt handler for IVC events
+ * 3. Resets the IVC channel to establish communication
+ * 4. Sends initial configuration command to the virtual storage server
+ * 5. Handles cleanup in case of failures
+ *
+ * The function ensures proper initialization of the communication channel between
+ * the virtual block device and the storage server in the hypervisor environment.
+ *
+ * @param[in] ws Pointer to the work_struct that contains the vblk_dev structure
+ *
+ * @pre
+ * - Device structure must be allocated and basic initialization done
+ * - IVC ID must be properly configured
+ * - Device must be in hypervisor mode
+ *
+ * @usage
+ * - Allowed context for the API call
+ *   - Interrupt handler: No
+ *   - Signal handler: No
+ *   - Thread-safe: Yes
+ *   - Async/Sync: Async
+ *   - Re-entrant: No
+ * - API Group
+ *   - Init: Yes
+ *   - Runtime: No
+ *   - De-Init: No
+ */
 static void vblk_request_config(struct work_struct *ws)
 {
 	struct vblk_dev *vblkdev = container_of(ws, struct vblk_dev, rq_cfg);
@@ -2415,6 +2606,7 @@ static void vblk_request_config(struct work_struct *ws)
 free_ivc:
 	tegra_hv_ivc_unreserve(vblkdev->ivck);
 }
+/** @} */
 
 static void tegra_create_timers(struct vblk_dev *vblkdev)
 {
@@ -2530,12 +2722,12 @@ static int tegra_hv_vblk_probe(struct platform_device *pdev)
 	}
 
 	vblkdev->initialized = false;
+	vblkdev->allow_ffu_passthrough_cmds = false;
 
 	init_completion(&vblkdev->req_queue_empty);
 #if (IS_ENABLED(CONFIG_TEGRA_HSIERRRPTINJ))
 	init_completion(&vblkdev->hsierror_handle);
 #endif
-	vblkdev->queue_state = VBLK_QUEUE_ACTIVE;
 
 	spin_lock_init(&vblkdev->lock);
 	spin_lock_init(&vblkdev->queue_lock);
@@ -2545,8 +2737,14 @@ static int tegra_hv_vblk_probe(struct platform_device *pdev)
 	INIT_WORK(&vblkdev->init, vblk_init_device);
 	INIT_WORK(&vblkdev->rq_cfg, vblk_request_config);
 
+	spin_lock(&vblkdev->queue_lock);
 	/* creating and initializing the an internal request list */
 	INIT_LIST_HEAD(&vblkdev->req_list);
+	spin_unlock(&vblkdev->queue_lock);
+
+	spin_lock(&vblkdev->lock);
+	vblkdev->queue_state = VBLK_QUEUE_ACTIVE;
+	spin_unlock(&vblkdev->lock);
 
 	/* Create timers for each request going to storage server*/
 	tegra_create_timers(vblkdev);
@@ -2678,12 +2876,10 @@ static int tegra_hv_vblk_remove(struct platform_device *pdev)
 static int tegra_hv_vblk_suspend(struct device *dev)
 {
 	struct vblk_dev *vblkdev = dev_get_drvdata(dev);
-	unsigned long flags;
 
 	if (vblkdev->queue) {
-		spin_lock_irqsave(&vblkdev->queue->queue_lock, flags);
-		blk_mq_stop_hw_queues(vblkdev->queue);
-		spin_unlock_irqrestore(&vblkdev->queue->queue_lock, flags);
+		/* Locking is not needed for stop_hw_queues */
+		blk_mq_quiesce_queue(vblkdev->queue);
 
 		spin_lock(&vblkdev->lock);
 		vblkdev->queue_state = VBLK_QUEUE_SUSPENDED;
@@ -2698,9 +2894,7 @@ static int tegra_hv_vblk_suspend(struct device *dev)
 	}
 
 	if (vblkdev->ioctl_queue) {
-		spin_lock_irqsave(&vblkdev->ioctl_queue->queue_lock, flags);
-		blk_mq_stop_hw_queues(vblkdev->ioctl_queue);
-		spin_unlock_irqrestore(&vblkdev->ioctl_queue->queue_lock, flags);
+		blk_mq_quiesce_queue(vblkdev->ioctl_queue);
 	}
 
 	return 0;
@@ -2744,7 +2938,6 @@ static int tegra_hv_vblk_suspend(struct device *dev)
 static int tegra_hv_vblk_resume(struct device *dev)
 {
 	struct vblk_dev *vblkdev = dev_get_drvdata(dev);
-	unsigned long flags;
 
 	if (vblkdev->queue) {
 		spin_lock(&vblkdev->lock);
@@ -2753,19 +2946,15 @@ static int tegra_hv_vblk_resume(struct device *dev)
 		spin_unlock(&vblkdev->lock);
 
 		enable_irq(vblkdev->ivck->irq);
-
-		spin_lock_irqsave(&vblkdev->queue->queue_lock, flags);
-		blk_mq_start_hw_queues(vblkdev->queue);
-		spin_unlock_irqrestore(&vblkdev->queue->queue_lock, flags);
+		/* Locking is not needed for start_hw_queues */
+		blk_mq_unquiesce_queue(vblkdev->queue);
 
 		/* wakeup worker thread */
 		complete(&vblkdev->complete);
 	}
 
 	if (vblkdev->ioctl_queue) {
-		spin_lock_irqsave(&vblkdev->ioctl_queue->queue_lock, flags);
-		blk_mq_start_hw_queues(vblkdev->ioctl_queue);
-		spin_unlock_irqrestore(&vblkdev->ioctl_queue->queue_lock, flags);
+		blk_mq_unquiesce_queue(vblkdev->ioctl_queue);
 	}
 
 	return 0;

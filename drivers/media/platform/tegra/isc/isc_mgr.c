@@ -1093,10 +1093,10 @@ static int isc_mgr_probe(struct platform_device *pdev)
 
 	isc_mgr->err_irq = platform_get_irq_optional(pdev, 0);
 	if (isc_mgr->err_irq > 0) {
-		err = devm_request_irq(&pdev->dev,
+		err = devm_request_any_context_irq(&pdev->dev,
 				isc_mgr->err_irq,
 				isc_mgr_isr, 0, pdev->name, isc_mgr);
-		if (err) {
+		if (err < 0) {
 			dev_err(&pdev->dev,
 				"request_irq failed with err %d\n", err);
 			isc_mgr->err_irq = 0;

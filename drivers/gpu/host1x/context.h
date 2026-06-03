@@ -34,7 +34,7 @@ struct host1x_hw_memory_context {
 	u32 stream_id;
 
 	struct list_head owners;
-	unsigned int active;
+	refcount_t active;
 };
 
 #ifdef CONFIG_IOMMU_API

@@ -175,11 +175,11 @@ struct camrtc_diag_isp5_sdl_setup_req {
 	iova_t rce_iova;
 
 	/**
-	 * Diagnostic test binary IOVA for ISP. See @ref isp5_sdl_header
+	 * Diagnostic test binary IOVA for ISPs. See @ref isp5_sdl_header
 	 * "Diagnostic test binary header". Must be non-zero and
 	 * a multiple of @ref CAMRTC_DIAG_DMA_ALIGN_BYTES.
 	 */
-	iova_t isp_iova;
+	iova_t isp_iova[CAMRTC_DIAG_MAX_ISP_UNITS];
 
 	/**
 	 * Diagnostic test binary size.
@@ -221,19 +221,17 @@ struct camrtc_diag_isp5_sdl_status_resp {
 	uint32_t running;
 
 	/** Number of tests that have been scheduled. */
-	uint64_t scheduled;
+	uint64_t scheduled[CAMRTC_DIAG_MAX_ISP_UNITS];
 
 	/** Number of tests that have been executed. */
-	uint64_t executed;
+	uint64_t executed[CAMRTC_DIAG_MAX_ISP_UNITS];
 
 	/** Number of tests that have been passed. */
-	uint64_t passed;
+	uint64_t passed[CAMRTC_DIAG_MAX_ISP_UNITS];
 
 	/** Number of CRC failures in tests. (Counter stops at UINT32_MAX.) */
-	uint32_t crc_failed;
+	uint32_t crc_failed[CAMRTC_DIAG_MAX_ISP_UNITS];
 
-	/** Explicit padding */
-	uint32_t pad32_[1];
 } CAMRTC_DIAG_IVC_ALIGN;
 
 /**

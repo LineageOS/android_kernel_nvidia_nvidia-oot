@@ -1,9 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
+/* SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
 
 #ifndef PVA_KMD_TEGRA_STATS_H
 #define PVA_KMD_TEGRA_STATS_H
-#include "pva_kmd_device.h"
 
 #if PVA_ENABLE_TEGRASTATS == 1
 

@@ -68,24 +68,24 @@
     },
 
     # Kernel source directory (if not set defaults to KernelObj).
-    "kernel_src": "/home/<user>/<repo-path>/kernel/kernel-oot",
+    "kernel_src": "<repo-path>/kernel/kernel-oot",
 
     # Directory with kernel object files (e.g. `vmlinux` for linux)
     # (used for report symbolization, coverage reports and in tree modules finding, optional).
-    "kernel_obj": "/home/<user>/<repo-path>/out/embedded-linux-generic-debug-none/nvidia/kernel-oot/kernel-rt_patches/",
+    "kernel_obj": "<repo-path>/out/embedded-linux-generic-debug-none/nvidia/kernel-oot/kernel-rt_patches/",
 
     # Directories with out-of-tree kernel module object files for coverage report generation (optional).
     # KernelObj is also scanned for in-tree kernel modules and does not need to be duplicated here.
     # Note: the modules need to be unstripped and contain debug info.
     "module_obj": [
-        "/home/<user>/<repo-path>/out/embedded-linux-generic-debug-none/nvidia/kernel-oot/kernel-rt_patches-nvidia-oot/nvidia-oot/drivers/media/platform/tegra"
+        "<repo-path>/out/embedded-linux-generic-debug-none/nvidia/kernel-oot/kernel-rt_patches-ootm-nvidia-public/nvidia-public/drivers/media/platform/tegra"
     ],
 
     # Location of a working directory for the syz-manager process. Outputs here include:
     # - <workdir>/crashes/: crash output files
     # - <workdir>/corpus.db: corpus with interesting programs
     # - <workdir>/instance-x: per VM instance temporary files
-    "workdir":"/home/<user>/<repo-path>/workdir",
+    "workdir":"<repo-path>/workdir/all",
 
     # List of syscalls to test (optional). For example:
     #   "enable_syscalls": [ "mmap", "openat$ashmem", "ioctl$ASHMEM*" ]
@@ -108,8 +108,10 @@
         "ioctl$CDI_MGR_IOCTL_INTR_CONFIG"
     ],
 
-    # List of system calls that should be treated as disabled (optional).
-    "disable_syscalls" : [
-        "ioctl$CDI_MGR_IOCTL_DISABLE_DES_POWER"
+    # Completely ignore reports matching these regexps (don't save nor reboot),
+    # must match the first line of crash message.
+    "ignores": [
+        "INFO: FINISHED_FBRD_LOW=.*"
     ]
+
 }

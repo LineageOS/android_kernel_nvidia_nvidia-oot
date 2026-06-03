@@ -12,29 +12,49 @@
 #include "../intr.h"
 #include "../dev.h"
 
+static void process_32_syncpts(struct host1x *host, unsigned long val, u32 reg_offset, ktime_t ts)
+{
+	unsigned int id;
+
+	if (!val)
+		return;
+
+	host1x_sync_writel(host, val, HOST1X_SYNC_SYNCPT_THRESH_INT_DISABLE(reg_offset));
+	host1x_sync_writel(host, val, HOST1X_SYNC_SYNCPT_THRESH_CPU0_INT_STATUS(reg_offset));
+
+	for_each_set_bit(id, &val, 32)
+		host1x_intr_handle_interrupt(host, reg_offset * 32 + id, ts);
+}
+
 static irqreturn_t syncpt_thresh_isr(int irq, void *dev_id)
 {
 	struct host1x_intr_irq_data *irq_data = dev_id;
 	struct host1x *host = irq_data->host;
 	unsigned long reg;
-	unsigned int i, id;
+	unsigned int i;
 	ktime_t ts;
 
 	ts = ktime_get();
 
+#if !defined(CONFIG_64BIT)
 	for (i = irq_data->offset; i < DIV_ROUND_UP(host->info->nb_pts, 32);
 	     i += host->num_syncpt_irqs) {
 		reg = host1x_sync_readl(host,
 			HOST1X_SYNC_SYNCPT_THRESH_CPU0_INT_STATUS(i));
 
-		host1x_sync_writel(host, reg,
-			HOST1X_SYNC_SYNCPT_THRESH_INT_DISABLE(i));
-		host1x_sync_writel(host, reg,
-			HOST1X_SYNC_SYNCPT_THRESH_CPU0_INT_STATUS(i));
-
-		for_each_set_bit(id, &reg, 32)
-			host1x_intr_handle_interrupt(host, i * 32 + id, ts);
+		process_32_syncpts(host, reg, i, ts);
 	}
+#else
+	/* All 64-bit capable SoCs have number of syncpoints divisible by 64 */
+	for (i = irq_data->offset; i < DIV_ROUND_UP(host->info->nb_pts, 64);
+	     i += host->num_syncpt_irqs) {
+		reg = host1x_sync_readq(host,
+			HOST1X_SYNC_SYNCPT_THRESH_CPU0_INT_STATUS(i*2));
+
+		process_32_syncpts(host, lower_32_bits(reg), i*2+0, ts);
+		process_32_syncpts(host, upper_32_bits(reg), i*2+1, ts);
+	}
+#endif
 
 	return IRQ_HANDLED;
 }
@@ -77,7 +97,7 @@ host1x_intr_init_host_sync(struct host1x *host, u32 cpm)
 	 * around in a round robin fashion.
 	 */
 	for (id = 0; id < host->info->nb_pts; id++) {
-		u32 reg_offset = id / 32;
+		u32 reg_offset = id / 64;
 		u32 irq_index = reg_offset % host->num_syncpt_irqs;
 
 		host1x_sync_writel(host, irq_index, HOST1X_SYNC_SYNCPT_INTR_DEST(id));

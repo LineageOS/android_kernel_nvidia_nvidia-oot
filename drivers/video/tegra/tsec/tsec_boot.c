@@ -159,11 +159,8 @@ static int tsec_read_img_and_desc(struct platform_device *dev,
 	/* Copy the whole image taking endianness into account */
 	for (w = 0; w < fw_image->size/sizeof(u32); w++)
 		rv_data->backdoor_img_va[w] = le32_to_cpu(((__le32 *)fw_image->data)[w]);
-#if (KERNEL_VERSION(5, 14, 0) <= LINUX_VERSION_CODE)
+
 	arch_invalidate_pmem(rv_data->backdoor_img_va, rv_data->backdoor_img_size);
-#else
-	__flush_dcache_area((void *)rv_data->backdoor_img_va, fw_image->size);
-#endif
 
 	/* Read the offsets from desc binary */
 	err = tsec_compute_ucode_offsets(dev, rv_data, fw_desc);
@@ -249,7 +246,6 @@ static int tsec_riscv_data_deinit(struct platform_device *dev)
 static int get_carveout_info_4(
 	struct platform_device *dev, struct carveout_info *co_info)
 {
-#if (KERNEL_VERSION(5, 14, 0) <= LINUX_VERSION_CODE)
 	int err;
 	phys_addr_t base;
 	u64 size;
@@ -265,18 +261,6 @@ static int get_carveout_info_4(
 	co_info->size = size;
 
 	return 0;
-#else
-	int err;
-	struct mc_carveout_info mc_co_info;
-
-	err = mc_get_carveout_info(&mc_co_info, NULL, MC_SECURITY_CARVEOUT4);
-	if (err)
-		return err;
-	co_info->base = mc_co_info.base;
-	co_info->size = mc_co_info.size;
-
-	return 0;
-#endif
 }
 
 static int get_carveout_info_lite42(
@@ -333,12 +317,14 @@ int tsec_finalize_poweron(struct platform_device *dev)
 	void __iomem *ipc_co_va = NULL;
 	dma_addr_t ipc_co_iova = 0;
 	dma_addr_t ipc_co_iova_with_streamid;
-	struct tsec_reg_offsets_t *reg_off = pdata->tsec_reg_offsets;
+	struct tsec_reg_offsets_t *reg_off;
 
 	if (!pdata) {
 		dev_err(&dev->dev, "no platform data\n");
 		return -ENODATA;
 	}
+
+	reg_off = pdata->tsec_reg_offsets;
 
 	/* Init rv_data with image and descriptor info */
 	err = tsec_riscv_data_init(dev);
@@ -385,13 +371,8 @@ int tsec_finalize_poweron(struct platform_device *dev)
 		}
 		dev_dbg(&dev->dev, "IPCCO va=0x%llx pa=0x%llx\n",
 			(__force phys_addr_t)(ipc_co_va), page_to_phys(vmalloc_to_page(ipc_co_va)));
-#if (KERNEL_VERSION(5, 10, 0) <= LINUX_VERSION_CODE)
 		ipc_co_iova = dma_map_page_attrs(&dev->dev, vmalloc_to_page(ipc_co_va),
 			offset_in_page(ipc_co_va), ipc_co_info.size, DMA_BIDIRECTIONAL, 0);
-#else
-		ipc_co_iova = dma_map_page(&dev->dev, vmalloc_to_page(ipc_co_va),
-			offset_in_page(ipc_co_va), ipc_co_info.size, DMA_BIDIRECTIONAL);
-#endif
 		err = dma_mapping_error(&dev->dev, ipc_co_iova);
 		if (err) {
 			dev_err(&dev->dev, "IPC Carveout memory IOVA mapping failed");
@@ -533,13 +514,8 @@ int tsec_finalize_poweron(struct platform_device *dev)
 
 clean_up:
 	if (ipc_co_iova) {
-#if (KERNEL_VERSION(5, 10, 0) <= LINUX_VERSION_CODE)
 		dma_unmap_page_attrs(&dev->dev, ipc_co_iova,
 			ipc_co_info.size, DMA_BIDIRECTIONAL, 0);
-#else
-		dma_unmap_page(&dev->dev, ipc_co_iova,
-			ipc_co_info.size, DMA_BIDIRECTIONAL);
-#endif
 	}
 	if (ipc_co_va)
 		iounmap(ipc_co_va);
@@ -706,7 +682,7 @@ int tsec_kickoff_boot(struct platform_device *pdev)
 	pdata->private_data = tsec_priv_data;
 
 	spin_lock_init(&pdata->mirq_lock);
-	ret = request_threaded_irq(pdata->irq, tsec_irq_top_half,
+	ret = devm_request_threaded_irq(&pdev->dev, pdata->irq, tsec_irq_top_half,
 		tsec_irq_bottom_half, 0, "tsec_riscv_irq", pdev);
 	if (ret) {
 		dev_err(&pdev->dev, "CMD: failed to request irq %d\n", ret);

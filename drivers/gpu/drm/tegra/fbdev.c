@@ -99,10 +99,14 @@ static int tegra_fbdev_probe(struct drm_fb_helper *helper,
 	struct tegra_drm *tegra = helper->dev->dev_private;
 	struct drm_device *drm = helper->dev;
 	struct drm_mode_fb_cmd2 cmd = { 0 };
+#if defined(NV_DRM_FB_HELPER_ALLOC_INFO_PRESENT) || defined(NV_DRM_FB_HELPER_ALLOC_FBI_PRESENT)
+	struct fb_info *info;
+#else
+	struct fb_info *info = helper->info;
+#endif
 	unsigned int bytes_per_pixel;
 	struct drm_framebuffer *fb;
 	unsigned long offset;
-	struct fb_info *info;
 	struct tegra_bo *bo;
 	size_t size;
 	int err;
@@ -125,14 +129,19 @@ static int tegra_fbdev_probe(struct drm_fb_helper *helper,
 
 #if defined(NV_DRM_FB_HELPER_ALLOC_INFO_PRESENT) /* Linux v6.2 */
 	info = drm_fb_helper_alloc_info(helper);
-#else
-	info = drm_fb_helper_alloc_fbi(helper);
-#endif
 	if (IS_ERR(info)) {
 		dev_err(drm->dev, "failed to allocate framebuffer info\n");
 		drm_gem_object_put(&bo->gem);
 		return PTR_ERR(info);
 	}
+#elif defined(NV_DRM_FB_HELPER_ALLOC_FBI_PRESENT)
+	info = drm_fb_helper_alloc_fbi(helper);
+	if (IS_ERR(info)) {
+		dev_err(drm->dev, "failed to allocate framebuffer info\n");
+		drm_gem_object_put(&bo->gem);
+		return PTR_ERR(info);
+	}
+#endif
 
 	fb = tegra_fb_alloc(drm,
 #if defined(NV_DRM_HELPER_MODE_FILL_FB_STRUCT_HAS_INFO_ARG) /* Linux v6.17 */

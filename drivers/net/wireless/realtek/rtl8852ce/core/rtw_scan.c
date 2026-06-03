@@ -1090,7 +1090,11 @@ static struct wlan_network *add_network(_adapter *adapter, WLAN_BSSID_EX *bss)
 
 void dump_scanned_queue(void *sel, _adapter *adapter)
 {
-#define DUMP_SURVEY_INFO_80211D (1 && defined(CONFIG_80211D))
+#if defined(CONFIG_80211D)
+#define DUMP_SURVEY_INFO_80211D 1
+#else
+#define DUMP_SURVEY_INFO_80211D 0
+#endif
 
 #if DUMP_SURVEY_INFO_80211D
 #define DUMP_SURVEY_INFO_80211D_6G (1 && CONFIG_IEEE80211_BAND_6GHZ)
@@ -2660,7 +2664,7 @@ static int scan_start_fsm_cb(void *priv, struct rtw_phl_scan_param *param)
 	_adapter *padapter = scan_priv->padapter;
 
 	scan_start_cb(priv, param);
-	rtw_fsm_notify_scan_start(&padapter->fsmpriv, scan_priv->psta);
+	rtw_fsm_notify_scan_start(&padapter->fsmpriv);
 
 	return 0;
 }
@@ -2696,7 +2700,7 @@ _exit:
 	_rtw_scan_abort_check(padapter, __func__);
 
 #ifdef CONFIG_RTW_FSM
-	rtw_fsm_notify_scan_done(&padapter->fsmpriv, scan_priv->psta);
+	rtw_fsm_notify_scan_done(&padapter->fsmpriv);
 #endif
 
 #ifdef CONFIG_CMD_SCAN
@@ -2751,7 +2755,7 @@ _exit:
 		param->done_num, param->ch_num, pmlmeext->sitesurvey_res.bss_cnt);
 	_rtw_scan_abort_check(padapter, __func__);
 
-	rtw_fsm_notify_scan_done(&padapter->fsmpriv, scan_priv->psta);
+	rtw_fsm_notify_scan_done(&padapter->fsmpriv);
 
 	_free_phl_param(padapter, param);
 	pmlmeext->sitesurvey_res.scan_param = NULL;

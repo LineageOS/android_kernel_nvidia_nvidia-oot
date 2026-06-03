@@ -303,7 +303,7 @@ void pva_kmd_update_fw_resource_table(struct pva_kmd_resource_table *res_table);
  *
  * @param[in, out] resource_table  Pointer to @ref pva_kmd_resource_table structure
  *                                 Valid value: non-null, must be initialized
- * @param[in] memory               Pointer to device memory allocation
+ * @param[in] dev_mem               Pointer to device memory allocation
  *                                 Valid value: non-null, must be allocated
  * @param[out] out_resource_id     Pointer to store the assigned resource ID
  *                                 Valid value: non-null
@@ -315,7 +315,7 @@ void pva_kmd_update_fw_resource_table(struct pva_kmd_resource_table *res_table);
  */
 enum pva_error
 pva_kmd_add_dram_buffer_resource(struct pva_kmd_resource_table *resource_table,
-				 struct pva_kmd_device_memory *memory,
+				 struct pva_kmd_device_memory *dev_mem,
 				 uint32_t *out_resource_id, bool priv);
 
 /**
@@ -403,7 +403,7 @@ enum pva_error pva_kmd_add_dma_config_resource(
  * The caller must ensure proper locking around calls to this function and
  * the corresponding @ref pva_kmd_drop_resource_unsafe().
  *
- * @param[in, out] resource_table  Pointer to @ref pva_kmd_resource_table structure
+ * @param[in, out] res_table  Pointer to @ref pva_kmd_resource_table structure
  *                                 Valid value: non-null, must be initialized
  * @param[in] resource_id          Resource ID to access
  *                                 Valid range: [0 .. curr_max_resource_id]
@@ -414,7 +414,7 @@ enum pva_error pva_kmd_add_dma_config_resource(
  * @note TODO: make use and drop thread safe.
  */
 struct pva_kmd_resource_record *
-pva_kmd_use_resource_unsafe(struct pva_kmd_resource_table *resource_table,
+pva_kmd_use_resource_unsafe(struct pva_kmd_resource_table *res_table,
 			    uint32_t resource_id);
 
 /**
@@ -432,7 +432,7 @@ pva_kmd_use_resource_unsafe(struct pva_kmd_resource_table *resource_table,
  * threads. The returned resource record remains valid until the corresponding
  * @ref pva_kmd_drop_resource() is called.
  *
- * @param[in, out] resource_table  Pointer to @ref pva_kmd_resource_table structure
+ * @param[in, out] res_table  Pointer to @ref pva_kmd_resource_table structure
  *                                 Valid value: non-null, must be initialized
  * @param[in] resource_id          Resource ID to access
  *                                 Valid range: [0 .. curr_max_resource_id]
@@ -441,7 +441,7 @@ pva_kmd_use_resource_unsafe(struct pva_kmd_resource_table *resource_table,
  * @retval NULL      Invalid resource ID or resource not found
  */
 struct pva_kmd_resource_record *
-pva_kmd_use_resource(struct pva_kmd_resource_table *resource_table,
+pva_kmd_use_resource(struct pva_kmd_resource_table *res_table,
 		     uint32_t resource_id);
 
 /**
@@ -458,7 +458,7 @@ pva_kmd_use_resource(struct pva_kmd_resource_table *resource_table,
  * their reference counting. The returned pointer is only valid while
  * the caller maintains appropriate synchronization with the resource table.
  *
- * @param[in] resource_table  Pointer to @ref pva_kmd_resource_table structure
+ * @param[in] res_table  Pointer to @ref pva_kmd_resource_table structure
  *                            Valid value: non-null, must be initialized
  * @param[in] resource_id     Resource ID to inspect
  *                            Valid range: [0 .. curr_max_resource_id]
@@ -467,7 +467,7 @@ pva_kmd_use_resource(struct pva_kmd_resource_table *resource_table,
  * @retval NULL      Invalid resource ID or resource not found
  */
 struct pva_kmd_resource_record *
-pva_kmd_peek_resource(struct pva_kmd_resource_table *resource_table,
+pva_kmd_peek_resource(struct pva_kmd_resource_table *res_table,
 		      uint32_t resource_id);
 
 /**

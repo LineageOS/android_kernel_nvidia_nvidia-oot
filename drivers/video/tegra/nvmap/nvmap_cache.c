@@ -11,7 +11,6 @@
 #include <linux/of.h>
 #include <linux/rtmutex.h>
 #include <linux/sys_soc.h>
-#include <linux/version.h>
 #include <soc/tegra/fuse.h>
 __weak struct arm64_ftr_reg arm64_ftr_reg_ctrel0;
 

@@ -42,9 +42,9 @@
  *                                    Valid value: non-null, must point to KMD-private buffer
  * @param[in] ops_size                Size of the operations buffer in bytes
  *                                    Valid range: [1 .. UINT32_MAX]
- * @param[out] response               Pointer to buffer where response will be written
+ * @param[out] resp_buffer               Pointer to buffer where response will be written
  *                                    Valid value: non-null, must not alias ops_buffer
- * @param[in] response_buffer_size    Size of the response buffer in bytes
+ * @param[in] resp_buffer_size    Size of the response buffer in bytes
  *                                    Valid range: [1 .. UINT32_MAX]
  * @param[out] out_response_size      Pointer to variable for actual response size
  *                                    Valid value: non-null
@@ -65,8 +65,7 @@ enum pva_error pva_kmd_ops_handler(struct pva_kmd_context *ctx,
 				   enum pva_ops_submit_mode mode,
 				   struct pva_fw_postfence *postfence,
 				   void const *ops_buffer, uint32_t ops_size,
-				   void *response,
-				   uint32_t response_buffer_size,
+				   void *resp_buffer, uint32_t resp_buffer_size,
 				   uint32_t *out_response_size, bool priv);
 
 #endif // PVA_KMD_OP_HANDLER_H

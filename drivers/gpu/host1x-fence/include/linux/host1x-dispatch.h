@@ -33,6 +33,9 @@
 #define  host1x_writel										wrap_host1x_writel
 #define  nvhost_get_default_device							wrap_nvhost_get_default_device
 #define  nvhost_get_host1x									wrap_nvhost_get_host1x
+#define  nvhost_syncpt_unit_interface_get_byte_offset		wrap_nvhost_syncpt_unit_interface_get_byte_offset
+#define  nvhost_syncpt_unit_interface_get_aperture			wrap_nvhost_syncpt_unit_interface_get_aperture
+#ifndef CONFIG_TEGRA_DRM_DISABLE_LEGACY_INTERFACE
 #define  nvhost_client_device_get_resources					wrap_nvhost_client_device_get_resources
 #define  nvhost_client_device_init							wrap_nvhost_client_device_init
 #define  nvhost_client_device_release						wrap_nvhost_client_device_release
@@ -47,8 +50,6 @@
 #define  nvhost_syncpt_read_maxval							wrap_nvhost_syncpt_read_maxval
 #define  nvhost_syncpt_incr_max_ext							wrap_nvhost_syncpt_incr_max_ext
 #define  nvhost_syncpt_unit_interface_get_byte_offset_ext	wrap_nvhost_syncpt_unit_interface_get_byte_offset_ext
-#define  nvhost_syncpt_unit_interface_get_byte_offset		wrap_nvhost_syncpt_unit_interface_get_byte_offset
-#define  nvhost_syncpt_unit_interface_get_aperture			wrap_nvhost_syncpt_unit_interface_get_aperture
 #define  nvhost_syncpt_unit_interface_init					wrap_nvhost_syncpt_unit_interface_init
 #define  nvhost_syncpt_unit_interface_deinit				wrap_nvhost_syncpt_unit_interface_deinit
 #define  nvhost_syncpt_address								wrap_nvhost_syncpt_address
@@ -59,5 +60,5 @@
 #define  nvhost_module_busy									wrap_nvhost_module_busy
 #define  nvhost_module_idle									wrap_nvhost_module_idle
 #define  nvhost_module_idle_mult							wrap_nvhost_module_idle_mult
-
+#endif  /* CONFIG_TEGRA_DRM_DISABLE_LEGACY_INTERFACE */
 #endif /*__HOST1X_DISPATCH_H */

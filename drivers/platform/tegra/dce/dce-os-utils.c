@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2019-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2019-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  */
 #include <dce.h>
 #include <dce-os-thread.h>
@@ -155,6 +155,10 @@ struct dce_firmware *dce_os_request_firmware(struct tegra_dce *d,
 	struct device *dev = dev_from_dce_linux_device(d);
 	struct dce_firmware *fw;
 	const struct firmware *l_fw;
+	struct device *alloc_dev;
+	struct dce_linux_device *d_dev = NULL;
+
+	d_dev = dev_get_drvdata(dev);
 
 	fw = dce_os_kzalloc(d, sizeof(*fw), false);
 	if (!fw)
@@ -177,9 +181,13 @@ struct dce_firmware *dce_os_request_firmware(struct tegra_dce *d,
 	 * allocate 2MB FW virtual space. Ideally it should be as per the
 	 * actual size of the fw.
 	 */
-	fw->size = SZ_32M;
+	if (d_dev->psc_dev == NULL) {
+		fw->size = SZ_32M;
+		alloc_dev = dev;
+	} else
+		alloc_dev = d_dev->psc_dev;
 
-	fw->data = dma_alloc_coherent(dev, fw->size,
+	fw->data = dma_alloc_coherent(alloc_dev, fw->size,
 				      (dma_addr_t *)&fw->dma_handle,
 				      GFP_KERNEL);
 	if (!fw->data)
@@ -209,11 +217,19 @@ err:
 void dce_os_release_fw(struct tegra_dce *d, struct dce_firmware *fw)
 {
 	struct device *dev = dev_from_dce_linux_device(d);
+	struct dce_linux_device *d_dev = NULL;
+	struct device *alloc_dev;
 
 	if (!fw)
 		return;
 
-	dma_free_coherent(dev, fw->size,
+	d_dev = dev_get_drvdata(dev);
+	if ((d_dev == NULL) || (d_dev->psc_dev == NULL))
+		alloc_dev = dev;
+	else
+		alloc_dev = d_dev->psc_dev;
+
+	dma_free_coherent(alloc_dev, fw->size,
 			(void *)fw->data,
 			(dma_addr_t)fw->dma_handle);
 
@@ -300,6 +316,23 @@ int dce_os_cond_broadcast_interruptible(struct dce_os_cond *cond)
 	wake_up_interruptible_all(&cond->wq);
 
 	return 0;
+}
+
+/**
+ * dce_os_cond_reset - Reset a condition variable to unsignaled state
+ *
+ * @cond - The condition variable to reset
+ *
+ * For Linux kernel, the wait queue doesn't have persistent signaled state,
+ * so this is a no-op. The function exists for API compatibility with HVRTOS.
+ */
+void dce_os_cond_reset(struct dce_os_cond *cond)
+{
+	WARN_ON(!cond->initialized);
+	/* Linux wait queues don't have persistent signaled state,
+	 * so nothing to reset here. This function exists for API
+	 * compatibility with HVRTOS implementation.
+	 */
 }
 
 /**
@@ -577,7 +610,7 @@ int dce_os_init_log_buffer(struct tegra_dce *d)
 	struct device *dev = dev_from_dce_linux_device(d);
 
 	buffer = &d->dce_log_buff;
-	buffer->size = SZ_512K; // Allocate 512KB for log buffer
+	buffer->size = SZ_2M; // Allocate 2MB for log buffer
 
 	buffer->cpu_base = dma_alloc_coherent(dev, buffer->size, &buffer->iova_addr,
 								GFP_KERNEL);

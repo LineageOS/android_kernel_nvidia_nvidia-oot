@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2024-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include <nvidia/conftest.h>
 #include <linux/version.h>
@@ -74,12 +74,7 @@ static int32_t ether_tx_swcx_populate(struct osi_tx_ring *tx_ring, struct ether_
 
 	while (cnt < g_num_frags) {
 		tx_swcx = tx_ring->tx_swcx + cur_tx_idx;
-
-		if (tx_swcx->len != 0U) {
-			/* should not hit this case */
-			return -1;
-		}
-
+		CLEAR_TX_SWCX(tx_swcx, flags, 0);
 		if (cur_tx_idx > TX_BW_RING_SIZE) {
 			printk(KERN_ERR "INVALID RING SIZE\n");
 			return -1;

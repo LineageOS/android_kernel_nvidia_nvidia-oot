@@ -92,6 +92,12 @@ struct platform_device* wrap_nvhost_get_default_device(void);
 
 struct host1x* wrap_nvhost_get_host1x(struct platform_device *pdev);
 
+u32 wrap_nvhost_syncpt_unit_interface_get_byte_offset(u32 syncpt_id);
+
+int wrap_nvhost_syncpt_unit_interface_get_aperture(struct platform_device *pdev,
+                          u64 *base, size_t *size);
+
+#ifndef CONFIG_TEGRA_DRM_DISABLE_LEGACY_INTERFACE
 int wrap_nvhost_client_device_get_resources(struct platform_device *pdev);
 
 int wrap_nvhost_client_device_init(struct platform_device *pdev);
@@ -125,11 +131,6 @@ u32 wrap_nvhost_syncpt_incr_max_ext(struct platform_device *pdev, u32 id, u32 in
 u32 wrap_nvhost_syncpt_unit_interface_get_byte_offset_ext(struct platform_device *pdev,
                              u32 syncpt_id);
 
-u32 wrap_nvhost_syncpt_unit_interface_get_byte_offset(u32 syncpt_id);
-
-int wrap_nvhost_syncpt_unit_interface_get_aperture(struct platform_device *pdev,
-                          u64 *base, size_t *size);
-
 int wrap_nvhost_syncpt_unit_interface_init(struct platform_device *pdev);
 
 void wrap_nvhost_syncpt_unit_interface_deinit(struct platform_device *pdev);
@@ -152,4 +153,5 @@ int wrap_nvhost_module_busy(struct platform_device *dev);
 inline void wrap_nvhost_module_idle(struct platform_device *pdev);
 
 void wrap_nvhost_module_idle_mult(struct platform_device *pdev, int refs);
+#endif  /* CONFIG_TEGRA_DRM_DISABLE_LEGACY_INTERFACE */
 #endif /*__HOST1X_DISPATCH_API_H */

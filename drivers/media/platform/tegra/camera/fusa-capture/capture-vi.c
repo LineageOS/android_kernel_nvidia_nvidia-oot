@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* SPDX-FileCopyrightText: Copyright (c) 2017-2025 NVIDIA CORPORATION & AFFILIATES.
- * All rights reserved.
- *
- *
+// SPDX-FileCopyrightText: Copyright (c) 2017-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+/*
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
  * version 2, as published by the Free Software Foundation.
@@ -46,6 +44,7 @@
 #include "soc/tegra/camrtc-capture-messages.h"
 #include <media/fusa-capture/capture-vi-channel.h>
 #include <media/fusa-capture/capture-common.h>
+#include <media/fusa-capture/capture-logging.h>
 
 #include <media/fusa-capture/capture-vi.h>
 #ifdef NV_IS_L4T
@@ -142,7 +141,7 @@ struct tegra_capture_vi_data {
 };
 
 /**
- * @brief Initialize a VI syncpoint and get its GoS backing.
+ * @brief Initialize a VI syncpoint and get its shim address.
  *
  * This function performs the following operations:
  * - Clears the syncpoint handle if enable is false.
@@ -150,8 +149,7 @@ struct tegra_capture_vi_data {
  *   @ref struct syncpoint_info::ops::alloc_syncpt().
  * - Gets the syncpoint handle using @ref host1x_syncpt_get_by_id_noref().
  * - Reads the syncpoint value using @ref host1x_syncpt_read().
- * - Gets the GoS backing for the syncpoint using
- *   @ref struct syncpoint_info::ops::get_gos_backing().
+ * - Gets the syncpt shim address using @ref struct syncpoint_info::ops::get_syncpt_addr().
  * - In case of failure during any step, releases the allocated syncpoint and clears
  *   the handle using @ref struct syncpoint_info::ops::release_syncpt().
  *
@@ -167,7 +165,7 @@ struct tegra_capture_vi_data {
  * @retval 0        Operation completed successfully.
  * @retval -EINVAL  Error returned from @ref host1x_syncpt_get_by_id_noref().
  * @retval (int)    Error codes returned from @ref struct syncpoint_info::ops::alloc_syncpt() or
- *                  @ref struct syncpoint_info::ops::get_syncpt_gos_backing().
+ *                  @ref struct syncpoint_info::ops::get_syncpt_addr().
  */
 static int vi_capture_setup_syncpt(
 	struct tegra_vi_channel *chan,
@@ -178,11 +176,9 @@ static int vi_capture_setup_syncpt(
 	struct platform_device *pdev = chan->ndev;
 	struct nvhost_device_data *pdata = platform_get_drvdata(pdev);
 	struct host1x_syncpt *host1x_sp;
-	uint32_t gos_index, gos_offset;
 	int err;
 
 	memset(sp, 0, sizeof(*sp));
-	sp->gos_index = GOS_INDEX_INVALID;
 
 	if (!enable)
 		return 0;
@@ -199,13 +195,9 @@ static int vi_capture_setup_syncpt(
 
 	sp->threshold = host1x_syncpt_read(host1x_sp);
 
-	err = chan->ops->get_syncpt_gos_backing(pdev, sp->id, &sp->shim_addr,
-				&gos_index, &gos_offset);
+	err = chan->ops->get_syncpt_addr(pdev, sp->id, &sp->shim_addr);
 	if (err)
 		goto cleanup;
-
-	sp->gos_index = gos_index;
-	sp->gos_offset = gos_offset;
 
 	return 0;
 
@@ -284,7 +276,6 @@ static void vi_capture_release_syncpts(
  * @brief Set up the VI channel progress, embedded data and line timer syncpoints.
  *
  * This function performs the following operations:
- * - Gets the GoS table using @ref struct tegra_vi_channel::ops::get_gos_table().
  * - Sets up the progress syncpoint using @ref vi_capture_setup_syncpt().
  * - Sets up the embedded data syncpoint if enabled using @ref vi_capture_setup_syncpt().
  * - Sets up the line timer syncpoint if enabled using @ref vi_capture_setup_syncpt().
@@ -304,10 +295,6 @@ static int vi_capture_setup_syncpts(
 {
 	struct vi_capture *capture = chan->capture_data;
 	int err = 0;
-
-	chan->ops->get_gos_table(chan->ndev,
-				&capture->num_gos_tables,
-				&capture->gos_tables);
 
 	err = vi_capture_setup_syncpt(chan, "progress", true,
 			&capture->progress_sp);
@@ -817,7 +804,6 @@ EXPORT_SYMBOL(vi_csi_stream_to_nvhost_device);
  * - Registers control callback using @ref tegra_capture_ivc_register_control_cb().
  * - Allocates memory for memoryinfo ring buffer using @ref dma_alloc_coherent().
  * - Allocates memory for unpins list using @ref vzalloc().
- * - If @ref HAVE_VI_GOS_TABLES is defined, copies GoS tables to config.
  * - Sends channel setup request using @ref vi_capture_ivc_send_control().
  * - Updates channel state with response info.
  * - Updates control callback with capture channel ID using
@@ -851,10 +837,6 @@ int vi_capture_setup(
 	struct capture_channel_config *config =
 		&control_desc.channel_setup_req.channel_config;
 	int err = 0;
-#ifdef HAVE_VI_GOS_TABLES
-	int i;
-#endif
-
 	uint32_t vi_inst = 0;
 	struct device *dev;
 
@@ -1018,17 +1000,6 @@ int vi_capture_setup(
 	config->error_mask_uncorrectable = setup->error_mask_uncorrectable;
 	config->stop_on_error_notify_bits = setup->stop_on_error_notify_bits;
 
-#ifdef HAVE_VI_GOS_TABLES
-	dev_dbg(chan->dev, "%u GoS tables configured.\n",
-		capture->num_gos_tables);
-	for (i = 0; i < capture->num_gos_tables; i++) {
-		config->vi_gos_tables[i] = (iova_t)capture->gos_tables[i];
-		dev_dbg(chan->dev, "gos[%d] = 0x%08llx\n",
-			i, (u64)capture->gos_tables[i]);
-	}
-	config->num_vi_gos_tables = capture->num_gos_tables;
-#endif
-
 	config->progress_sp = capture->progress_sp;
 	config->embdata_sp = capture->embdata_sp;
 	config->linetimer_sp = capture->linetimer_sp;
@@ -1077,6 +1048,10 @@ int vi_capture_setup(
 
 	channels[setup->csi_stream_id][setup->virtual_channel_id] = chan;
 
+	/* Log successful setup with pipeline ID */
+	vi_chan_info(chan, "VI capture setup complete (channel_id=%u, csi_stream=%u, vc=%u)\n",
+		     capture->channel_id, setup->csi_stream_id, setup->virtual_channel_id);
+
 	return 0;
 
 cb_fail:
@@ -1086,6 +1061,9 @@ submit_fail:
 	capture->unpins_list = NULL;
 unpin_alloc_fail:
 	/* Release memoryinfo ringbuffer */
+	memset(capture->requests_memoryinfo, 0,
+		capture->queue_depth *
+		sizeof(struct capture_descriptor_memoryinfo));
 	dma_free_coherent(capture->rtcpu_dev,
 		capture->queue_depth *
 		sizeof(struct capture_descriptor_memoryinfo),
@@ -1217,6 +1195,8 @@ int vi_capture_reset(
 
 	vi_capture_fastforward_syncpt(chan);
 
+	complete(&capture->capture_resp);
+
 submit_fail:
 	mutex_unlock(&capture->reset_lock);
 	return err;
@@ -1260,6 +1240,7 @@ int vi_capture_release(
 	int err = 0;
 	int ret = 0;
 	int i = 0;
+	size_t size = 0;
 
 	if (unlikely(chan == NULL)) {
 		pr_err("%s: vi channel pointer is NULL\n", __func__);
@@ -1306,8 +1287,9 @@ int vi_capture_release(
 
 	if (capture->requests_memoryinfo) {
 		/* Release memoryinfo ringbuffer */
-		dma_free_coherent(capture->rtcpu_dev,
-			capture->queue_depth * sizeof(struct capture_descriptor_memoryinfo),
+		size = capture->queue_depth * sizeof(struct capture_descriptor_memoryinfo);
+		memset(capture->requests_memoryinfo, 0, size);
+		dma_free_coherent(capture->rtcpu_dev, size,
 			capture->requests_memoryinfo, capture->requests_memoryinfo_iova);
 		capture->requests_memoryinfo = NULL;
 	}

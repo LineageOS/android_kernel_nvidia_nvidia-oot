@@ -2,7 +2,7 @@
 /*
  * Voltage Regulator Specification: Power Sequencer MFD Driver
  *
- * Copyright (C) 2020-2023 NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2020-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  */
 
 #include <nvidia/conftest.h>

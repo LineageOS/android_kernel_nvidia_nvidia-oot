@@ -1,6 +1,15 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/*
- * Copyright (c) 2017-2025 NVIDIA Corporation.  All rights reserved.
+/* SPDX-FileCopyrightText: Copyright (c) 2017-2025 NVIDIA CORPORATION & AFFILIATES.
+ * All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms and conditions of the GNU General Public License,
+ * version 2, as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
  */
 
 /**
@@ -74,6 +83,11 @@ struct isp_capture_setup {
 		/**<
 		 * Bitmask for uncorrectable channel errors. See
 		 * @ref CAPTURE_ISP_CHANNEL_ERRORS
+		 */
+	uint32_t pipeline_id;
+		/**<
+		 * Pipeline ID for logging.
+		 * @ref CAPTURE_PIPELINE_ID_INVALID
 		 */
 } __ISP_CAPTURE_ALIGN;
 

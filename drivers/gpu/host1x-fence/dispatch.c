@@ -34,6 +34,9 @@ static bool host1x_wrapper_init_default_interface(void)
 	host1x_api_table.host1x_writel                      = host1x_writel;
 	host1x_api_table.nvhost_get_default_device          = nvhost_get_default_device;
 	host1x_api_table.nvhost_get_host1x                  = nvhost_get_host1x;
+	host1x_api_table.nvhost_syncpt_unit_interface_get_byte_offset       = nvhost_syncpt_unit_interface_get_byte_offset;
+	host1x_api_table.nvhost_syncpt_unit_interface_get_aperture          = nvhost_syncpt_unit_interface_get_aperture;
+#ifndef CONFIG_TEGRA_DRM_DISABLE_LEGACY_INTERFACE
 	host1x_api_table.nvhost_client_device_get_resources = nvhost_client_device_get_resources;
 	host1x_api_table.nvhost_client_device_init          = nvhost_client_device_init;
 	host1x_api_table.nvhost_client_device_release       = nvhost_client_device_release;
@@ -48,8 +51,6 @@ static bool host1x_wrapper_init_default_interface(void)
 	host1x_api_table.nvhost_syncpt_read_maxval          = nvhost_syncpt_read_maxval;
 	host1x_api_table.nvhost_syncpt_incr_max_ext         = nvhost_syncpt_incr_max_ext;
 	host1x_api_table.nvhost_syncpt_unit_interface_get_byte_offset_ext   = nvhost_syncpt_unit_interface_get_byte_offset_ext;
-	host1x_api_table.nvhost_syncpt_unit_interface_get_byte_offset       = nvhost_syncpt_unit_interface_get_byte_offset;
-	host1x_api_table.nvhost_syncpt_unit_interface_get_aperture          = nvhost_syncpt_unit_interface_get_aperture;
 	host1x_api_table.nvhost_syncpt_unit_interface_init                  = nvhost_syncpt_unit_interface_init;
 	host1x_api_table.nvhost_syncpt_unit_interface_deinit                = nvhost_syncpt_unit_interface_deinit;
 	host1x_api_table.nvhost_syncpt_address              = nvhost_syncpt_address;
@@ -57,7 +58,7 @@ static bool host1x_wrapper_init_default_interface(void)
 	host1x_api_table.nvhost_module_init                 = nvhost_module_init;
 	host1x_api_table.nvhost_module_deinit               = nvhost_module_deinit;
 	host1x_api_table.nvhost_module_idle_mult            = nvhost_module_idle_mult;
-
+#endif
 	return true;
 }
 
@@ -217,22 +218,37 @@ void wrap_host1x_writel(struct platform_device *pdev, u32 r, u32 v)
 }
 EXPORT_SYMBOL(wrap_host1x_writel);
 
-struct platform_device* wrap_nvhost_get_default_device(void)
-{
-	return host1x_api_table.nvhost_get_default_device();
-}
-EXPORT_SYMBOL(wrap_nvhost_get_default_device);
-
 struct host1x* wrap_nvhost_get_host1x(struct platform_device *pdev)
 {
 	return host1x_api_table.nvhost_get_host1x(pdev);
 }
 EXPORT_SYMBOL(wrap_nvhost_get_host1x);
 
+struct platform_device* wrap_nvhost_get_default_device(void)
+{
+	return host1x_api_table.nvhost_get_default_device();
+}
+EXPORT_SYMBOL(wrap_nvhost_get_default_device);
+
+u32 wrap_nvhost_syncpt_unit_interface_get_byte_offset(u32 syncpt_id)
+{
+	return host1x_api_table.nvhost_syncpt_unit_interface_get_byte_offset(syncpt_id);
+}
+EXPORT_SYMBOL(wrap_nvhost_syncpt_unit_interface_get_byte_offset);
+
+int wrap_nvhost_syncpt_unit_interface_get_aperture(struct platform_device *pdev,
+						u64 *base, size_t *size)
+{
+	return host1x_api_table.nvhost_syncpt_unit_interface_get_aperture(pdev, base, size);
+}
+EXPORT_SYMBOL(wrap_nvhost_syncpt_unit_interface_get_aperture);
+
+#ifndef CONFIG_TEGRA_DRM_DISABLE_LEGACY_INTERFACE
 int wrap_nvhost_client_device_get_resources(struct platform_device *pdev)
 {
 	return host1x_api_table.nvhost_client_device_get_resources(pdev);
 }
+
 EXPORT_SYMBOL(wrap_nvhost_client_device_get_resources);
 
 int wrap_nvhost_client_device_init(struct platform_device *pdev)
@@ -318,19 +334,6 @@ u32 wrap_nvhost_syncpt_unit_interface_get_byte_offset_ext(struct platform_device
 }
 EXPORT_SYMBOL(wrap_nvhost_syncpt_unit_interface_get_byte_offset_ext);
 
-u32 wrap_nvhost_syncpt_unit_interface_get_byte_offset(u32 syncpt_id)
-{
-	return host1x_api_table.nvhost_syncpt_unit_interface_get_byte_offset(syncpt_id);
-}
-EXPORT_SYMBOL(wrap_nvhost_syncpt_unit_interface_get_byte_offset);
-
-int wrap_nvhost_syncpt_unit_interface_get_aperture(struct platform_device *pdev,
-						u64 *base, size_t *size)
-{
-	return host1x_api_table.nvhost_syncpt_unit_interface_get_aperture(pdev, base, size);
-}
-EXPORT_SYMBOL(wrap_nvhost_syncpt_unit_interface_get_aperture);
-
 int wrap_nvhost_syncpt_unit_interface_init(struct platform_device *pdev)
 {
 	return host1x_api_table.nvhost_syncpt_unit_interface_init(pdev);
@@ -350,14 +353,14 @@ dma_addr_t wrap_nvhost_syncpt_address(struct platform_device *pdev, u32 id)
 EXPORT_SYMBOL(wrap_nvhost_syncpt_address);
 
 int wrap_nvhost_intr_register_notifier(struct platform_device *pdev,
-					u32 id, u32 thresh,
-					void (*callback)(void *data),
-					void *private_data)
+		u32 id, u32 thresh,
+		void (*callback)(void *data),
+		void *private_data)
 {
 	return host1x_api_table.nvhost_intr_register_notifier(pdev,
-									id, thresh,
-									callback,
-									private_data);
+			id, thresh,
+			callback,
+			private_data);
 }
 EXPORT_SYMBOL(wrap_nvhost_intr_register_notifier);
 
@@ -396,3 +399,4 @@ void wrap_nvhost_module_idle_mult(struct platform_device *pdev, int refs)
 	return host1x_api_table.nvhost_module_idle_mult(pdev, refs);
 }
 EXPORT_SYMBOL(wrap_nvhost_module_idle_mult);
+#endif

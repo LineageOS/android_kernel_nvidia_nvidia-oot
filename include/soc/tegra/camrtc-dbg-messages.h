@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Copyright (c) 2022-2023, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+ * Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
  */
 
 #ifndef INCLUDE_CAMRTC_DBG_MESSAGES_H
@@ -33,7 +33,8 @@
 #define CAMRTC_REQ_GET_IRQ_STAT         MK_U32(0x11)
 #define CAMRTC_REQ_SET_FALCON_COVERAGE  MK_U32(0x12)
 #define CAMRTC_REQ_GET_COVERAGE_SUPPORT MK_U32(0x13)
-#define CAMRTC_REQUEST_TYPE_MAX         MK_U32(0x14)
+#define CAMRTC_REQ_GET_CPU_LOAD         MK_U32(0x14) /* Get CPU load statistics */
+#define CAMRTC_REQUEST_TYPE_MAX         MK_U32(0x15)
 
 /* MODS test cases */
 #define CAMRTC_MODS_TEST_BASIC		MK_U32(0x00) /* Basic MODS tests */
@@ -351,6 +352,24 @@ struct camrtc_dbg_coverage_stat {
 	uint32_t bytes_written;
 };
 
+/**
+ * CPU load statistics response
+ * Fields:
+ *   load_permille: CPU load in permille (0-1000, divide by 10 for percent with 1 decimal)
+ *   idle_permille: Idle in permille (0-1000, divide by 10 for percent with 1 decimal)
+ *   cycles_per_second: CPU cycles executed in last measurement window
+ *   idle_time_us: Idle time in microseconds
+ *   total_time_us: Total measurement window in microseconds
+ */
+struct camrtc_dbg_cpu_load {
+	uint32_t load_permille;
+	uint32_t idle_permille;
+	uint32_t cycles_per_second;
+	uint32_t idle_time_us;
+	uint32_t total_time_us;
+	uint32_t reserved[3];  /* Padding for alignment */
+};
+
 /* This struct encapsulates the type of the request and the respective
  * data associated with that request.
  * Fields:
@@ -403,6 +422,7 @@ struct camrtc_dbg_response {
 		struct camrtc_dbg_mem_usage mem_usage;
 		struct camrtc_dbg_irq_stat irq_stat;
 		struct camrtc_dbg_coverage_stat coverage_stat;
+		struct camrtc_dbg_cpu_load cpu_load;
 	} data;
 };
 

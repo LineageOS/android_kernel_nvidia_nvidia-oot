@@ -220,6 +220,9 @@ static int tegra_auto_cpuidle_remove(struct platform_device *pdev)
 	struct cpuidle_driver *drv;
 
 	for_each_possible_cpu(cpu) {
+		/* Validate CPU index before per-cpu access to satisfy CERT ARR30-C */
+		if (cpu < 0 || cpu >= nr_cpu_ids)
+			continue;
 		drv = per_cpu(tegra_auto_cpuidle_drivers, cpu);
 		cpuidle_unregister(drv);
 		per_cpu(tegra_auto_cpuidle_drivers, cpu) = NULL;

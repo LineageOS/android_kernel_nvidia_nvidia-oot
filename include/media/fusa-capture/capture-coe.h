@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0-only
-/* SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES.
+/* SPDX-License-Identifier: GPL-2.0-only
+ * SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES.
  * All rights reserved.
  *
  *
@@ -84,8 +84,9 @@ struct coe_ioctl_data_capture_req {
  *
  * @param[in]	timeout_ms		uint32_t timeout in [ms], 0 for indefinite wait.
  * @param[out]	capture_number	uint32_t capture number for which the status is returned.
- * @param[out]	capture_status	uint32_t capture status, Valid range: [ @ref CAPTURE_STATUS_UNKNOWN,
- *                                                                      @ref CAPTURE_STATUS_INVALID_CAP_SETTINGS]
+ * @param[out]	capture_status	uint32_t capture status, Valid range:
+ *                                                    [ @ref CAPTURE_STATUS_UNKNOWN,
+ *                                                    @ref CAPTURE_STATUS_INVALID_CAP_SETTINGS]
  * @param[out]	errData		uint32_t extended error data.
  * @param[out]	sofTimestamp	uint64_t start-of-frame time stamp in nanoseconds.
  * @param[out]	eofTimestamp	uint64_t end-of-frame time stamp in nanoseconds.

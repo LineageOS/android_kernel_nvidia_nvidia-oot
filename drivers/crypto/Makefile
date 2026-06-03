@@ -4,6 +4,7 @@
 ifdef CONFIG_TEGRA_HOST1X
 obj-m += tegra-hv-vse-safety.o
 obj-m += tegra-nvvse-cryptodev.o
+obj-m += nvvse/
 ifdef CONFIG_CRYPTO_ENGINE
 obj-m += tegra/
 endif

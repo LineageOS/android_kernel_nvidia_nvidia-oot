@@ -262,10 +262,12 @@ struct nvdla_queue_pool *nvdla_queue_init(struct platform_device *pdev,
 	pool->queue_task_pool = task_pool;
 	mutex_init(&pool->queue_lock);
 
-	debugfs_create_file("queues", S_IRUGO,
-			pdata->debugfs, pool,
-			&queue_expose_operations);
-
+	if (pdata->debugfs) {
+		pool->debugfs =
+			debugfs_create_file("queues", 0444,
+				pdata->debugfs, pool,
+				&queue_expose_operations);
+	}
 
 	for (i = 0; i < num_queues; i++) {
 		queue = &queues[i];
@@ -290,6 +292,9 @@ void nvdla_queue_deinit(struct nvdla_queue_pool *pool)
 {
 	if (!pool)
 		return;
+
+	debugfs_remove(pool->debugfs);
+	pool->debugfs = NULL;
 
 	kfree(pool->queue_task_pool);
 	kfree(pool->queues);

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/*
- * Copyright (c) 2021-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- */
+// SPDX-FileCopyrightText: Copyright (c) 2021-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+
+#include <nvidia/conftest.h>
 
 #include <linux/module.h>
 
@@ -1434,6 +1434,9 @@ static const struct snd_soc_component_driver tegra234_virt_xbar_codec = {
 	.num_dapm_widgets = ARRAY_SIZE(tegra234_virt_xbar_widgets),
 	.dapm_routes = tegra234_virt_xbar_routes,
 	.num_dapm_routes = ARRAY_SIZE(tegra234_virt_xbar_routes),
+#ifdef CONFIG_DEBUG_FS
+	.debugfs_prefix = "xbar",
+#endif
 };
 
 static const struct snd_soc_component_driver tegra264_virt_xbar_codec = {
@@ -1444,6 +1447,9 @@ static const struct snd_soc_component_driver tegra264_virt_xbar_codec = {
 	.num_dapm_widgets = ARRAY_SIZE(tegra264_virt_xbar_widgets),
 	.dapm_routes = tegra264_virt_xbar_routes,
 	.num_dapm_routes = ARRAY_SIZE(tegra264_virt_xbar_routes),
+#ifdef CONFIG_DEBUG_FS
+	.debugfs_prefix = "xbar",
+#endif
 };
 
 int tegra_virt_get_route(struct snd_kcontrol *kcontrol,
@@ -1498,7 +1504,11 @@ int tegra_virt_put_route(struct snd_kcontrol *kcontrol,
 	int err;
 	struct nvaudio_ivc_msg msg;
 	struct snd_soc_dapm_context *dapm =
-				snd_soc_dapm_kcontrol_dapm(kcontrol);
+#if defined(NV_SND_SOC_DAPM_KCONTROL_TO_DAPM) /* Linux v7.0 */
+		snd_soc_dapm_kcontrol_to_dapm(kcontrol);
+#else
+		snd_soc_dapm_kcontrol_dapm(kcontrol);
+#endif
 
 	memset(&msg, 0, sizeof(struct nvaudio_ivc_msg));
 	msg.cmd = NVAUDIO_XBAR_SET_ROUTE;
@@ -1506,8 +1516,13 @@ int tegra_virt_put_route(struct snd_kcontrol *kcontrol,
 	msg.params.xbar_info.tx_value =
 	e->values[ucontrol->value.integer.value[0]];
 
-	msg.params.xbar_info.tx_idx =
-		ucontrol->value.integer.value[0] - 1;
+	/* Values 0 and above are valid */
+	if (ucontrol->value.integer.value[0] >= 0) {
+		msg.params.xbar_info.tx_idx = ucontrol->value.integer.value[0] - 1;
+	} else {
+		pr_err("Invalid tx_idx: %ld\n", ucontrol->value.integer.value[0]);
+		return -EINVAL;
+	}
 	msg.ack_required = true;
 
 	err = nvaudio_ivc_send_receive(hivc_client,
@@ -1544,16 +1559,16 @@ int tegra_virt_xbar_register_codec(struct platform_device *pdev)
 
 	if (of_device_is_compatible(pdev->dev.of_node,
 		"nvidia,tegra264-virt-pcm-oot")) {
-		ret = tegra_register_component(&pdev->dev,
+		ret = devm_snd_soc_register_component(&pdev->dev,
 				&tegra264_virt_xbar_codec,
 				tegra264_virt_xbar_dais,
-				ARRAY_SIZE(tegra264_virt_xbar_dais), "xbar");
+				ARRAY_SIZE(tegra264_virt_xbar_dais));
 	} else if (of_device_is_compatible(pdev->dev.of_node,
 		"nvidia,tegra234-virt-pcm-oot")) {
-		ret = tegra_register_component(&pdev->dev,
+		ret = devm_snd_soc_register_component(&pdev->dev,
 				&tegra234_virt_xbar_codec,
 				tegra234_virt_xbar_dais,
-				ARRAY_SIZE(tegra234_virt_xbar_dais), "xbar");
+				ARRAY_SIZE(tegra234_virt_xbar_dais));
 	}
 
 	if (ret != 0) {

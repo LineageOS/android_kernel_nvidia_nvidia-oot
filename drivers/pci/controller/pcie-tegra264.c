@@ -28,6 +28,7 @@
 #include <soc/tegra/bpmp.h>
 #include <soc/tegra/bpmp-abi.h>
 #include <soc/tegra/fuse.h>
+#include <soc/tegra/fuse-helper.h>
 
 extern int of_get_pci_domain_nr(struct device_node *node);
 
@@ -123,7 +124,7 @@ static void tegra264_pcie_bpmp_set_rp_state(struct tegra264_pcie *pcie)
 		dev_info(pcie->dev, "PCIe Controller-%d failed to turn off via BPMP with error message %d\r\n",
 			 pcie->ctl_id, msg.rx.ret);
 #else
-	dev_err(pcie->dev, "%s not supported!\n", __func__);
+	dev_err(pcie->dev, "Turning RP off is not supported!\n");
 #endif
 }
 
@@ -169,8 +170,8 @@ static void tegra264_pcie_init(struct tegra264_pcie *pcie)
 	val |= XTL_RC_MGMT_PERST_CONTROL_PERST_O_N;
 	writel(val, pcie->xtl_pri_base + XTL_RC_MGMT_PERST_CONTROL);
 
-	if (tegra_sku_info.platform == TEGRA_PLATFORM_VDK) {
-		dev_info(pcie->dev, "PCIe Controller-%d - Skip link state check for VDK\n",
+	if (!tegra_platform_is_silicon()) {
+		dev_info(pcie->dev, "PCIe Controller-%d - Skip link state check if it is not silicon\n",
 			 pcie->ctl_id);
 		pcie->link_state = true;
 		return;
@@ -252,14 +253,11 @@ static int tegra264_pcie_probe(struct platform_device *pdev)
 
 	ret = tegra264_pcie_parse_dt(pcie);
 	if (ret < 0) {
-		const char *level = KERN_ERR;
-
 		if (ret == -EPROBE_DEFER)
-			level = KERN_DEBUG;
+			dev_dbg(dev, "Failed to parse device tree: %d\n", ret);
+		else
+			dev_err(dev, "Failed to parse device tree: %d\n", ret);
 
-		dev_printk(level, dev,
-			   dev_fmt("Failed to parse device tree: %d\n"),
-			   ret);
 		return ret;
 	}
 
@@ -289,8 +287,8 @@ static int tegra264_pcie_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	/* Parse BPMP property only for non VDK, as interaction with BPMP not needed for VDK */
-	if (tegra_sku_info.platform != TEGRA_PLATFORM_VDK) {
+	/* Parse BPMP property only for silicon, as interaction with BPMP not needed for other platforms. */
+	if (tegra_platform_is_silicon()) {
 		ret = of_property_read_u32_index(dev->of_node, "nvidia,bpmp", 1, &pcie->ctl_id);
 		if (ret) {
 			dev_err(pcie->dev, "Failed to read Controller-ID: %d\n", ret);
@@ -325,7 +323,7 @@ static int tegra264_pcie_probe(struct platform_device *pdev)
 	ret = pci_host_probe(bridge);
 	if (ret < 0) {
 		dev_err(dev, "failed to register host: %d\n", ret);
-		if (tegra_sku_info.platform != TEGRA_PLATFORM_VDK)
+		if (tegra_platform_is_silicon())
 			tegra_bpmp_put(pcie->bpmp);
 		pci_ecam_free(pcie->cfg);
 		return ret;
@@ -341,7 +339,7 @@ static int tegra264_pcie_remove(struct platform_device *pdev)
 	if (pcie->link_state == false)
 		return 0;
 
-	if (tegra_sku_info.platform != TEGRA_PLATFORM_VDK)
+	if (tegra_platform_is_silicon())
 		tegra_bpmp_put(pcie->bpmp);
 	/*
 	 * If we undo tegra264_pcie_init() then link goes down and need controller reset to bring up

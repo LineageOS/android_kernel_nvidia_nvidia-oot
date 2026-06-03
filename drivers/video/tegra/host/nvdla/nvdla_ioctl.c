@@ -53,7 +53,17 @@ static int nvdla_get_fw_ver(struct nvdla_private *priv,
 	if (err)
 		return err;
 
-	args->version = nvdla_dev->fw_version;
+	if (nvdla_is_ctx_device(pdev)) {
+		struct platform_device *parent_pdev = nvdla_dev->parent_pdev;
+		struct nvhost_device_data *parent_pdata =
+			platform_get_drvdata(parent_pdev);
+		struct nvdla_device *parent_nvdla_dev =
+			parent_pdata->private_data;
+
+		args->version = parent_nvdla_dev->fw_version;
+	} else {
+		args->version = nvdla_dev->fw_version;
+	}
 
 	nvdla_dbg_fn(pdev, "version returned[%u]", args->version);
 

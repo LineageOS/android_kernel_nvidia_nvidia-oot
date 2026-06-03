@@ -53,8 +53,10 @@ int tegra_drm_ioctl_syncpoint_wait(struct drm_device *drm, void *data,
 				   struct drm_file *file);
 int tegra_drm_ioctl_syncpoint_increment(struct drm_device *drm, void *data,
 					struct drm_file *file);
+#ifndef CONFIG_TEGRA_DRM_DISABLE_LEGACY_IOCTL
 int tegra_drm_ioctl_syncpoint_export_memory(struct drm_device *drm, void *data,
 					    struct drm_file *file);
+#endif
 
 void tegra_drm_uapi_close_file(struct tegra_drm_file *file);
 void tegra_drm_mapping_put(struct tegra_drm_mapping *mapping);

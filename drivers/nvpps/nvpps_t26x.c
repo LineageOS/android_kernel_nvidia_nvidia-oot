@@ -226,13 +226,35 @@ static void nvpps_t26x_ptp_tsc_synchronize(struct soc_dev_data *soc_data)
 
 static int32_t nvpps_t26x_ptp_tsc_suspend_sync(struct soc_dev_data *soc_data)
 {
-	/* Stub implementation */
+	uint32_t reg_val = 0;
+
+	/* Disable ability to feed the HW Lock mechanism */
+	reg_val = readl(soc_data->reg_map_base + T26X_TSC_CAPTURE_CONFIGURATION_PTX_OFFSET);
+	reg_val = (reg_val & ~BIT(T26X_TSC_CAPTURE_CONFIG_EN_SHIFT));
+	writel(reg_val, soc_data->reg_map_base + T26X_TSC_CAPTURE_CONFIGURATION_PTX_OFFSET);
+
+	/* Disable HW LOCKING Mechanism */
+	reg_val = readl(soc_data->reg_map_base + T26X_TSC_LOCKING_CONFIGURATION_OFFSET);
+	reg_val = (reg_val & ~BIT(T26X_TSC_LOCKING_CONFIG_EN_SHIFT));
+	writel(reg_val, soc_data->reg_map_base + T26X_TSC_LOCKING_CONFIGURATION_OFFSET);
+
 	return 0;
 }
 
 static int32_t nvpps_t26x_ptp_tsc_resume_sync(struct soc_dev_data *soc_data)
 {
-	/* Stub implementation */
+	uint32_t reg_val = 0;
+
+	/* Enable HW LOCKING Mechanism */
+	reg_val = readl(soc_data->reg_map_base + T26X_TSC_LOCKING_CONFIGURATION_OFFSET);
+	reg_val = (reg_val | BIT(T26X_TSC_LOCKING_CONFIG_EN_SHIFT));
+	writel(reg_val, soc_data->reg_map_base + T26X_TSC_LOCKING_CONFIGURATION_OFFSET);
+
+	/* Enable ability to feed the HW Lock mechanism */
+	reg_val = readl(soc_data->reg_map_base + T26X_TSC_CAPTURE_CONFIGURATION_PTX_OFFSET);
+	reg_val = (reg_val | BIT(T26X_TSC_CAPTURE_CONFIG_EN_SHIFT));
+	writel(reg_val, soc_data->reg_map_base + T26X_TSC_CAPTURE_CONFIGURATION_PTX_OFFSET);
+
 	return 0;
 }
 

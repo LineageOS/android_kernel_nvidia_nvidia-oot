@@ -34,6 +34,11 @@
 #define INFO(...) pr_info("tegra_hv: " __VA_ARGS__)
 #define DRV_NAME	"tegra_hv"
 
+/* NVDVMS VM operation constants */
+#define NVDVMS_VM_OP_MIN 300U
+#define NVDVMS_VM_OP_MAX 363U
+#define ENABLE_PM_SERVER_DT_NODE "enable_pm_server"
+
 struct tegra_hv_data;
 
 static struct property interrupts_prop = {
@@ -99,6 +104,8 @@ struct tegra_hv_data {
 	struct class *hv_class;
 
 	struct device_node *dev;
+
+	uint32_t vcpu_affinity;
 };
 
 /*
@@ -166,11 +173,14 @@ EXPORT_SYMBOL(tegra_hv_get_ivc_info);
 int tegra_hv_get_vmid(void)
 {
 	struct tegra_hv_data *hvd = get_hvd();
+	int ret = 0;
 
-	if (IS_ERR(hvd))
-		return -1;
+	if (IS_ERR(hvd) || hvd->guestid >= NGUESTS_MAX)
+		ret = -EINVAL;
 	else
-		return hvd->guestid;
+		ret = hvd->guestid;
+
+	return ret;
 }
 EXPORT_SYMBOL(tegra_hv_get_vmid);
 
@@ -333,13 +343,9 @@ static int tegra_hv_add_ivc(struct tegra_hv_data *hvd,
 	}
 
 #if defined(NV_TEGRA_IVC_STRUCT_HAS_IOSYS_MAP)
-	INFO("adding ivc%u: rx_base=%lx tx_base = %lx size=%x irq = %d (%lu)\n",
-			qd->id, (uintptr_t)rx_map.vaddr, (uintptr_t)tx_map.vaddr, qd->size, ivc->irq, d->hwirq);
 	ret = tegra_ivc_init(&ivc->ivc, NULL, &rx_map, 0, &tx_map, 0, qd->nframes,
 				qd->frame_size, ivc_raise_irq, ivc);
 #else
-	INFO("adding ivc%u: rx_base=%lx tx_base = %lx size=%x irq = %d (%lu)\n",
-			qd->id, rx_base, tx_base, qd->size, ivc->irq, d->hwirq);
 	ret = tegra_ivc_init(&ivc->ivc, NULL, (void *)rx_base, 0, (void *)tx_base, 0, qd->nframes,
 				qd->frame_size, ivc_raise_irq, ivc);
 #endif
@@ -427,9 +433,133 @@ static ssize_t vmid_show(struct class *class,
 	struct tegra_hv_data *hvd = get_hvd();
 
 	BUG_ON(!hvd);
+
+	if (hvd->guestid >= NGUESTS_MAX)
+		hvd->guestid = -EINVAL;
+
 	return snprintf(buf, PAGE_SIZE, "%d\n", hvd->guestid);
 }
 static CLASS_ATTR_RO(vmid);
+
+static bool is_device_node_present(const char *node_name)
+{
+	struct device_node *node;
+	bool node_present = false;
+
+	node = of_find_node_by_name(NULL, node_name);
+	if (node) {
+		node_present = true;
+		of_node_put(node);
+		INFO("Found %s node in device tree\n", node_name);
+	} else {
+		INFO("No %s node found in device tree\n", node_name);
+	}
+
+	return node_present;
+}
+
+#if defined(NV_CLASS_ATTRIBUTE_STRUCT_HAS_CONST_STRUCT_CLASS_ATTRIBUTE_ARG)
+static ssize_t update_vm_op_store(const struct class *class,
+	const struct class_attribute *attr, const char *buf, size_t count)
+#else
+static ssize_t update_vm_op_store(struct class *class,
+	struct class_attribute *attr, const char *buf, size_t count)
+#endif
+{
+	unsigned int state;
+	int ret;
+
+	/* Parse unsigned int from user input */
+	ret = kstrtouint(buf, 0, &state);
+	if (ret < 0)
+		return ret;
+
+	/* Validate state is within VM operation boundaries */
+	if (state < NVDVMS_VM_OP_MIN || state > NVDVMS_VM_OP_MAX) {
+		pr_err("tegra_hv: Invalid VM_OP state %u\n", state);
+		return -EINVAL;
+	}
+
+	/* Trigger HVC to update VM_OP transition completion */
+	ret = hyp_guest_enter_vm_op(GUEST_ENTER_VM_OP_CMD, state);
+	if (ret < 0) {
+		pr_err("tegra_hv: VM_OP transition update failed\n");
+		return ret;
+	}
+
+	pr_info("tegra_hv: VM_OP transition updated: %u\n", state);
+	return count;
+}
+static CLASS_ATTR_WO(update_vm_op);
+
+static long async_err_diagnostics(void *ptr)
+{
+	int32_t ret = 0;
+
+	/*
+	* Virtualization_System will check SMMU, CBB, and MC errors and report to
+	* FSI if any errors are seen. This will be indirectly observed by User code
+	* running on FSI.
+	*/
+	if (!hyp_smmu_diagnostic()) {
+		ERR("hyp_smmu_diagnostic failed\n");
+		ret = -1;
+		goto fail;
+	}
+
+	if (!hyp_cbb_err_diagnostic()) {
+		ERR("hyp_cbb_err_diagnostic failed\n");
+		ret = -1;
+		goto fail;
+	}
+
+	if (!hyp_mc_err_diagnostic()) {
+		ERR("hyp_mc_err_diagnostic failed\n");
+		ret = -1;
+		goto fail;
+	}
+
+fail:
+	return ret;
+}
+
+#if defined(NV_CLASS_ATTRIBUTE_STRUCT_HAS_CONST_STRUCT_CLASS_ATTRIBUTE_ARG)
+static ssize_t async_err_diagnostics_store(const struct class *class,
+	const struct class_attribute *attr, const char *buf, size_t len)
+#else
+static ssize_t async_err_diagnostics_store(struct class *class,
+	struct class_attribute *attr, const char *buf, size_t len)
+#endif
+{
+	struct tegra_hv_data *hvd = get_hvd();
+	int val = 0;
+	ssize_t ret = 0;
+
+	ret = kstrtoint(buf, 10, &val);
+	if (ret < 0) {
+		pr_err("%s: Failed to convert string to uint %ld\n", __func__, ret);
+		ret = -EINVAL;
+		goto fail;
+	}
+
+	if (val != 1) {
+		pr_err("%s: Unsupported value, %u\n", __func__, val);
+		ret = -EINVAL;
+		goto fail;
+	}
+
+	if (!cpu_online(hvd->vcpu_affinity)) {
+		pr_warn("CPU %u is not online\n", hvd->vcpu_affinity);
+		ret = -EINVAL;
+		goto fail;
+	}
+
+	ret = work_on_cpu(hvd->vcpu_affinity, async_err_diagnostics, NULL);
+fail:
+	ret = ret ? ret : len;
+	return ret;
+}
+static CLASS_ATTR_WO(async_err_diagnostics);
 
 static int tegra_hv_setup(struct tegra_hv_data *hvd)
 {
@@ -453,6 +583,11 @@ static int tegra_hv_setup(struct tegra_hv_data *hvd)
 		return -ENODEV;
 	}
 
+	if (hvd->guestid >= NGUESTS_MAX) {
+		ERR("Failed to read valid guest id\n");
+		return -EINVAL;
+	}
+
 #if defined(NV_CLASS_CREATE_HAS_NO_OWNER_ARG) /* Linux v6.4 */
 	hvd->hv_class = class_create("tegra_hv");
 #else
@@ -467,6 +602,21 @@ static int tegra_hv_setup(struct tegra_hv_data *hvd)
 	if (ret != 0) {
 		ERR("failed to create vmid file: %d\n", ret);
 		return ret;
+	}
+
+	ret = class_create_file(hvd->hv_class, &class_attr_async_err_diagnostics);
+	if (ret != 0) {
+		ERR("failed to create async_err_diagnostics file: %d\n", ret);
+		return ret;
+	}
+
+	/* Create sysfs entry only if enable_pm_server DT node is present */
+	if (is_device_node_present(ENABLE_PM_SERVER_DT_NODE)) {
+		ret = class_create_file(hvd->hv_class, &class_attr_update_vm_op);
+		if (ret != 0) {
+			ERR("failed to create update_vm_op file: %d\n", ret);
+			return ret;
+		}
 	}
 
 	ret = hyp_read_ivc_info(&info_page);
@@ -501,9 +651,6 @@ static int tegra_hv_setup(struct tegra_hv_data *hvd)
 	ivc_notify.trap_region_base_ipa = hvd->info->trap_region_base_ipa;
 	ivc_notify.trap_region_size = hvd->info->trap_region_size;
 	if (ivc_notify.trap_region_size != 0UL) {
-		INFO("trap_region_base_ipa %lx: trap_region_size=%llx\n",
-			ivc_notify.trap_region_base_ipa,
-			ivc_notify.trap_region_size);
 		if (WARN_ON(ivc_notify.trap_region_base_ipa == 0UL))
 			return -EINVAL;
 		if (WARN_ON(ivc_notify.trap_region_base_va != 0UL))
@@ -527,9 +674,6 @@ static int tegra_hv_setup(struct tegra_hv_data *hvd)
 	ivc_notify.msi_region_base_ipa = hvd->info->msi_region_base_ipa;
 	ivc_notify.msi_region_size = hvd->info->msi_region_size;
 	if (ivc_notify.msi_region_size != 0UL) {
-		INFO("msi_region_base_ipa %lx: msi_region_size=%llx\n",
-			ivc_notify.msi_region_base_ipa,
-			ivc_notify.msi_region_size);
 		if (WARN_ON(ivc_notify.msi_region_base_ipa == 0UL))
 			return -EINVAL;
 		if (WARN_ON(ivc_notify.msi_region_base_va != 0UL))
@@ -648,9 +792,6 @@ static int tegra_hv_setup(struct tegra_hv_data *hvd)
 
 		mpsize += mpd->size;
 		BUG_ON(mpsize < mpd->size);
-
-		INFO("added mempool %u: ipa=%llx size=%llx peer=%u\n",
-				mpd->id, mpd->pa, mpd->size, mpd->peer_vmid);
 	}
 
 	INFO("Memory usage: ivc:0x%llx mempool=0x%llx\n", ivcsize, mpsize);
@@ -819,7 +960,7 @@ int tegra_hv_ivc_read_user(struct tegra_hv_ivc_cookie *ivck, void __user *buf, i
 }
 EXPORT_SYMBOL(tegra_hv_ivc_read_user);
 
-#ifndef CONFIG_BUILD_PROD
+#ifndef CONFIG_KERNEL_BUILD_WITH_PROD_DEFCONFIG
 int tegra_hv_ivc_read_peek(struct tegra_hv_ivc_cookie *ivck, void *buf,
 			   int off, int count)
 {
@@ -858,7 +999,7 @@ int tegra_hv_ivc_tx_empty(struct tegra_hv_ivc_cookie *ivck)
 }
 EXPORT_SYMBOL(tegra_hv_ivc_tx_empty);
 
-#ifndef CONFIG_BUILD_PROD
+#ifndef CONFIG_KERNEL_BUILD_WITH_PROD_DEFCONFIG
 uint32_t tegra_hv_ivc_tx_frames_available(struct tegra_hv_ivc_cookie *ivck)
 {
 	struct hv_ivc *ivc = cookie_to_ivc_dev(ivck);
@@ -994,9 +1135,20 @@ void tegra_hv_ivc_channel_reset(struct tegra_hv_ivc_cookie *ivck)
 }
 EXPORT_SYMBOL(tegra_hv_ivc_channel_reset);
 
+static long int read_mpidr(void *data)
+{
+	uint64_t mpidr;
+	__asm volatile("MRS %0, MPIDR_EL1 " : "=r"(mpidr) :: "memory");
+	return mpidr;
+}
+
 static int tegra_hv_probe(struct platform_device *pdev)
 {
 	struct tegra_hv_data *hvd;
+	long int lcpu0_mpidr;
+	long int mpidr = 0UL;
+	uint32_t num_vcpus = num_present_cpus();
+	uint32_t idx;
 	int ret;
 
 	if (!is_tegra_hypervisor_mode())
@@ -1007,6 +1159,20 @@ static int tegra_hv_probe(struct platform_device *pdev)
 		ERR("failed to allocate hvd\n");
 		return -ENOMEM;
 	}
+
+	hvd->vcpu_affinity = num_vcpus;
+	lcpu0_mpidr = hyp_lcpu0_mpidr();
+	for (idx = 0; idx < num_vcpus; idx++) {
+		mpidr = work_on_cpu(idx, read_mpidr, NULL);
+		if (mpidr == lcpu0_mpidr) {
+			hvd->vcpu_affinity = idx;
+			break;
+		}
+	}
+
+	if (hvd->vcpu_affinity >= num_vcpus)
+		INFO("%s: cpu affinity (%d) > online cpus (%d)\n", __func__,
+						hvd->vcpu_affinity, num_online_cpus());
 
 	ret = tegra_hv_setup(hvd);
 	if (ret != 0) {

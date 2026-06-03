@@ -192,6 +192,7 @@ struct nvmap_sciipc_map {
 	__u32 flags;       /* Exporter permission flags */
 	__u64 sci_ipc_id;  /* FromImportId */
 	__u32 handle;      /* Nvmap handle */
+	__u8 is_inter_vm; /* Is endpoint inter-vm */
 };
 
 struct nvmap_handle_parameters {

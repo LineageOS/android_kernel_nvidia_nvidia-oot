@@ -14,18 +14,23 @@
 #include <linux/module.h>
 #include <linux/notifier.h>
 #include <linux/of.h>
+#include <linux/of_device.h>
 #include <linux/platform_device.h>
 #include <linux/pm_qos.h>
 #include <linux/sysfs.h>
 #include <linux/types.h>
-#if defined(NV_TEGRA264_BWMGR_DEBUG_MACRO_PRESENT)
-#include <linux/tegra264-bwmgr.h>
-#endif
 #include <soc/tegra/bpmp.h>
 
 #include <devfreq/governor.h>
 
+#define TEGRA234_BWMGR_NVPMODEL	46
+#define TEGRA239_BWMGR_NVPMODEL	46
+#define TEGRA264_BWMGR_NVPMODEL	42
 #define DEVFREQ_GOV_BWMGR "bpmp-bwmgr"
+
+struct tegra_bpmp_bwmgr_data {
+	unsigned int client_id;
+};
 
 struct tegra_bpmp_bwmgr {
 	struct device *dev;
@@ -34,11 +39,11 @@ struct tegra_bpmp_bwmgr {
 	struct devfreq_dev_profile *devfreq_profile;
 	struct notifier_block max_freq_nb;
 	struct tegra_bpmp *bpmp;
+	const struct tegra_bpmp_bwmgr_data *data;
 	bool mrq_valid;
 	bool enabled;
 };
 
-#if defined(NV_TEGRA264_BWMGR_DEBUG_MACRO_PRESENT)
 static int tegra_bpmp_bwmgr_max_freq_notifier(struct notifier_block *nb, unsigned long action, void *ptr)
 {
 	struct tegra_bpmp_bwmgr *bwmgr = container_of(nb, struct tegra_bpmp_bwmgr, max_freq_nb);
@@ -67,16 +72,15 @@ static int tegra_bpmp_bwmgr_max_freq_notifier(struct notifier_block *nb, unsigne
 		return err;
 	}
 
-	if (msg.rx.ret == 0) {
-		dev_info(bwmgr->dev, "cap EMC frequency to %luHz\n", rate);
-	} else {
+	if (msg.rx.ret < 0) {
 		dev_err(bwmgr->dev, "failed to cap EMC frequency with %luHz: %d\n", rate, msg.rx.ret);
 		return -EINVAL;
 	}
 
+	dev_dbg(bwmgr->dev, "cap EMC frequency to %luHz\n", rate);
+
 	return err;
 }
-#endif
 
 static int devfreq_gov_bwmgr_target_freq(struct devfreq *df, unsigned long *freq)
 {
@@ -104,7 +108,6 @@ static struct devfreq_governor devfreq_gov_bwmgr = {
 	.event_handler = devfreq_gov_bwmgr_event_handler,
 };
 
-#if defined(NV_TEGRA264_BWMGR_DEBUG_MACRO_PRESENT)
 static int tegra_bpmp_bwmgr_devfreq_target(struct device *dev, unsigned long *freq, u32 flags)
 {
 	struct platform_device *pdev = to_platform_device(dev);
@@ -116,7 +119,7 @@ static int tegra_bpmp_bwmgr_devfreq_target(struct device *dev, unsigned long *fr
 	int err;
 
 	// This will be called once when calling devfreq_add_device. Need to
-	// check early return if bwmgr is not supported.
+	// check and early return if bwmgr is not supported.
 	if (!bwmgr->mrq_valid || !bwmgr->enabled)
 		return 0;
 
@@ -124,7 +127,7 @@ static int tegra_bpmp_bwmgr_devfreq_target(struct device *dev, unsigned long *fr
 	bwmgr_req.cmd = CMD_BWMGR_INT_CALC_AND_SET;
 	bwmgr_req.bwmgr_calc_set_req.mc_floor = khz;
 	bwmgr_req.bwmgr_calc_set_req.floor_unit = BWMGR_INT_UNIT_KHZ;
-	bwmgr_req.bwmgr_calc_set_req.client_id = TEGRA264_BWMGR_DEBUG;
+	bwmgr_req.bwmgr_calc_set_req.client_id = bwmgr->data->client_id;
 
 	msg.mrq = MRQ_BWMGR_INT;
 	msg.tx.data = &bwmgr_req;
@@ -138,12 +141,12 @@ static int tegra_bpmp_bwmgr_devfreq_target(struct device *dev, unsigned long *fr
 		return err;
 	}
 
-	if (msg.rx.ret == 0) {
-		dev_info(dev, "set EMC floor frequency to %uKHz\n", khz);
-	} else {
+	if (msg.rx.ret < 0) {
 		dev_err(dev, "failed to set floor frequency with %uKHz: %d\n", khz, msg.rx.ret);
 		return -EINVAL;
 	}
+
+	dev_dbg(dev, "set EMC floor frequency to %uKHz\n", khz);
 
 	return 0;
 }
@@ -157,11 +160,9 @@ static int tegra_bpmp_bwmgr_devfreq_cur_freq(struct device *dev, unsigned long *
 
 	return 0;
 }
-#endif
 
 static int tegra_bpmp_bwmgr_devfreq_register(struct tegra_bpmp_bwmgr *bwmgr)
 {
-#if defined(NV_TEGRA264_BWMGR_DEBUG_MACRO_PRESENT)
 	static const struct attribute min_attr = { .name = "min_freq" };
 	static const struct attribute max_attr = { .name = "max_freq" };
 	unsigned long max_rate = clk_round_rate(bwmgr->clk, ULONG_MAX);
@@ -220,21 +221,16 @@ devfreq_add_dev_err:
 	dev_pm_opp_remove_all_dynamic(bwmgr->dev);
 	kfree(bwmgr->devfreq_profile);
 	return ret;
-#else
-	return -EOPNOTSUPP;
-#endif
 }
 
 static void tegra_bpmp_bwmgr_devfreq_unregister(struct tegra_bpmp_bwmgr *bwmgr)
 {
-#if defined(NV_TEGRA264_BWMGR_DEBUG_MACRO_PRESENT)
 	dev_pm_qos_remove_notifier(bwmgr->dev,
 				   &bwmgr->max_freq_nb,
 				   DEV_PM_QOS_MAX_FREQUENCY);
 	devm_devfreq_remove_device(bwmgr->dev, bwmgr->devfreq);
 	dev_pm_opp_remove_all_dynamic(bwmgr->dev);
 	kfree(bwmgr->devfreq_profile);
-#endif
 }
 
 static int tegra_bpmp_bwmgr_probe(struct platform_device *pdev)
@@ -248,6 +244,8 @@ static int tegra_bpmp_bwmgr_probe(struct platform_device *pdev)
 	bwmgr = devm_kzalloc(&pdev->dev, sizeof(*bwmgr), GFP_KERNEL);
 	if (!bwmgr)
 		return -ENOMEM;
+
+	bwmgr->data = of_device_get_match_data(&pdev->dev);
 
 	bwmgr->clk = devm_clk_get(&pdev->dev, "emc");
 	if (IS_ERR(bwmgr->clk)) {
@@ -266,9 +264,7 @@ static int tegra_bpmp_bwmgr_probe(struct platform_device *pdev)
 		bwmgr_req.cmd = CMD_BWMGR_INT_CALC_AND_SET;
 		bwmgr_req.bwmgr_calc_set_req.mc_floor = 0;
 		bwmgr_req.bwmgr_calc_set_req.floor_unit = BWMGR_INT_UNIT_KHZ;
-#if defined(NV_TEGRA264_BWMGR_DEBUG_MACRO_PRESENT)
-		bwmgr_req.bwmgr_calc_set_req.client_id = TEGRA264_BWMGR_DEBUG;
-#endif
+		bwmgr_req.bwmgr_calc_set_req.client_id = bwmgr->data->client_id;
 
 		msg.mrq = MRQ_BWMGR_INT;
 		msg.tx.data = &bwmgr_req;
@@ -329,8 +325,22 @@ static int tegra_bpmp_bwmgr_remove(struct platform_device *pdev)
 	return 0;
 }
 
+static const struct tegra_bpmp_bwmgr_data t234_bpmp_bwmgr_data = {
+	.client_id = TEGRA234_BWMGR_NVPMODEL
+};
+
+static const struct tegra_bpmp_bwmgr_data t239_bpmp_bwmgr_data = {
+	.client_id = TEGRA239_BWMGR_NVPMODEL
+};
+
+static const struct tegra_bpmp_bwmgr_data t264_bpmp_bwmgr_data = {
+	.client_id = TEGRA264_BWMGR_NVPMODEL
+};
+
 static const struct of_device_id tegra_bpmp_bwmgr_of_match[] = {
-	{ .compatible = "nvidia,tegra264-bpmp-bwmgr", .data = NULL, },
+	{ .compatible = "nvidia,tegra234-bpmp-bwmgr", .data = &t234_bpmp_bwmgr_data, },
+	{ .compatible = "nvidia,tegra239-bpmp-bwmgr", .data = &t239_bpmp_bwmgr_data, },
+	{ .compatible = "nvidia,tegra264-bpmp-bwmgr", .data = &t264_bpmp_bwmgr_data, },
 	{},
 };
 MODULE_DEVICE_TABLE(of, tegra_bpmp_bwmgr_of_match);

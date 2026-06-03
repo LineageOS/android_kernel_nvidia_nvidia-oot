@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* SPDX-FileCopyrightText: Copyright (c) 2012-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
-/*
+/* SPDX-FileCopyrightText: Copyright (c) 2012-2025 NVIDIA CORPORATION & AFFILIATES.
+ * All rights reserved.
+ *
  * NvMap event logging to ftrace.
  */
 
@@ -350,38 +351,6 @@ TRACE_EVENT(nvmap_ioctl_rw_handle,
 		__entry->client, __entry->h, __entry->is_read, __entry->offset,
 		__entry->addr, __entry->mem_stride, __entry->user_stride,
 		__entry->elem_size, __entry->count)
-);
-
-TRACE_EVENT(nvmap_ioctl_pinop,
-	TP_PROTO(struct nvmap_client *client,
-		 u32 is_pin,
-		 u32 count,
-		 struct nvmap_handle **ids
-	),
-
-	TP_ARGS(client, is_pin, count, ids),
-
-	TP_STRUCT__entry(
-		__field(struct nvmap_client *, client)
-		__field(u32, is_pin)
-		__field(u32, count)
-		__field(struct nvmap_handle **, ids)
-		__dynamic_array(struct nvmap_handle *, ids, count)
-	),
-
-	TP_fast_assign(
-		__entry->client = client;
-		__entry->is_pin = is_pin;
-		__entry->count = count;
-		__entry->ids = ids;
-		memcpy(__get_dynamic_array(ids), ids,
-		    sizeof(struct nvmap_handle *) * count);
-	),
-
-	TP_printk("client=%p, is_pin=%d, count=%d, ids=[%s]",
-		__entry->client, __entry->is_pin, __entry->count,
-		__print_hex(__get_dynamic_array(ids), __entry->ids ?
-			    sizeof(struct nvmap_handle *) * __entry->count : 0))
 );
 
 DECLARE_EVENT_CLASS(handle_get_put,
@@ -757,7 +726,8 @@ TRACE_EVENT(nvmap_pp_do_background_zero_pages,
 	),
 
 	TP_printk("failed to insert %u no. of zeroed pages to page_list",
-		__entry->zeroed - __entry->inserted)
+		(__entry->zeroed < __entry->inserted) ? 0U :
+		(__entry->zeroed - __entry->inserted))
 );
 
 TRACE_EVENT(nvmap_pp_alloc_locked,
@@ -839,9 +809,11 @@ TRACE_EVENT(nvmap_pp_fill_zero_lots,
 	),
 
 	TP_printk("inserted %u pages to zero list, freed %u pages, did not process %u pages",
-		__entry->to_zero - __entry->save_to_zero,
-		__entry->ret - (__entry->to_zero - __entry->save_to_zero),
-		__entry->nr - __entry->ret)
+		(__entry->to_zero < __entry->save_to_zero) ? 0U :
+		(__entry->to_zero - __entry->save_to_zero),
+		(__entry->ret < (__entry->to_zero - __entry->save_to_zero)) ? 0U :
+		(__entry->ret - (__entry->to_zero - __entry->save_to_zero)),
+		(__entry->nr < __entry->ret) ? 0U : (__entry->nr - __entry->ret))
 );
 
 TRACE_EVENT(refcount_get_handle_from_sci_ipc_id,

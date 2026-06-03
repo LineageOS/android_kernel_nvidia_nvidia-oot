@@ -1,5 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // SPDX-FileCopyrightText: Copyright (c) 2017-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+/*
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms and conditions of the GNU General Public License,
+ * version 2, as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ */
 
 /**
  * @file drivers/media/platform/tegra/camera/fusa-capture/capture-vi-channel.c
@@ -21,8 +31,10 @@
 #include <linux/uaccess.h>
 #include <linux/dma-buf.h>
 #include <linux/dma-mapping.h>
+#include <linux/stddef.h>
 #include <media/fusa-capture/capture-vi.h>
 #include <media/fusa-capture/capture-vi-channel.h>
+#include <media/fusa-capture/capture-logging.h>
 #include <linux/arm64-barrier.h>
 
 /**
@@ -165,7 +177,7 @@
  * - Locks the unpins list mutex using @ref mutex_lock().
  * - Accesses the unpins list for the specified buffer index.
  * - If there are pending unpins, iterates through each and releases the mappings
- *   by calling @ref put_mapping().
+ *   by calling @ref capture_common_put_mapping().
  * - Resets the unpins data using @ref memset().
  * - Unlocks the unpins list mutex using @ref mutex_unlock().
  *
@@ -189,7 +201,7 @@ void vi_capture_request_unpin(
 
 	capture = chan->capture_data;
 	if (unlikely(capture == NULL)) {
-		dev_err(chan->dev, "%s: vi capture uninitialized\n", __func__);
+		vi_chan_err(chan, "%s: vi capture uninitialized\n", __func__);
 		return;
 	}
 
@@ -199,7 +211,7 @@ void vi_capture_request_unpin(
 	if (unpins->num_unpins != 0) {
 		for (i = 0; i < unpins->num_unpins; i++) {
 			if (capture->buf_ctx != NULL && unpins->data[i] != NULL)
-				put_mapping(capture->buf_ctx, unpins->data[i]);
+				capture_common_put_mapping(capture->buf_ctx, unpins->data[i]);
 		}
 		(void)memset(unpins, 0U,sizeof(*unpins));
 	}
@@ -325,7 +337,8 @@ int vi_channel_close_ex(
 	mutex_lock(&chan_drv->lock);
 
 	if (rcu_access_pointer(chan_drv->channels[channel]) != chan)
-		dev_warn(chan_drv->dev, "%s: dev does not match\n", __func__);
+		capture_dev_warn_pl(chan_drv->dev, chan->pipeline_id,
+			"%s: dev does not match\n", __func__);
 
 	RCU_INIT_POINTER(chan_drv->channels[channel], NULL);
 
@@ -467,7 +480,8 @@ static int pin_vi_capture_request_buffers_locked(struct tegra_vi_channel *chan,
 			desc->ch_cfg.atomp.surface[i].offset_hi,
 			desc->ch_cfg.atomp.surface[i].offset,
 			&desc_mem->surface[i].base_address, &desc_mem->surface[i].size,
-			request_unpins);
+			request_unpins,
+			BUFFER_WRITE);
 
 		if (err) {
 			dev_err(chan->dev, "%s: get atomp iova failed\n", __func__);
@@ -480,7 +494,8 @@ static int pin_vi_capture_request_buffers_locked(struct tegra_vi_channel *chan,
 		desc->engine_status.offset,
 		&desc_mem->engine_status_surface_base_address,
 		&desc_mem->engine_status_surface_size,
-		request_unpins);
+		request_unpins,
+		BUFFER_WRITE);
 
 	if (err) {
 		dev_err(chan->dev, "%s: get engine surf iova failed\n", __func__);
@@ -591,7 +606,7 @@ static long vi_channel_ioctl(
 
 	capture = chan->capture_data;
 	if (unlikely(capture == NULL)) {
-		dev_err(chan->dev, "%s: invalid context", __func__);
+		vi_chan_err(chan, "%s: invalid context", __func__);
 		return -EINVAL;
 	}
 
@@ -603,28 +618,31 @@ static long vi_channel_ioctl(
 		if (copy_from_user(&setup, ptr, sizeof(setup)))
 			break;
 
+		/* Store pipeline ID in channel */
+		chan->pipeline_id = setup.pipeline_id;
+
 		vi_get_nvhost_device(chan, &setup);
 		if (chan->dev == NULL) {
-			dev_err(&chan->vi_capture_pdev->dev,
+			capture_dev_err_pl(&chan->vi_capture_pdev->dev, chan->pipeline_id,
 				"%s: channel device is NULL",
 				__func__);
 			return -EINVAL;
 		}
 
 		if (setup.request_size < sizeof(struct capture_descriptor)) {
-			dev_err(chan->dev,
+			vi_chan_err(chan,
 				"request size is too small to fit capture descriptor\n");
 			return -EINVAL;
 		}
 
 		if (capture->buf_ctx) {
-			dev_err(chan->dev, "vi buffer setup already done");
+			vi_chan_err(chan, "vi buffer setup already done");
 			return -EFAULT;
 		}
 
 		buffer_ctx = create_buffer_table(chan->dev);
 		if (buffer_ctx == NULL) {
-			dev_err(chan->dev, "vi buffer setup failed");
+			vi_chan_err(chan, "vi buffer setup failed");
 			return -ENOMEM;
 		}
 
@@ -654,7 +672,7 @@ static long vi_channel_ioctl(
 		setup.iova = capture->requests.iova;
 		err = vi_capture_setup(chan, &setup);
 		if (err < 0) {
-			dev_err(chan->dev, "vi capture setup failed\n");
+			vi_chan_err(chan, "vi capture setup failed\n");
 			capture_common_unpin_memory(&capture->requests);
 			destroy_buffer_table(buffer_ctx);
 			buffer_ctx = NULL;
@@ -674,7 +692,7 @@ static long vi_channel_ioctl(
 
 		err = vi_capture_reset(chan, reset_flags);
 		if (err < 0)
-			dev_err(chan->dev, "vi capture reset failed\n");
+			vi_chan_err(chan, "vi capture reset failed\n");
 		else {
 			for (i = 0; i < capture->queue_depth; i++)
 				vi_capture_request_unpin(chan, i);

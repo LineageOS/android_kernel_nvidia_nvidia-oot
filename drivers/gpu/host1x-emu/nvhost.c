@@ -1,7 +1,6 @@
-/*
- * SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- * SPDX-License-Identifier: GPL-2.0-only
- */
+// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+
 #include <nvidia/conftest.h>
 #include <linux/clk.h>
 #include <linux/debugfs.h>
@@ -43,6 +42,7 @@ static const struct of_device_id host1x_match[] = {
     {},
 };
 
+#ifndef CONFIG_TEGRA_DRM_DISABLE_LEGACY_INTERFACE
 static struct device *nvhost_client_device_create(struct platform_device *pdev,
                           struct cdev *cdev,
                           const char *cdev_name,
@@ -107,6 +107,7 @@ static void nvhost_intr_do_work(struct work_struct *work)
     kfree_rcu(host1x_cb);
 #endif
 }
+#endif
 
 /*Exported Function*/
 HOST1X_EMU_EXPORT_DECL(u32, host1x_readl(struct platform_device *pdev, u32 r))
@@ -165,6 +166,54 @@ HOST1X_EMU_EXPORT_DECL(struct host1x*, nvhost_get_host1x(struct platform_device 
 }
 HOST1X_EMU_EXPORT_SYMBOL(nvhost_get_host1x);
 
+HOST1X_EMU_EXPORT_DECL(u32, nvhost_syncpt_unit_interface_get_byte_offset(u32 syncpt_id))
+{
+	struct platform_device *host1x_pdev;
+	struct host1x *host1x;
+
+	host1x_pdev = HOST1X_EMU_EXPORT_CALL(nvhost_get_default_device());
+	if (WARN_ON(!host1x_pdev))
+		return 0;
+
+	host1x = platform_get_drvdata(host1x_pdev);
+	if (!host1x) {
+		pr_info("Host1x-EMU: No platform data for host1x!\n");
+		return 0;
+	}
+
+	if (syncpt_id >= host1x->syncpt_count) {
+	#ifdef HOST1X_EMU_SYNCPT_DEBUG
+		pr_info("Host1x-EMU: Invalid syncpoint ID!\n");
+	#endif
+		return 0;
+	}
+	return (syncpt_id * host1x->syncpt_page_size);
+}
+HOST1X_EMU_EXPORT_SYMBOL(nvhost_syncpt_unit_interface_get_byte_offset);
+
+HOST1X_EMU_EXPORT_DECL(int, nvhost_syncpt_unit_interface_get_aperture(struct platform_device *pdev,
+                          u64 *base, size_t *size))
+{
+	struct platform_device *host1x_pdev;
+	struct host1x *host1x;
+
+	host1x_pdev = HOST1X_EMU_EXPORT_CALL(nvhost_get_default_device());
+	if (WARN_ON(!host1x_pdev))
+		return 0;
+
+	host1x = platform_get_drvdata(host1x_pdev);
+	if (!host1x) {
+		pr_info("Host1x-EMU: No platform data for host1x!\n");
+		return 0;
+	}
+
+	*base = host1x->syncpt_phy_apt;
+	*size = host1x->syncpt_page_size * host1x->syncpt_count;
+	return 0;
+}
+HOST1X_EMU_EXPORT_SYMBOL(nvhost_syncpt_unit_interface_get_aperture);
+
+#ifndef CONFIG_TEGRA_DRM_DISABLE_LEGACY_INTERFACE
 HOST1X_EMU_EXPORT_DECL(int, nvhost_client_device_get_resources(struct platform_device *pdev))
 {
     struct nvhost_device_data *pdata = platform_get_drvdata(pdev);
@@ -332,11 +381,6 @@ HOST1X_EMU_EXPORT_DECL(void, nvhost_syncpt_set_min_update(struct platform_device
     struct host1x_syncpt *sp;
     u32 cur;
 
-    /**
-     * TODO: Use host1x_syncpt_get_by_id(), otherwise anyone can update
-     * syncpoint without allocating
-     */
-    //sp = HOST1X_EMU_EXPORT_CALL(host1x_syncpt_get_by_id(pdata->host1x, id));
     sp = HOST1X_EMU_EXPORT_CALL(host1x_syncpt_get_by_id_noref(pdata->host1x, id));
     if (WARN_ON(!sp))
         return;
@@ -403,63 +447,20 @@ HOST1X_EMU_EXPORT_DECL(u32, nvhost_syncpt_unit_interface_get_byte_offset_ext(str
 
 	host1x = platform_get_drvdata(host1x_pdev);
 	if (!host1x) {
-		pr_info("No platform data for host1x!\n");
+		pr_info("Host1x-EMU: No platform data for host1x!\n");
 		return 0;
 	}
 
 	if (syncpt_id >= host1x->syncpt_count) {
-		pr_info("Invalid syncpoint ID!\n");
+#ifdef HOST1X_EMU_SYNCPT_DEBUG
+		pr_info("Host1x-EMU: Invalid syncpoint ID!\n");
+#endif
 		return 0;
 	}
 
 	return syncpt_id * host1x->syncpt_page_size;
 }
 HOST1X_EMU_EXPORT_SYMBOL(nvhost_syncpt_unit_interface_get_byte_offset_ext);
-
-HOST1X_EMU_EXPORT_DECL(u32, nvhost_syncpt_unit_interface_get_byte_offset(u32 syncpt_id))
-{
-    struct platform_device *host1x_pdev;
-    struct host1x *host1x;
-
-    host1x_pdev = HOST1X_EMU_EXPORT_CALL(nvhost_get_default_device());
-    if (WARN_ON(!host1x_pdev))
-        return 0;
-
-    host1x = platform_get_drvdata(host1x_pdev);
-    if (!host1x) {
-        pr_info("No platform data for host1x!\n");
-        return 0;
-    }
-
-    if (syncpt_id >= host1x->syncpt_count) {
-        pr_info("Invalid syncpoint ID!\n");
-        return 0;
-    }
-    return (syncpt_id * host1x->syncpt_page_size);
-}
-HOST1X_EMU_EXPORT_SYMBOL(nvhost_syncpt_unit_interface_get_byte_offset);
-
-HOST1X_EMU_EXPORT_DECL(int, nvhost_syncpt_unit_interface_get_aperture(struct platform_device *pdev,
-                          u64 *base, size_t *size))
-{
-	struct platform_device *host1x_pdev;
-	struct host1x *host1x;
-
-	host1x_pdev = HOST1X_EMU_EXPORT_CALL(nvhost_get_default_device());
-	if (WARN_ON(!host1x_pdev))
-		return 0;
-
-	host1x = platform_get_drvdata(host1x_pdev);
-	if (!host1x) {
-		pr_info("No platform data for host1x!\n");
-		return 0;
-	}
-
-	*base = host1x->syncpt_phy_apt;
-	*size = host1x->syncpt_page_size * host1x->syncpt_count;
-	return 0;
-}
-HOST1X_EMU_EXPORT_SYMBOL(nvhost_syncpt_unit_interface_get_aperture);
 
 HOST1X_EMU_EXPORT_DECL(int, nvhost_syncpt_unit_interface_init(struct platform_device *pdev))
 {
@@ -543,39 +544,39 @@ HOST1X_EMU_EXPORT_DECL(int, nvhost_intr_register_notifier(struct platform_device
                   void (*callback)(void *data),
                   void *private_data))
 {
-    int err;
-    struct dma_fence *fence;
-    struct host1x_syncpt *sp;
-    struct nvhost_host1x_cb *cb;
-    struct nvhost_device_data *pdata = platform_get_drvdata(pdev);
+	int err;
+	struct dma_fence *fence;
+	struct host1x_syncpt *sp;
+	struct nvhost_host1x_cb *cb;
+	struct nvhost_device_data *pdata = platform_get_drvdata(pdev);
 
-    sp = HOST1X_EMU_EXPORT_CALL(host1x_syncpt_get_by_id_noref(pdata->host1x, id));
-    if (!sp)
-        return -EINVAL;
+	sp = HOST1X_EMU_EXPORT_CALL(host1x_syncpt_get_by_id_noref(pdata->host1x, id));
+	if (!sp)
+		return -EINVAL;
 
-    fence = HOST1X_EMU_EXPORT_CALL(host1x_fence_create(sp, thresh, true));
-    if (IS_ERR(fence)) {
-        pr_err("error %d during construction of fence!", (int)PTR_ERR(fence));
-        return PTR_ERR(fence);
-    }
+	fence = HOST1X_EMU_EXPORT_CALL(host1x_fence_create(sp, thresh, true));
+	if (IS_ERR(fence)) {
+		dev_info(&pdev->dev, "error %d during construction of fence!", (int)PTR_ERR(fence));
+		return PTR_ERR(fence);
+	}
 
-    cb = kzalloc(sizeof(*cb), GFP_KERNEL);
-    if (!cb) {
-        dma_fence_put(fence);
-        return -ENOMEM;
-    }
+	cb = kzalloc(sizeof(*cb), GFP_KERNEL);
+	if (!cb) {
+		dma_fence_put(fence);
+		return -ENOMEM;
+	}
 
-    INIT_WORK(&cb->work, nvhost_intr_do_work);
-    cb->notifier      = callback;
-    cb->notifier_data = private_data;
+	INIT_WORK(&cb->work, nvhost_intr_do_work);
+	cb->notifier      = callback;
+	cb->notifier_data = private_data;
 
-    err = dma_fence_add_callback(fence, &cb->cb, nvhost_host1x_cb_func);
-    if (err < 0) {
-        dma_fence_put(fence);
-        kfree(cb);
-    }
+	err = dma_fence_add_callback(fence, &cb->cb, nvhost_host1x_cb_func);
+	if (err < 0) {
+		dma_fence_put(fence);
+		kfree(cb);
+	}
 
-    return err;
+	return err;
 }
 HOST1X_EMU_EXPORT_SYMBOL(nvhost_intr_register_notifier);
 
@@ -614,3 +615,4 @@ HOST1X_EMU_EXPORT_DECL(void, nvhost_module_idle_mult(struct platform_device *pde
     return;
 }
 HOST1X_EMU_EXPORT_SYMBOL(nvhost_module_idle_mult);
+#endif  /* CONFIG_TEGRA_DRM_DISABLE_LEGACY_INTERFACE */

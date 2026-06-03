@@ -50,13 +50,11 @@ validate_channel_mapping(struct pva_dma_config const *out_cfg,
 	enum pva_error err = PVA_SUCCESS;
 
 	for (uint8_t i = 0U; i < cfg_hdr->num_channels; i++) {
-		uint8_t desc_id;
-
 		channel = &out_cfg->channels[i];
-		desc_id = safe_addu8(channel->desc_index,
-				     out_cfg->header.base_descriptor);
 		if ((channel->desc_index >= out_cfg->header.num_descriptors) ||
-		    (pva_is_reserved_desc(desc_id))) {
+		    (pva_is_reserved_desc(addu8(channel->desc_index,
+						cfg_hdr->base_descriptor,
+						&math_err)))) {
 			pva_kmd_log_err(
 				"ERR: Invalid Channel Descriptor Index");
 			return PVA_INVAL;
@@ -311,8 +309,8 @@ validate_descriptor(const struct pva_dma_descriptor *desc,
 	if ((desc->link_desc_id - cfg_hdr->base_descriptor >
 	     cfg_hdr->num_descriptors) ||
 	    ((desc->link_desc_id != 0U) &&
-	     pva_is_reserved_desc((uint32_t)desc->link_desc_id -
-				  (uint32_t)PVA_DMA_DESC_ID_BASE))) {
+	     pva_is_reserved_desc(desc->link_desc_id -
+				  (uint8_t)PVA_DMA_DESC_ID_BASE))) {
 		pva_kmd_log_err("ERR: Invalid linker Desc ID");
 		return PVA_INVAL;
 	}
@@ -405,7 +403,8 @@ is_dma_config_header_valid(struct pva_ops_dma_config_register const *ops_hdr,
 	offsets[0].end = addu32(
 		ops_hdr->channels_offset,
 		align8_u32(mulu32(cfg_hdr->num_channels,
-				  sizeof(struct pva_dma_channel), &math_err),
+				  (uint32_t)sizeof(struct pva_dma_channel),
+				  &math_err),
 			   &math_err),
 		&math_err);
 
@@ -413,22 +412,25 @@ is_dma_config_header_valid(struct pva_ops_dma_config_register const *ops_hdr,
 	offsets[1].end = addu32(
 		ops_hdr->descriptors_offset,
 		align8_u32(mulu32(cfg_hdr->num_descriptors,
-				  sizeof(struct pva_dma_descriptor), &math_err),
+				  (uint32_t)sizeof(struct pva_dma_descriptor),
+				  &math_err),
 			   &math_err),
 		&math_err);
 
 	offsets[2].start = ops_hdr->hwseq_words_offset;
-	offsets[2].end = addu32(ops_hdr->hwseq_words_offset,
-				align8_u32(mulu32(cfg_hdr->num_hwseq_words,
-						  sizeof(uint32_t), &math_err),
-					   &math_err),
-				&math_err);
+	offsets[2].end =
+		addu32(ops_hdr->hwseq_words_offset,
+		       align8_u32(mulu32(cfg_hdr->num_hwseq_words,
+					 (uint32_t)sizeof(uint32_t), &math_err),
+				  &math_err),
+		       &math_err);
 
 	offsets[3].start = ops_hdr->static_bindings_offset;
 	offsets[3].end =
 		addu32(ops_hdr->static_bindings_offset,
 		       align8_u32(mulu32(cfg_hdr->num_static_slots,
-					 sizeof(struct pva_dma_static_binding),
+					 (uint32_t)sizeof(
+						 struct pva_dma_static_binding),
 					 &math_err),
 				  &math_err),
 		       &math_err);
@@ -486,15 +488,13 @@ validate_descriptors(const struct pva_dma_config *dma_config,
 	const struct pva_dma_config_header *cfg_hdr = &dma_config->header;
 	const struct pva_dma_descriptor *desc;
 	bool relax_dim3_check = true;
+	uint8_t desc_id;
+	pva_math_error math_err = MATH_OP_SUCCESS;
 
 	for (i = 0U; i < cfg_hdr->num_descriptors; i++) {
-		uint8_t desc_id =
-			safe_addu8((uint8_t)i, cfg_hdr->base_descriptor);
-
+		desc_id = addu8(i, cfg_hdr->base_descriptor, &math_err);
 		if (pva_is_reserved_desc(desc_id)) {
 			// skip over the reserved descriptor range
-			i = safe_subu8(PVA_RESERVED_DESCRIPTORS_END,
-				       dma_config->header.base_descriptor);
 			continue;
 		}
 
@@ -507,6 +507,11 @@ validate_descriptors(const struct pva_dma_config *dma_config,
 		if (err != PVA_SUCCESS) {
 			return err;
 		}
+	}
+
+	if (math_err != MATH_OP_SUCCESS) {
+		pva_kmd_log_err("validate_descriptors math error");
+		return PVA_ERR_MATH_OP;
 	}
 
 	return err;
@@ -706,19 +711,21 @@ static uint16_t get_slot_flag(uint8_t transfer_mode, bool cb_enable,
 		flags |= PVA_FW_DMA_SLOT_FLAG_DRAM;
 	} else if (transfer_mode == (uint8_t)PVA_DMA_TRANS_MODE_VPUCFG) {
 		flags |= PVA_FW_DMA_SLOT_FLAG_VMEM_VPUC_TABLE;
+	} else {
+		/* No flag modification needed for other transfer modes */
 	}
 
 	if (cb_enable) {
 		flags |= PVA_FW_DMA_SLOT_FLAG_CB;
 	}
 	if (is_dst) {
-		flags |= PVA_INSERT((uint32_t)PVA_ACCESS_WO,
-				    PVA_FW_DMA_SLOT_FLAG_ACCESS_MSB,
-				    PVA_FW_DMA_SLOT_FLAG_ACCESS_LSB);
+		flags |= PVA_INSERT16((uint16_t)PVA_ACCESS_WO,
+				      PVA_FW_DMA_SLOT_FLAG_ACCESS_MSB,
+				      PVA_FW_DMA_SLOT_FLAG_ACCESS_LSB);
 	} else {
-		flags |= PVA_INSERT((uint32_t)PVA_ACCESS_RO,
-				    PVA_FW_DMA_SLOT_FLAG_ACCESS_MSB,
-				    PVA_FW_DMA_SLOT_FLAG_ACCESS_LSB);
+		flags |= PVA_INSERT16((uint16_t)PVA_ACCESS_RO,
+				      PVA_FW_DMA_SLOT_FLAG_ACCESS_MSB,
+				      PVA_FW_DMA_SLOT_FLAG_ACCESS_LSB);
 	}
 	return flags;
 }
@@ -730,7 +737,7 @@ static void update_reloc_count(uint16_t slot, uint8_t transfer_mode,
 			       struct pva_fw_dma_slot *out_dyn_slots,
 			       uint16_t num_dyn_slots, bool is_dst)
 {
-	uint8_t slot_id = get_slot_id(slot);
+	uint16_t slot_id = get_slot_id(slot);
 
 	if ((slot & PVA_DMA_DYNAMIC_SLOT) != 0U) {
 		out_dyn_slots[slot_id].reloc_count =
@@ -742,6 +749,8 @@ static void update_reloc_count(uint16_t slot, uint8_t transfer_mode,
 			safe_addu16(out_static_slots[slot_id].reloc_count, 1U);
 		out_static_slots[slot_id].flags |=
 			get_slot_flag(transfer_mode, cb_enable, is_dst);
+	} else {
+		/* No relocation counting for non-slot addresses */
 	}
 }
 
@@ -751,32 +760,41 @@ static void count_relocs(struct pva_dma_config const *dma_cfg,
 			 struct pva_fw_dma_slot *out_dyn_slots,
 			 uint16_t num_dyn_slots)
 {
-	uint8_t i;
+	uint8_t i = 0U;
 	const struct pva_dma_descriptor *desc;
 
-	for (i = 0U; i < dma_cfg->header.num_descriptors; i++) {
-		if (pva_is_reserved_desc(i + dma_cfg->header.base_descriptor)) {
+	/* CERT INT30-C: Use safe arithmetic to prevent potential wrap */
+	while (i < dma_cfg->header.num_descriptors) {
+		uint8_t desc_id =
+			safe_addu8(i, dma_cfg->header.base_descriptor);
+		if (pva_is_reserved_desc(desc_id)) {
 			// skip over the reserved descriptor range
-			i = PVA_RESERVED_DESCRIPTORS_END -
-			    dma_cfg->header.base_descriptor;
+			/* CERT INT31-C: Use safe subtract to handle underflow gracefully */
+			i = safe_subu8(PVA_RESERVED_DESCRIPTORS_END,
+				       dma_cfg->header.base_descriptor);
+			/* Skip to first descriptor after reserved range */
+			i = safe_addu8(i, 1U);
 			continue;
 		}
 		desc = &dma_cfg->descriptors[i];
 
 		update_reloc_count(desc->src.slot, desc->src.transfer_mode,
-				   desc->src.cb_enable, out_static_slots,
+				   (bool)desc->src.cb_enable, out_static_slots,
 				   num_static_slots, out_dyn_slots,
 				   num_dyn_slots, false);
 
 		update_reloc_count(desc->dst.slot, desc->dst.transfer_mode,
-				   desc->dst.cb_enable, out_static_slots,
+				   (bool)desc->dst.cb_enable, out_static_slots,
 				   num_static_slots, out_dyn_slots,
 				   num_dyn_slots, true);
 
 		update_reloc_count(desc->dst2_slot, desc->dst.transfer_mode,
-				   desc->dst.cb_enable, out_static_slots,
+				   (bool)desc->dst.cb_enable, out_static_slots,
 				   num_static_slots, out_dyn_slots,
 				   num_dyn_slots, true);
+
+		/* CERT INT30-C: Use safe addition to prevent wrap */
+		i = safe_addu8(i, 1U);
 	}
 }
 
@@ -792,7 +810,7 @@ static void write_one_reloc(uint8_t ch_index, uint32_t desc_index,
 	int64_t old_start_addr = info->slots[slot_id].start_addr;
 	int64_t old_end_addr = info->slots[slot_id].end_addr;
 	uint32_t shift_amount = (uint32_t)ch_index & 0x0FU;
-	uint32_t shift_result = 1U << shift_amount;
+	uint32_t shift_result = (uint32_t)1U << shift_amount;
 	uint16_t ch_mask_u16;
 	uint16_t new_mask;
 
@@ -801,13 +819,13 @@ static void write_one_reloc(uint8_t ch_index, uint32_t desc_index,
 	info->slots[slot_id].end_addr =
 		maxs64(access_entry->end_addr, old_end_addr);
 
-	ASSERT(shift_result <= U16_MAX);
+	ASSERT(shift_result <= (uint32_t)U16_MAX);
 	ch_mask_u16 = (uint16_t)shift_result;
 	new_mask = info->slots[slot_id].ch_use_mask | ch_mask_u16;
 	info->slots[slot_id].ch_use_mask = new_mask;
 
 	/* desc_index field is uint8_t - validated by DMA config validation */
-	ASSERT(desc_index <= U8_MAX);
+	ASSERT(desc_index <= (uint32_t)U8_MAX);
 	info->relocs[reloc_id].desc_index = (uint8_t)desc_index;
 	info->relocs[reloc_id].field = reloc_field;
 	info->reloc_off[slot_id] = safe_addu8(info->reloc_off[slot_id], 1U);
@@ -826,6 +844,8 @@ static void handle_reloc(uint16_t slot, uint8_t transfer_mode,
 		write_one_reloc(ch_index, desc_index, slot, transfer_mode,
 				reloc_field, &rel_info->static_slot,
 				access_entry);
+	} else {
+		/* No relocation handling for non-slot addresses */
 	}
 }
 
@@ -854,8 +874,6 @@ static void write_relocs(const struct pva_dma_config *dma_cfg,
 		if (pva_is_reserved_desc(
 			    safe_addu8(i, dma_cfg->header.base_descriptor))) {
 			// skip over the reserved descriptor range
-			i = safe_subu8(PVA_RESERVED_DESCRIPTORS_END,
-				       dma_cfg->header.base_descriptor);
 			continue;
 		}
 		desc = &dma_cfg->descriptors[i];
@@ -962,18 +980,18 @@ static enum pva_error get_access_size(const struct pva_dma_descriptor *desc,
 
 	end += adds64((int64_t)dim_offset_U, (int64_t)tx, &math_err);
 
-	// 3rd dim
-	dim_offset = muls32((attr->adv1), (int32_t)(attr->rpt1), &math_err);
+	// 3rd dim - adv values are two's complement signed stored as uint32_t
+	dim_offset = muls32(attr->adv1, (int32_t)(attr->rpt1), &math_err);
 	start += mins32(dim_offset, 0);
 	end += maxs32(dim_offset, 0);
 
 	// 4th dim
-	dim_offset = muls32((attr->adv2), (int32_t)(attr->rpt2), &math_err);
+	dim_offset = muls32(attr->adv2, (int32_t)(attr->rpt2), &math_err);
 	start += mins32(dim_offset, 0);
 	end += maxs32(dim_offset, 0);
 
 	// 5th dim
-	dim_offset = muls32((attr->adv3), (int32_t)(attr->rpt3), &math_err);
+	dim_offset = muls32(attr->adv3, (int32_t)(attr->rpt3), &math_err);
 	start += mins32(dim_offset, 0);
 	end += maxs32(dim_offset, 0);
 	// convert to byte range
@@ -1032,9 +1050,7 @@ pva_kmd_compute_dma_access(struct pva_dma_config const *dma_cfg,
 					    (1ULL << (i & 0x3FU))) == 1U);
 		if (pva_is_reserved_desc(
 			    safe_addu8(i, dma_cfg->header.base_descriptor))) {
-			// skip over the reserved descriptor range
-			i = safe_subu8(PVA_RESERVED_DESCRIPTORS_END,
-				       dma_cfg->header.base_descriptor);
+			// skip over the reserved descriptor
 			continue;
 		}
 
@@ -1081,8 +1097,8 @@ void pva_kmd_collect_relocs(struct pva_dma_config const *dma_cfg,
 	count_relocs(dma_cfg, out_static_slots, num_static_slots, out_dyn_slots,
 		     num_dyn_slots);
 
-	(void)memset(static_reloc_off, 0U, sizeof(static_reloc_off));
-	(void)memset(dyn_reloc_off, 0U, sizeof(dyn_reloc_off));
+	(void)memset(static_reloc_off, 0, sizeof(static_reloc_off));
+	(void)memset(dyn_reloc_off, 0, sizeof(dyn_reloc_off));
 
 	rel_info.dyn_slot.slots = out_dyn_slots;
 	rel_info.dyn_slot.relocs = out_dyn_relocs;

@@ -938,6 +938,10 @@ static int netdev_close(struct net_device *pnetdev);
 extern int rtw_sdio_set_power(int on);
 #endif /* CONFIG_PLATFORM_INTEL_BYT */
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 8, 0)
+#define strlcpy(p, q, s) strscpy(p, q, s)
+#endif
+
 #ifdef CONFIG_MCC_MODE
 /* enable MCC mode or not */
 int rtw_en_mcc = 1;

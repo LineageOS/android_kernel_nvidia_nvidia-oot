@@ -1,5 +1,16 @@
-// SPDX-License-Identifier: GPL-2.0
-// Copyright (c) 2020-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: GPL-2.0-only
+/* SPDX-FileCopyrightText: Copyright (c) 2020-2026 NVIDIA CORPORATION & AFFILIATES.
+ * All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms and conditions of the GNU General Public License,
+ * version 2, as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ */
 
 #ifndef __UAPI_TEGRA_CDI_MGR_H__
 #define __UAPI_TEGRA_CDI_MGR_H__
@@ -24,6 +35,10 @@
 #define CDI_MGR_IOCTL_GET_PWR_INFO _IOW('o', 15, struct cdi_mgr_pwr_ctrl_info)
 #define CDI_MGR_IOCTL_ENABLE_DES_POWER	_IO('o',   16)
 #define CDI_MGR_IOCTL_DISABLE_DES_POWER	_IO('o',   17)
+#define CDI_MGR_IOCTL_GPIO_GET_LEVEL \
+	_IOWR('o',  18, struct cdi_mgr_gpio_level)
+#define CDI_MGR_IOCTL_GPIO_SET_LEVEL \
+	_IOW('o',  19, struct cdi_mgr_gpio_level)
 
 #define CDI_MGR_POWER_ALL	5
 #define MAX_CDI_NAME_LENGTH	32
@@ -69,6 +84,11 @@ struct cdi_mgr_gpio_intr {
 	__u32 code;
 };
 
+struct cdi_mgr_gpio_level {
+	__u32 idx;
+	__u32 level;
+};
+
 struct cdi_mgr_pwm_info {
 	__u64 duty_ns;
 	__u64 period_ns;
@@ -89,6 +109,11 @@ enum {
 enum {
 	CDI_MGR_PWM_DISABLE = 0,
 	CDI_MGR_PWM_ENABLE,
+};
+
+enum {
+	CDI_MGR_GPIO_LEVEL_LOW = 0,
+	CDI_MGR_GPIO_LEVEL_HIGH,
 };
 
 #endif  /* __UAPI_TEGRA_CDI_MGR_H__ */

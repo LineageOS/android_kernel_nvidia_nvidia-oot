@@ -14,6 +14,7 @@
 #include <linux/overflow.h>
 #include <soc/tegra/virt/syscalls.h>
 #include <soc/tegra/virt/hv-ivc.h>
+#include <linux/string.h>
 #define TEGRA_HV_ERR(...) pr_err("hvc_sysfs: " __VA_ARGS__)
 #define TEGRA_HV_INFO(...) pr_info("hvc_sysfs: " __VA_ARGS__)
 
@@ -50,7 +51,6 @@ struct hyp_shared_memory_info {
 
 #define HYP_SHM_ID_NUM  (2 * NGUESTS_MAX + 1U) // trace buffers + PCT.
 static struct hyp_shared_memory_info hyp_shared_memory_attrs[HYP_SHM_ID_NUM];
-static uint64_t EventType = 1;
 
 /* Map the HV trace buffer to the calling user process */
 static int nvlog_buffer_mmap(struct file *fp, struct kobject *ko,
@@ -318,17 +318,26 @@ static ssize_t log_mask_read(struct file *fp, struct kobject *ko,
 #endif
 	char *buf, loff_t pos, size_t size)
 {
-	uint64_t value = 0;
+	int ret;
+	uint64_t mask = 0;
 
-	/* Kernel checks for validity of buf, no need to check here. */
-	value = EventType;
-
-	if (size == sizeof(uint64_t)) {
-		hyp_trace_get_mask(&value);
-		memcpy(buf, &value, sizeof(value));
+	if (size != sizeof(uint64_t)) {
+		TEGRA_HV_ERR("log_mask read size must be %lu bytes\n", sizeof(uint64_t));
+		return -EINVAL;
 	}
 
-	return size;
+	if (pos != 0) {
+		return 0;
+	}
+
+	ret = hyp_trace_get_mask(&mask);
+	if (ret != 0) {
+		TEGRA_HV_ERR("hyp_trace_get_mask failed: %d\n", ret);
+		return -EIO;
+	}
+
+	memcpy(buf, &mask, sizeof(mask));
+	return sizeof(uint64_t);
 }
 
 static ssize_t log_mask_write(struct file *fp, struct kobject *ko,
@@ -339,17 +348,26 @@ static ssize_t log_mask_write(struct file *fp, struct kobject *ko,
 #endif
 	char *buf, loff_t pos, size_t size)
 {
-	uint64_t type, value;
+	int ret;
+	uint64_t mask;
 
-	memcpy(&type, buf, sizeof(uint64_t));
-	memcpy(&value, buf + sizeof(uint64_t), sizeof(uint64_t));
+	if (size != sizeof(uint64_t)) {
+		TEGRA_HV_ERR("log_mask write size must be %lu bytes\n", sizeof(uint64_t));
+		return -EINVAL;
+	}
 
-	if (size == 2 * sizeof(uint64_t))
-		hyp_trace_set_mask(type, value);
-	else
-		EventType = *buf;
+	if (pos != 0) {
+		return -EINVAL;
+	}
 
-	return size;
+	memcpy(&mask, buf, sizeof(mask));
+	ret = hyp_trace_set_mask(mask);
+	if (ret != 0) {
+		TEGRA_HV_ERR("hyp_trace_set_mask failed: %d\n", ret);
+		return -EIO;
+	}
+
+	return sizeof(uint64_t);
 }
 
 static struct bin_attribute log_mask_attr;
@@ -363,8 +381,84 @@ static int create_log_mask_node(struct kobject *kobj)
 	log_mask_attr.attr.mode = 0600;
 	log_mask_attr.read = log_mask_read;
 	log_mask_attr.write = log_mask_write;
-	log_mask_attr.size = sizeof(uint64_t) * 2U;
+	log_mask_attr.size = sizeof(uint64_t);
 	return sysfs_create_bin_file(kobj, &log_mask_attr);
+}
+
+static ssize_t profiler_freq_read(struct file *fp, struct kobject *ko,
+#if defined(NV_BIN_ATTRIBUTE_STRUCT_READWRITE_HAS_CONST_BIN_ATTRIBUTE_ARG)
+	const struct bin_attribute *attr,
+#else
+	struct bin_attribute *attr,
+#endif
+	char *buf, loff_t pos, size_t size)
+{
+	int ret;
+	uint64_t frequency = 0;
+
+	if (size != sizeof(uint64_t)) {
+		TEGRA_HV_ERR("profiler_frequency read size must be %lu bytes\n", sizeof(uint64_t));
+		return -EINVAL;
+	}
+
+	if (pos != 0) {
+		return 0;
+	}
+
+	ret = hyp_trace_get_profiler_freq(&frequency);
+	if (ret != 0) {
+		TEGRA_HV_ERR("hyp_trace_get_profiler_freq failed: %d\n", ret);
+		return -EIO;
+	}
+
+	memcpy(buf, &frequency, sizeof(frequency));
+
+	return sizeof(uint64_t);
+}
+
+static ssize_t profiler_freq_write(struct file *fp, struct kobject *ko,
+#if defined(NV_BIN_ATTRIBUTE_STRUCT_READWRITE_HAS_CONST_BIN_ATTRIBUTE_ARG)
+	const struct bin_attribute *attr,
+#else
+	struct bin_attribute *attr,
+#endif
+	char *buf, loff_t pos, size_t size)
+{
+	int ret;
+	uint64_t frequency;
+
+	if (size != sizeof(uint64_t)) {
+		TEGRA_HV_ERR("profiler_frequency write size must be %lu bytes\n", sizeof(uint64_t));
+		return -EINVAL;
+	}
+
+	if (pos != 0) {
+		return -EINVAL;
+	}
+
+	memcpy(&frequency, buf, sizeof(frequency));
+	ret = hyp_trace_set_profiler_freq(frequency);
+	if (ret != 0) {
+		TEGRA_HV_ERR("hyp_trace_set_profiler_freq failed: %d\n", ret);
+		return -EIO;
+	}
+
+	return sizeof(uint64_t);
+}
+
+static struct bin_attribute profiler_freq_attr;
+static int create_profiler_freq_node(struct kobject *kobj)
+{
+	if (kobj == NULL)
+		return -EINVAL;
+
+	sysfs_bin_attr_init((struct bin_attribute *)&profiler_freq_attr);
+	profiler_freq_attr.attr.name = "profiler_frequency";
+	profiler_freq_attr.attr.mode = 0600;
+	profiler_freq_attr.read = profiler_freq_read;
+	profiler_freq_attr.write = profiler_freq_write;
+	profiler_freq_attr.size = sizeof(uint64_t);
+	return sysfs_create_bin_file(kobj, &profiler_freq_attr);
 }
 
 static int hyp_trace_buffer_init(void)
@@ -373,7 +467,8 @@ static int hyp_trace_buffer_init(void)
 	int ret;
 	uint64_t ipa;
 	struct hyp_info_page *info;
-	uint64_t log_mask = 1;
+	uint64_t log_mask;
+	uint64_t profiler_freq;
 	struct trace_buf *buffs;
 	uint16_t i, count;
 
@@ -397,7 +492,6 @@ static int hyp_trace_buffer_init(void)
 	buffs = info->trace_buffs;
 	count = ARRAY_SIZE(info->trace_buffs);
 
-	/* 2 bytes for number, 1 for "_" and 1 for null character.*/
 	if (MAX_NAME_SIZE < (ARRAY_SIZE(buffs[i].name) + 4U)) {
 		TEGRA_HV_INFO("hyp_shared_memory_attrs.name size is small\n");
 		iounmap((void __iomem *)info);
@@ -434,6 +528,20 @@ static int hyp_trace_buffer_init(void)
 		ret = create_log_mask_node(kobj);
 		if (ret == 0)
 			TEGRA_HV_INFO("access to trace event mask is available\n");
+		else
+			TEGRA_HV_ERR("failed to create log_mask node: %d\n", ret);
+	} else {
+		TEGRA_HV_INFO("trace event mask access unavailable\n");
+	}
+
+	if (hyp_trace_get_profiler_freq(&profiler_freq) == 0) {
+		ret = create_profiler_freq_node(kobj);
+		if (ret == 0)
+			TEGRA_HV_INFO("access to profiler frequency is available\n");
+		else
+			TEGRA_HV_ERR("failed to create profiler_frequency node: %d\n", ret);
+	} else {
+		TEGRA_HV_INFO("profiler frequency access unavailable\n");
 	}
 
 	hyp_shared_memory_attrs[i].ipa = info->pct_ipa;
@@ -471,9 +579,6 @@ static int __init hvc_sysfs_register(void)
 
 	if (is_tegra_hypervisor_mode() == false) {
 		TEGRA_HV_INFO("hypervisor is not present\n");
-		/* retunring success in case of native kernel otherwise
-		 * systemd-modules-load service will failed.
-		 */
 		return 0;
 	}
 
@@ -493,3 +598,5 @@ static int __init hvc_sysfs_register(void)
 late_initcall(hvc_sysfs_register);
 
 MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("Hypervisor control interface via Sysfs");
+MODULE_AUTHOR("NVIDIA Corporation");

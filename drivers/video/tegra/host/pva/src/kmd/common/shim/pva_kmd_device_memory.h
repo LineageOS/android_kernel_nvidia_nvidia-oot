@@ -156,7 +156,7 @@ pva_kmd_device_memory_alloc_map(uint64_t size, struct pva_kmd_device *pva,
  * - Linux: file descriptor associated with dma_buf object
  * - QNX: NvRM import ID
  *
- * @param[in] memory_handle  Platform-specific memory handle from user space
+ * @param[in] import_id  Platform-specific memory handle from user space
  *                           Valid value: platform-specific handle format
  * @param[in] offset         Byte offset into the memory allocation
  *                           Valid range: [0 .. allocation_size - 1]
@@ -169,7 +169,7 @@ pva_kmd_device_memory_alloc_map(uint64_t size, struct pva_kmd_device *pva,
  * @retval NULL      Memory acquisition or mapping failed
  */
 struct pva_kmd_device_memory *
-pva_kmd_device_memory_acquire(uint64_t memory_handle, uint64_t offset,
+pva_kmd_device_memory_acquire(uint64_t import_id, uint64_t offset,
 			      uint64_t size, struct pva_kmd_context *ctx);
 
 /**

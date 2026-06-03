@@ -46,6 +46,11 @@ struct nvsciipc_config_entry {
 	uint32_t uid;
 };
 
+struct nvsciipc_dt_config {
+	/* Flag indicating if device tree node exists */
+	uint32_t dt_exists;
+};
+
 struct nvsciipc_db {
 	int num_eps;
 	struct nvsciipc_config_entry **entry;
@@ -128,6 +133,12 @@ struct nvsciipc_reserve_ep {
 #define NVSCIIPC_IOCTL_RESERVE_EP \
 	_IOWR(NVSCIIPC_IOCTL_MAGIC, 10, struct nvsciipc_reserve_ep)
 
-#define NVSCIIPC_IOCTL_NUMBER_MAX 10
+#define NVSCIIPC_IOCTL_CHECK_DT_NODE \
+	_IOR(NVSCIIPC_IOCTL_MAGIC, 11, struct nvsciipc_dt_config)
+
+#define NVSCIIPC_IOCTL_GET_DB \
+	_IOR(NVSCIIPC_IOCTL_MAGIC, 12, struct nvsciipc_db)
+
+#define NVSCIIPC_IOCTL_NUMBER_MAX 12
 
 #endif /* __NVSCIIPC_IOCTL_H__ */

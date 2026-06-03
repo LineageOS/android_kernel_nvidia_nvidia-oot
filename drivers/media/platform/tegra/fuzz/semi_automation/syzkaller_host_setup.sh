@@ -53,6 +53,11 @@ main() {
     # create working directory
     send_command_tegra "mkdir /tmp/syzkaller"
 
+    # create coverage directory
+    send_command_tegra "sudo rm -rf /output"
+    send_command_tegra "sudo mkdir /output"
+    send_command_tegra "sudo chmod 777 -R /output"
+
     # # configure SSH
     send_command_tegra "echo 'PermitRootLogin yes' | sudo tee -a /etc/ssh/sshd_config"
     send_command_tegra "echo 'AllowTcpForwarding yes' | sudo tee -a /etc/ssh/sshd_config"

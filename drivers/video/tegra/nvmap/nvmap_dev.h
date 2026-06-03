@@ -84,6 +84,7 @@ struct nvmap_pid_data {
 };
 
 struct nvmap_device {
+	struct device *dev;
 	struct rb_root	handles;
 	spinlock_t	handle_lock;
 	struct miscdevice dev_user;

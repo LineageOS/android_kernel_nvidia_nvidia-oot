@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Copyright (c) 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2017-2026 NVIDIA CORPORATION.
+ *                         All rights reserved.
  */
 
 #ifndef __CAPTURE_IVC_PRIV_H__
@@ -26,6 +27,7 @@ struct tegra_capture_ivc_cb_ctx {
 	tegra_capture_ivc_cb_func cb_func;
 	/** Private context of a VI/ISP capture context */
 	const void *priv_context;
+	struct semaphore sem_ch;
 };
 
 /**

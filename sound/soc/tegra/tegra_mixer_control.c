@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// Copyright (c) 2024-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-//
-// tegra_mixer_control.c - Override DAI PCM parameters
-
-/* The driver is just for audio usecase testing purpose and has few limitations as
+// SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+/*
+ * tegra_mixer_control.c - Override DAI PCM parameters
+ *
+ * The driver is just for audio usecase testing purpose and has few limitations as
  * mentioned below, which is fine looking at the overall requirements.
  *
  * - Client overrides are not possible for AHUB internal modules. This is
@@ -13,7 +13,7 @@
  * - No overrides are provided for ADMAIF. The client configuration is
  *   passed by aplay/arecord applications and DAI hw_param() call carries
  *   the same.
-
+ *
  * - The DAI overrides need to be set every time before any use case and
  *   these are not persistent. This is because when an use case ends ASoC
  *   core clears DAI runtime settings. If necessary, it can be improved
@@ -27,7 +27,6 @@
 #include <linux/of_platform.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
-#include <linux/version.h>
 #include <sound/soc.h>
 #include <sound/pcm_params.h>
 
@@ -47,7 +46,7 @@ static int dai_get_rate(struct snd_kcontrol *kcontrol,
 {
 	struct soc_mixer_control *mc =
 		(struct soc_mixer_control *)kcontrol->private_value;
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	int reg = mc->reg, i = 0;
 	struct snd_soc_dai *dai;
 
@@ -72,7 +71,7 @@ static int dai_put_rate(struct snd_kcontrol *kcontrol,
 {
 	struct soc_mixer_control *mc =
 		(struct soc_mixer_control *)kcontrol->private_value;
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	int value = ucontrol->value.integer.value[0];
 	int reg = mc->reg, i = 0;
 	struct snd_soc_dai *dai;
@@ -100,7 +99,7 @@ static int dai_get_channel(struct snd_kcontrol *kcontrol,
 {
 	struct soc_mixer_control *mc =
 		(struct soc_mixer_control *)kcontrol->private_value;
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	int reg = mc->reg, i = 0;
 	struct snd_soc_dai *dai;
 
@@ -124,7 +123,7 @@ static int dai_put_channel(struct snd_kcontrol *kcontrol,
 {
 	struct soc_mixer_control *mc =
 		(struct soc_mixer_control *)kcontrol->private_value;
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	int value = ucontrol->value.integer.value[0];
 	int reg = mc->reg, i = 0;
 	struct snd_soc_dai *dai;
@@ -152,7 +151,7 @@ static int dai_get_bits(struct snd_kcontrol *kcontrol,
 {
 	struct soc_mixer_control *mc =
 		(struct soc_mixer_control *)kcontrol->private_value;
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	int reg = mc->reg, i = 0;
 	struct snd_soc_dai *dai;
 
@@ -176,7 +175,7 @@ static int dai_put_bits(struct snd_kcontrol *kcontrol,
 {
 	struct soc_mixer_control *mc =
 		(struct soc_mixer_control *)kcontrol->private_value;
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	int value = ucontrol->value.integer.value[0];
 	int reg = mc->reg, i = 0;
 	struct snd_soc_dai *dai;

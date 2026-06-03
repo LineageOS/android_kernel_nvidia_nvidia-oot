@@ -328,6 +328,8 @@ deinit:
 	vmap_deinit(&drv_ctx->vmap_h);
 	comm_channel_deinit(&drv_ctx->comm_channel_h);
 	pci_client_deinit(&drv_ctx->pci_client_h);
+	if (drv_ctx->chip_id == TEGRA264)
+		pci_free_irq_vectors(pdev);
 	free_outbound_area(pdev, &drv_ctx->peer_mem);
 	free_inbound_area(pdev, &drv_ctx->self_mem);
 
@@ -583,7 +585,8 @@ err_comm_init:
 	pci_client_deinit(&drv_ctx->pci_client_h);
 
 err_pci_client:
-	pci_free_irq_vectors(pdev);
+	if (drv_ctx->chip_id == TEGRA264)
+		pci_free_irq_vectors(pdev);
 err_alloc_irq:
 	free_outbound_area(pdev, &drv_ctx->peer_mem);
 

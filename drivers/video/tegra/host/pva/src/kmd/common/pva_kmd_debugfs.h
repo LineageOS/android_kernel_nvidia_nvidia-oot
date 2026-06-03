@@ -1,10 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
+/* SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
 
 #ifndef PVA_KMD_DEBUGFS_H
 #define PVA_KMD_DEBUGFS_H
 #include "pva_kmd.h"
-#include "pva_kmd_shim_debugfs.h"
 #include "pva_kmd_fw_profiler.h"
 
 /**
@@ -186,7 +185,7 @@ struct pva_kmd_debugfs_context {
  * through the debug interface, supporting development, debugging,
  * and performance analysis workflows.
  *
- * @param[in] dev  Pointer to @ref pva_kmd_device structure
+ * @param[in] pva  Pointer to @ref pva_kmd_device structure
  *                 Valid value: non-null, must be initialized
  *
  * @retval PVA_SUCCESS              Debug nodes created successfully
@@ -194,7 +193,7 @@ struct pva_kmd_debugfs_context {
  * @retval PVA_INVAL                Invalid parameters for debug node creation
  * @retval PVA_INTERNAL             Platform-specific debug creation failed
  */
-enum pva_error pva_kmd_debugfs_create_nodes(struct pva_kmd_device *dev);
+enum pva_error pva_kmd_debugfs_create_nodes(struct pva_kmd_device *pva);
 
 /**
  * @brief Destroy debug nodes and clean up resources
@@ -211,10 +210,10 @@ enum pva_error pva_kmd_debugfs_create_nodes(struct pva_kmd_device *dev);
  * This function should be called during device cleanup to ensure
  * proper removal of all debug interfaces and prevent resource leaks.
  *
- * @param[in] dev  Pointer to @ref pva_kmd_device structure
+ * @param[in] pva  Pointer to @ref pva_kmd_device structure
  *                 Valid value: non-null, must have been initialized with debug nodes
  */
-void pva_kmd_debugfs_destroy_nodes(struct pva_kmd_device *dev);
+void pva_kmd_debugfs_destroy_nodes(struct pva_kmd_device *pva);
 
 /**
  * @brief Copy data from buffer to user space with bounds checking

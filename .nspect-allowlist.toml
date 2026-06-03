@@ -123,3 +123,9 @@ paths = ['drivers/block/',
          'tools/']
 comment = 'Unused packages in Display Serdes'
 nspect_ids = ['NSPECT-86XH-KQRC']
+
+
+[[oss.excluded.directories]]
+paths = ['drivers/net/wireless/realtek/rtl8852ce', 'drivers/net/wireless/realtek/rtl8822ce']
+comment = 'unused packages'
+nspect_ids = ['NSPECT-LPH2-75O0']

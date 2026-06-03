@@ -27,6 +27,18 @@ HOST1X_EMU_EXPORT_DECL(void, host1x_writel(struct platform_device *pdev, u32 r, 
 /* public api to return platform_device ptr to the default host1x instance */
 HOST1X_EMU_EXPORT_DECL(struct platform_device*, nvhost_get_default_device(void));
 
+/* public host1x sync-point management APIs */
+HOST1X_EMU_EXPORT_DECL(struct host1x*, nvhost_get_host1x(struct platform_device *pdev));
+
+HOST1X_EMU_EXPORT_DECL(int, nvhost_syncpt_unit_interface_get_aperture(
+                struct platform_device *host_pdev,
+                phys_addr_t *base,
+                size_t *size));
+
+HOST1X_EMU_EXPORT_DECL(u32, nvhost_syncpt_unit_interface_get_byte_offset(u32 syncpt_id));
+
+#ifndef CONFIG_TEGRA_DRM_DISABLE_LEGACY_INTERFACE
+
 /* common runtime pm and power domain APIs */
 HOST1X_EMU_EXPORT_DECL(int, nvhost_module_init(struct platform_device *ndev));
 
@@ -84,17 +96,10 @@ HOST1X_EMU_EXPORT_DECL(int, nvhost_intr_register_notifier(struct platform_device
                   void (*callback)(void *),
                   void *private_data));
 
-/* public host1x sync-point management APIs */
-HOST1X_EMU_EXPORT_DECL(struct host1x*, nvhost_get_host1x(struct platform_device *pdev));
-
-HOST1X_EMU_EXPORT_DECL(int, nvhost_syncpt_unit_interface_get_aperture(
-                struct platform_device *host_pdev,
-                phys_addr_t *base,
-                size_t *size));
-
-HOST1X_EMU_EXPORT_DECL(u32, nvhost_syncpt_unit_interface_get_byte_offset(u32 syncpt_id));
 
 HOST1X_EMU_EXPORT_DECL(u32, nvhost_syncpt_unit_interface_get_byte_offset_ext(
                 struct platform_device *host_pdev,
                 u32 syncpt_id));
-#endif
+#endif  /* CONFIG_TEGRA_DRM_DISABLE_LEGACY_INTERFACE */
+
+#endif  /* __LINUX_NVHOST_H */

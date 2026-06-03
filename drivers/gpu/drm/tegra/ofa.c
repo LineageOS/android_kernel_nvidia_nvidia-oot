@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2021-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2021-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  */
 
 #include <linux/clk.h>
@@ -426,6 +426,12 @@ static __maybe_unused int ofa_runtime_resume(struct device *dev)
 	if (err < 0)
 		return err;
 
+	err = clk_set_rate(ofa->clk, ULONG_MAX);
+	if (err < 0) {
+		dev_err(dev, "failed to set clock rate: %d\n", err);
+		goto disable;
+	}
+
 	usleep_range(10, 20);
 
 	err = ofa_load_firmware(ofa);
@@ -436,7 +442,6 @@ static __maybe_unused int ofa_runtime_resume(struct device *dev)
 	if (err < 0)
 		goto disable;
 
-	ofa->devfreq->resume_freq = ofa->devfreq->scaling_max_freq;
 	err = devfreq_resume_device(ofa->devfreq);
 	if (err < 0)
 		goto disable;

@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: MIT */
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -96,5 +96,15 @@ int dce_os_cond_broadcast_interruptible(struct dce_os_cond *cond);
  * The waiters are using an interruptible wait.
  */
 void dce_os_cond_destroy(struct dce_os_cond *cond);
+
+/**
+ * dce_os_cond_reset - Reset a condition variable to unsignaled state
+ *
+ * @cond - The condition variable to reset
+ *
+ * Resets the condition variable's complete flag to 0, ensuring
+ * subsequent waits will block until properly signaled.
+ */
+void dce_os_cond_reset(struct dce_os_cond *cond);
 
 #endif /* DCE_OS_COND_H */

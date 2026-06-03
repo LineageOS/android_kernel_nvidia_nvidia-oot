@@ -49,6 +49,15 @@ struct nvmap_handle {
 	struct list_head lru;	/* list head to track the lru */
 	struct mutex lock;
 	struct list_head dmabuf_priv;
+
+	/*
+	 * Indicates if buffer is imported from Peer VM.
+	 * When the imported VM no longer needs (ref on handle reaches to zero)
+	 * the buffer, signal to decrement handle refcount would be sent to
+	 * exporter VM to relinquish the buffer.
+	 */
+	atomic_t imported_from_peer;
+
 	u64 ivm_id;
 	unsigned int peer;	/* Peer VM number */
 	int offs;		/* Offset in IVM mem pool */
@@ -316,9 +325,14 @@ struct nvmap_handle_ref *nvmap_create_handle_from_va(struct nvmap_client *client
 struct nvmap_handle_ref *nvmap_dup_handle_ro(struct nvmap_client *client,
 					int fd);
 
+struct nvmap_handle *nvmap_get_handle_from_ivm_id(u64 ivm_id);
+
 struct nvmap_handle_ref *nvmap_try_duplicate_by_ivmid(
 			struct nvmap_client *client, u64 ivm_id,
 			struct nvmap_heap_block **block);
+
+struct nvmap_handle_ref *nvmap_create_handle_from_ivm_id(struct nvmap_client *client,
+	u64 ivm_id, bool is_ro);
 
 struct nvmap_handle_ref *nvmap_create_handle_from_id(
 			struct nvmap_client *client, u32 id);
@@ -348,6 +362,7 @@ int nvmap_assign_pages_to_handle(struct nvmap_client *client,
 int nvmap_validate_sci_ipc_params(struct nvmap_client *client,
 			NvSciIpcEndpointAuthToken auth_token,
 			NvSciIpcEndpointVuid *pr_vuid,
+			NvSciIpcTopoId *pr_topoid,
 			NvSciIpcEndpointVuid *localusr_vuid);
 
 int nvmap_create_sci_ipc_id(struct nvmap_client *client,
@@ -355,13 +370,22 @@ int nvmap_create_sci_ipc_id(struct nvmap_client *client,
 				u32 flags,
 				u64 *sci_ipc_id,
 				NvSciIpcEndpointVuid pr_vuid,
+				NvSciIpcEndpointVuid localusr_vuid,
 				bool is_ro);
 
 int nvmap_get_handle_from_sci_ipc_id(struct nvmap_client *client,
 				u32 flags,
 				u64 sci_ipc_id,
+				NvSciIpcEndpointVuid peer_vuid,
 				NvSciIpcEndpointVuid localusr_vuid,
-				u32 *h);
+				u32 *h,
+				bool is_inter_vm);
+
+int nvmap_decrement_handle_refcount_by_ivm_id(u64 ivm_id, u64 vm_id);
+
+int nvmap_init_ivc_queue(struct device *dev);
+
+void nvmap_deinit_ivc_queue(void);
 
 struct nvmap_handle *nvmap_handle_get_from_fd(int fd);
 

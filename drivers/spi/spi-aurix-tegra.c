@@ -7,7 +7,6 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/spi/spi.h>
-//#include <soc/tegra/virt/tegra_hv_pm_ctl.h>
 #include <linux/sched/signal.h>
 
 #define AURIX			0x3

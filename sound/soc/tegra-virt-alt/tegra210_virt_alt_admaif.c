@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/*
- * Copyright (c) 2021-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- */
+// SPDX-FileCopyrightText: Copyright (c) 2021-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include <nvidia/conftest.h>
 
@@ -47,11 +45,23 @@ static int tegra210_admaif_hw_params(struct snd_pcm_substream *substream,
 	unsigned int audio_bits_shift;
 	unsigned int audio_ch_shift;
 	unsigned int client_ch_shift;
+	unsigned int max_channels, channels;
 	int err;
 
 	memset(&cif_conf, 0, sizeof(struct tegra210_virt_audio_cif));
-	cif_conf.audio_channels = params_channels(params);
-	cif_conf.client_channels = params_channels(params);
+
+	/* Validate channel count to prevent underflow and overflow */
+	max_channels = (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) ?
+		       dai->driver->playback.channels_max : dai->driver->capture.channels_max;
+	channels = params_channels(params);
+
+	if ((channels == 0) || (max_channels == 0) || (channels > max_channels)) {
+		dev_err(dev, "Invalid channel count: audio=%u, client=%u, max=%u\n",
+			cif_conf.audio_channels, channels, channels);
+		return -EINVAL;
+	}
+	cif_conf.audio_channels = channels;
+	cif_conf.client_channels = channels;
 
 	switch (params_format(params)) {
 	case SNDRV_PCM_FORMAT_S8:
@@ -200,9 +210,6 @@ static int tegra210_admaif_trigger(struct snd_pcm_substream *substream, int cmd,
 				 struct snd_soc_dai *dai)
 {
 	int err;
-	pr_info("Pcm trigger for admaif%d %s: cmd_id %d\n", dai->id+1,
-		(substream->stream == SNDRV_PCM_STREAM_PLAYBACK) ?
-		"playback":"capture", cmd);
 
 	err = snd_dmaengine_pcm_trigger(substream, cmd);
 	if (err)
@@ -734,6 +741,9 @@ static struct snd_soc_component_driver tegra210_admaif_dai_driver = {
 	.name		= "tegra210-virt-pcm",
 	.controls	= tegra_virt_t186ref_controls,
 	.num_controls	= ARRAY_SIZE(tegra_virt_t186ref_controls),
+#ifdef CONFIG_DEBUG_FS
+	.debugfs_prefix = "admaif",
+#endif
 };
 
 static struct snd_soc_component_driver tegra264_admaif_dai_driver = {
@@ -741,6 +751,9 @@ static struct snd_soc_component_driver tegra264_admaif_dai_driver = {
 	.name		= "tegra264-virt-pcm",
 	.controls	= tegra_virt_t186ref_controls,
 	.num_controls	= ARRAY_SIZE(tegra_virt_t186ref_controls),
+#ifdef CONFIG_DEBUG_FS
+	.debugfs_prefix = "admaif",
+#endif
 };
 
 int tegra210_virt_admaif_register_component(struct platform_device *pdev,
@@ -751,13 +764,13 @@ int tegra210_virt_admaif_register_component(struct platform_device *pdev,
 	int admaif_ch_num = 0;
 	unsigned int admaif_ch_list[MAX_ADMAIF_IDS] = {0};
 	struct tegra_virt_admaif_soc_data *soc_data = data;
-	int adma_count = 0;
+	uint8_t adma_count = 0;
 	unsigned int buffer_size;
 
 	admaif = devm_kzalloc(&pdev->dev, sizeof(*admaif), GFP_KERNEL);
 	if (admaif == NULL) {
 		ret = -ENOMEM;
-		goto err;
+		goto exit;
 	}
 
 	admaif->num_ch = soc_data->num_ch;
@@ -766,7 +779,7 @@ int tegra210_virt_admaif_register_component(struct platform_device *pdev,
 	if (!admaif->client_data.hivc_client) {
 		dev_err(&pdev->dev, "Failed to allocate IVC context\n");
 		ret = -ENODEV;
-		goto err;
+		goto exit;
 	}
 	svd_cntxt = admaif->client_data.hivc_client;
 
@@ -791,6 +804,12 @@ int tegra210_virt_admaif_register_component(struct platform_device *pdev,
 	if (of_property_read_u32(pdev->dev.of_node,
 				"admaif_ch_num", &admaif_ch_num)) {
 		dev_err(&pdev->dev, "number of admaif channels is not set\n");
+		ret = -ENOMEM;
+		goto err;
+	}
+
+	if (admaif_ch_num == 0) {
+		dev_err(&pdev->dev, "No ADMAIF channels enabled (admaif_ch_num is 0)\n");
 		return -EINVAL;
 	}
 
@@ -799,7 +818,8 @@ int tegra210_virt_admaif_register_component(struct platform_device *pdev,
 						admaif_ch_list,
 						admaif_ch_num)) {
 		dev_err(&pdev->dev, "admaif_ch_list is not populated\n");
-		return -EINVAL;
+		ret = -EINVAL;
+		goto err;
 	}
 
 
@@ -900,15 +920,15 @@ int tegra210_virt_admaif_register_component(struct platform_device *pdev,
 
 	if (of_device_is_compatible(pdev->dev.of_node,
 				"nvidia,tegra264-virt-pcm-oot")) {
-		ret = tegra_register_component(&pdev->dev,
+		ret = devm_snd_soc_register_component(&pdev->dev,
 					&tegra264_admaif_dai_driver,
 					tegra264_admaif_dais,
-					soc_data->num_ch, "admaif");
+					soc_data->num_ch);
 	} else {
-		ret = tegra_register_component(&pdev->dev,
+		ret = devm_snd_soc_register_component(&pdev->dev,
 					&tegra210_admaif_dai_driver,
 					tegra210_admaif_dais,
-					soc_data->num_ch, "admaif");
+					soc_data->num_ch);
 	}
 	if (ret) {
 		dev_err(&pdev->dev, "Could not register DAIs %d: %d\n",
@@ -919,21 +939,23 @@ int tegra210_virt_admaif_register_component(struct platform_device *pdev,
 	ret = tegra_alt_pcm_platform_register(&pdev->dev);
 	if (ret) {
 		dev_err(&pdev->dev, "Could not register PCM: %d\n", ret);
-		goto err_unregister_dais;
+		goto err;
 	}
 
 	return 0;
-err_unregister_dais:
-	snd_soc_unregister_component(&pdev->dev);
 err:
+	tegra210_virt_admaif_unregister_component(pdev);
+exit:
 	return ret;
 }
 EXPORT_SYMBOL_GPL(tegra210_virt_admaif_register_component);
 
 void tegra210_virt_admaif_unregister_component(struct platform_device *pdev)
 {
-	tegra_alt_pcm_platform_unregister(&pdev->dev);
-	snd_soc_unregister_component(&pdev->dev);
+	if (admaif->client_data.hivc_client) {
+		nvaudio_ivc_free_ctxt(&pdev->dev);
+		admaif->client_data.hivc_client = NULL;
+	}
 }
 EXPORT_SYMBOL_GPL(tegra210_virt_admaif_unregister_component);
 

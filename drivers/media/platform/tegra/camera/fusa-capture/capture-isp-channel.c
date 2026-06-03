@@ -1,5 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2017-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2017-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+/*
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms and conditions of the GNU General Public License,
+ * version 2, as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ */
 
 /**
  * @file drivers/media/platform/tegra/camera/fusa-capture/capture-isp-channel.c
@@ -23,6 +33,7 @@
 #include <linux/uaccess.h>
 #include <media/fusa-capture/capture-isp.h>
 #include <media/fusa-capture/capture-isp-channel.h>
+#include <media/fusa-capture/capture-logging.h>
 
 /**
  * @brief ISP channel character device driver context.
@@ -35,7 +46,7 @@ struct isp_channel_drv {
 	struct mutex lock; /**< ISP channel driver context lock. */
 	struct platform_device *ndev; /**< ISP kernel @em platform_device */
 	const struct isp_channel_drv_ops *ops;
-		/**< ISP fops for Host1x syncpt/gos allocations */
+		/**< ISP fops for Host1x syncpt allocations */
 	struct tegra_isp_channel *channels[];
 		/**< Allocated ISP channel contexts */
 };
@@ -339,7 +350,8 @@ static int isp_channel_release(
 	mutex_lock(&chan_drv->lock);
 
 	if (chan_drv->channels[channel] != chan)
-		dev_warn(chan_drv->dev, "%s: dev does not match!\n", __func__);
+		capture_dev_warn_pl(chan_drv->dev, chan->pipeline_id,
+			"%s: dev does not match!\n", __func__);
 
 	chan_drv->channels[channel] = NULL;
 
@@ -464,16 +476,19 @@ static long isp_channel_ioctl(
 		if (copy_from_user(&setup, ptr, sizeof(setup)))
 			break;
 
+		/* Store pipeline ID in channel */
+		chan->pipeline_id = setup.pipeline_id;
+
 		isp_get_nvhost_device(chan, &setup);
 		if (chan->isp_dev == NULL) {
-			dev_err(&chan->isp_capture_pdev->dev,
+			capture_dev_err_pl(&chan->isp_capture_pdev->dev, chan->pipeline_id,
 				"%s: channel device is NULL",
 				__func__);
 			return -EINVAL;
 		}
 		err = isp_capture_setup(chan, &setup);
 		if (err)
-			dev_err(chan->isp_dev, "isp capture setup failed\n");
+			isp_chan_err(chan, "isp capture setup failed\n");
 		break;
 	}
 
@@ -484,7 +499,7 @@ static long isp_channel_ioctl(
 			break;
 		err = isp_capture_reset(chan, rst);
 		if (err)
-			dev_err(chan->isp_dev, "isp capture reset failed\n");
+			isp_chan_err(chan, "isp capture reset failed\n");
 		break;
 	}
 
@@ -495,7 +510,7 @@ static long isp_channel_ioctl(
 			break;
 		err = isp_capture_release(chan, rel);
 		if (err)
-			dev_err(chan->isp_dev, "isp capture release failed\n");
+			isp_chan_err(chan, "isp capture release failed\n");
 		break;
 	}
 
@@ -689,7 +704,7 @@ int isp_channel_drv_register(
 
 	mutex_lock(&chdrv_lock);
 	if (chdrv_ != NULL) {
-		dev_warn(chan_drv->dev, "%s: dev is busy\n", __func__);
+		pr_err("%s: dev is busy\n", __func__);
 		mutex_unlock(&chdrv_lock);
 		err = -EBUSY;
 		goto error;

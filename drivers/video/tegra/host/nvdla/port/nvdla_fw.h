@@ -118,6 +118,19 @@ int32_t nvdla_fw_interrupt_stat_read(struct platform_device *pdev,
 	int32_t *stat);
 
 /**
+ * @brief Reads the mnod interrupt stat registers.
+ *
+ * @param[in] pdev Platform device
+ * @param[out] stat Pointer where the fetched stat data is stored.
+ *
+ * @return
+ * - zero, if successfully read the interrupt stat.
+ * - non-zero, otherwise
+ **/
+int32_t nvdla_fw_interrupt_stat_read_mnoc(struct platform_device *pdev,
+	int32_t *stat);
+
+/**
  * @brief Clears the interrupt stat registers.
  *
  * @param[in] pdev Platform device
@@ -127,6 +140,17 @@ int32_t nvdla_fw_interrupt_stat_read(struct platform_device *pdev,
  * - non-zero, otherwise
  **/
 int32_t nvdla_fw_interrupt_stat_clear(struct platform_device *pdev);
+
+/**
+ * @brief Clears the mnoc interrupt stat registers.
+ *
+ * @param[in] pdev Platform device
+ *
+ * @return
+ * - zero, if successfully cleared the interrupt stat.
+ * - non-zero, otherwise
+ **/
+int32_t nvdla_fw_interrupt_stat_clear_mnoc(struct platform_device *pdev);
 
 /**
  * @brief Injects corrected error
@@ -149,5 +173,31 @@ int32_t nvdla_fw_inject_corrected_error(struct platform_device *pdev);
  * - non-zero, otherwise
  **/
 int32_t nvdla_fw_inject_uncorrected_error(struct platform_device *pdev);
+
+/**
+ * @brief Updates the SWGEN debugfs stats.
+ *
+ * @param[in] pdev Platform device
+ * @param[in] error_status Error status from the SWGEN response
+ *
+ * @return
+ * - zero, if successfully updated the SWGEN Response stats.
+ * - non-zero, otherwise
+ **/
+int32_t nvdla_fw_update_response_stats(struct platform_device *pdev,
+	uint32_t error_status);
+
+/**
+ * @brief Updates the MNOC debugfs stats.
+ *
+ * @param[in] pdev Platform device
+ * @param[in] error_status Error status from the MNOC response
+ *
+ * @return
+ * - zero, if successfully updated the MNOC Response stats.
+ * - non-zero, otherwise
+ **/
+int32_t nvdla_fw_update_response_stats_mnoc(struct platform_device *pdev,
+	uint32_t error_status);
 
 #endif /*__NVDLA_FW_H__ */

@@ -15,7 +15,7 @@
 #ifndef _HALBB_RA_H_
 #define _HALBB_RA_H_
 
-const static u16 bb_phy_rate_table_he_eht[SU_EHT_MCS_NUM] = {
+static const u16 bb_phy_rate_table_he_eht[SU_EHT_MCS_NUM] = {
 	/*HE/EHT-1ss 0.8GI U(16,2)*/
 	34, 69, 103, 138, 206, 275, 310, 344, 413, 459, 516, 574, 619, 688
 };

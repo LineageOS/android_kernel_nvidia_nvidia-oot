@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Copyright (c) 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2022-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  */
 
 #ifndef __TEGRA_IVC_EXT_H
@@ -10,24 +10,6 @@
 
 #include <linux/types.h>
 #include <soc/tegra/ivc-priv.h>
-
-/**
- * tegra_ivc_channel_notified - notifies the peer device
- * @ivc		pointer of the IVC channel
- *
- * notifies the peer device
- *
- * Returns 0 if success else -EAGAIN in case of failure.
- */
-int tegra_ivc_channel_notified(struct tegra_ivc *ivc);
-
-/**
- * tegra_ivc_channel_reset - Resets the channel state
- * @ivc		pointer of the IVC channel
- *
- * Resets the channel state
- */
-void tegra_ivc_channel_reset(struct tegra_ivc *ivc);
 
 #if defined(NV_TEGRA_IVC_STRUCT_HAS_IOSYS_MAP)
 /**

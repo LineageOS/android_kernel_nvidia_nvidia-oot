@@ -196,7 +196,7 @@ static int tegra_key_move_to_kds(struct tegra_se *se, u32 slot, u32 kds_id)
 	int ret;
 
 	src_keyid = SE_KSLT_REGION_ID_SYM | slot;
-	size = tegra_key_prep_mov_cmd(se, se->cmdbuf->addr, src_keyid, kds_id);
+	size = tegra_key_prep_mov_cmd(se, se->keybuf->addr, src_keyid, kds_id);
 
 	ret = tegra_se_host1x_submit(se, se->keybuf, size);
 	if (ret)
@@ -224,7 +224,7 @@ static void tegra_key_kds_invalidate(struct tegra_se *se, u32 keyid)
 {
 	unsigned int size;
 
-	size = tegra_key_prep_invld_cmd(se, se->cmdbuf->addr, keyid);
+	size = tegra_key_prep_invld_cmd(se, se->keybuf->addr, keyid);
 	tegra_se_host1x_submit(se, se->keybuf, size);
 	tegra_kds_free_id(keyid);
 }

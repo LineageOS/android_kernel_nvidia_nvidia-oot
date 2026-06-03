@@ -268,7 +268,7 @@ struct regd_exc_ent {
 	_list list;
 	char country[2];
 	u8 domain;
-	char lmt_name[0];
+	char lmt_name[];
 };
 
 void dump_regd_exc_list(void *sel, struct rf_ctl_t *rfctl);

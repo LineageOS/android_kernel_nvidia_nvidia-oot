@@ -129,6 +129,7 @@ void tegra_ivc_channel_runtime_put(struct tegra_ivc_channel *chan);
 
 struct tegra_ivc_channel_ops {
 	int (*probe)(struct tegra_ivc_channel *);
+	int (*late_init)(struct tegra_ivc_channel *);
 	void (*ready)(struct tegra_ivc_channel *, bool online);
 	void (*remove)(struct tegra_ivc_channel *);
 	void (*notify)(struct tegra_ivc_channel *);

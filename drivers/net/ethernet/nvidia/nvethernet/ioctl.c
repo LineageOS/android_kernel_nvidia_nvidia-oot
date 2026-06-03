@@ -575,19 +575,38 @@ static int ether_config_l2_filters(struct net_device *dev,
 	if (ifdata->ptr == NULL) {
 		dev_err(pdata->dev, "%s: Invalid data for priv ioctl %d\n",
 			__func__, ifdata->ifcmd);
-		return ret;
+		goto err;
 	}
 
 	if (osi_core->pre_sil != OSI_ENABLE) {
 		if (osi_core->use_virtualization == OSI_DISABLE) {
 			dev_err(pdata->dev, "%s Ethernet virualization is not enabled\n", __func__);
-			return ret;
+			goto err;
 		}
 	}
 	if (copy_from_user(&u_l2_filter, (void __user *)ifdata->ptr,
 			   sizeof(struct ether_l2_filter)) != 0U) {
 		dev_err(pdata->dev, "%s copy from user failed\n", __func__);
-		return ret;
+		goto err;
+	}
+
+	/* validate and populate pkt_dup, DMA chan for Thor MGBE only */
+	if (osi_core->mac == OSI_MAC_HW_MGBE_T26X) {
+		if (u_l2_filter.pkt_dup > OSI_ENABLE) {
+			dev_err(pdata->dev, "Invalid pkt_dup value (%d), valid values are 0 or 1\n",
+				u_l2_filter.pkt_dup);
+			goto err;
+		}
+
+		if (u_l2_filter.dma_chan >= OSI_MGBE_MAX_NUM_CHANS) {
+			dev_err(pdata->dev, "Invalid DMA channel number (%d), valid values are 0 to %d\n",
+				u_l2_filter.dma_chan, (OSI_MGBE_MAX_NUM_CHANS - 1U));
+			goto err;
+		}
+		l2_filter->dma_chan = u_l2_filter.dma_chan;
+		l2_filter->pkt_dup = u_l2_filter.pkt_dup;
+	} else {
+		l2_filter->dma_chan = osi_dma->dma_chans[0];
 	}
 
 	l2_filter->index = u_l2_filter.index;
@@ -606,15 +625,11 @@ static int ether_config_l2_filters(struct net_device *dev,
 	memcpy(l2_filter->mac_addr, u_l2_filter.mac_addr, ETH_ALEN);
 	l2_filter->dma_routing = OSI_ENABLE;
 	l2_filter->addr_mask = OSI_DISABLE;
-	l2_filter->pkt_dup = u_l2_filter.pkt_dup;
-	if (l2_filter->pkt_dup) {
-		l2_filter->dma_chan = u_l2_filter.dma_chan;
-	} else {
-		l2_filter->dma_chan = osi_dma->dma_chans[0];
-	}
 	l2_filter->dma_chansel = OSI_BIT_64(l2_filter->dma_chan);
 	ioctl_data.cmd = OSI_CMD_L2_FILTER;
-	return osi_handle_ioctl(osi_core, &ioctl_data);
+	ret = osi_handle_ioctl(osi_core, &ioctl_data);
+err:
+	return ret;
 }
 
 #ifndef OSI_STRIPPED_LIB
@@ -1177,7 +1192,6 @@ int ether_handle_priv_ioctl(struct net_device *ndev,
 		break;
 	case ETHER_GET_AVB_PERF:
 		ivc_buf->cmd = nvethmgr_get_avb_perf;
-		ivc_buf->args.arguments[0] = ifdata.mac_id;
 		ivc_buf->args.arguments[1] = ifdata.qinx;
 		ret = osd_ivc_send_cmd(pdata->osi_core, ivc_buf, sizeof(*ivc_buf));
 		if (ret < 0) {
@@ -1187,8 +1201,6 @@ int ether_handle_priv_ioctl(struct net_device *ndev,
 		break;
 	case ETHER_VERIFY_TS:
 		ivc_buf->cmd = nvethmgr_verify_ts;
-		ivc_buf->args.arguments[0] = ifdata.mac_id;
-		ivc_buf->args.arguments[1] = ifdata.qinx;
 		ret = osd_ivc_send_cmd(pdata->osi_core, ivc_buf, sizeof(*ivc_buf));
 		if (ret != 0) {
 			dev_err(pdata->dev, "Failed to verify timestamp\n");
@@ -1197,7 +1209,6 @@ int ether_handle_priv_ioctl(struct net_device *ndev,
 		break;
 	case ETHER_GET_STATUS:
 		ivc_buf->cmd = nvethmgr_get_status;
-		ivc_buf->args.arguments[0] = ifdata.mac_id;
 		ret = osd_ivc_send_cmd(pdata->osi_core, ivc_buf, sizeof(*ivc_buf));
 		if (ret != 0) {
 			dev_err(pdata->dev, "Failed to get status for registers\n");
@@ -1290,8 +1301,10 @@ int ether_handle_priv_ioctl(struct net_device *ndev,
 		if (ret < 0)
 			goto err;
 
+#ifndef OSI_STRIPPED_LIB
 		ioctl_data.cmd = OSI_CMD_STRUCTS_DUMP;
 		ret = osi_handle_ioctl(osi_core, &ioctl_data);
+#endif /* !OSI_STRIPPED_LIB */
 		break;
 	case ETHER_DEBUG_INTR_CONFIG:
 		ret = ether_debug_intr_config(ndev, &ifdata);

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2022-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2022-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 /*
  * RTC driver for Maxim MAX77851
  */
@@ -137,12 +137,19 @@ enum max77851_rtc_reg_offset {
 	REG_RTC_END,
 };
 
+enum max77851_rtc_irqs {
+	MAX77851_RTC60S_I = 0,
+	MAX77851_RTCA1_I,
+	MAX77851_RTCA2_I,
+	MAX77851_RTC1S_I,
+};
+
 static const struct regmap_irq max77851_rtc_irqs[] = {
 	/* RTC interrupts */
-	REGMAP_IRQ_REG(0, 0, RTC_MSK_RTC60S_M),
-	REGMAP_IRQ_REG(1, 0, RTC_MSK_RTCA1_M),
-	REGMAP_IRQ_REG(2, 0, RTC_MSK_RTCA2_M),
-	REGMAP_IRQ_REG(3, 0, RTC_MSK_RTC1S_M),
+	REGMAP_IRQ_REG(MAX77851_RTC60S_I, 0, RTC_MSK_RTC60S_M),
+	REGMAP_IRQ_REG(MAX77851_RTCA1_I, 0, RTC_MSK_RTCA1_M),
+	REGMAP_IRQ_REG(MAX77851_RTCA2_I, 0, RTC_MSK_RTCA2_M),
+	REGMAP_IRQ_REG(MAX77851_RTC1S_I, 0, RTC_MSK_RTC1S_M),
 };
 
 /* Maps RTC registers offset to the MAX77851 register addresses */
@@ -246,8 +253,9 @@ static void max77851_rtc_data_to_tm(u8 *data, struct rtc_time *tm,
 	tm->tm_yday = 0;
 	tm->tm_isdst = 0;
 
-	if (!info->drv_data->alarm_enable_reg)
-		tm->tm_year += 100;
+	/* RTC_YEAR register range is 0..199 representing years 2000-2199 */
+	/* Convert to Linux tm_year format (years since 1900) */
+	tm->tm_year += 100;
 }
 
 static int max77851_rtc_tm_to_data(struct rtc_time *tm, u8 *data,
@@ -260,15 +268,12 @@ static int max77851_rtc_tm_to_data(struct rtc_time *tm, u8 *data,
 	data[RTC_DATE] = tm->tm_mday;
 	data[RTC_MONTH] = tm->tm_mon + 1;
 
-	if (info->drv_data->alarm_enable_reg) {
-		data[RTC_YEAR] = tm->tm_year;
-		return 0;
-	}
-
-	data[RTC_YEAR] = tm->tm_year > 100 ? (tm->tm_year - 100) : 0;
-
-	if (tm->tm_year < 100) {
-		dev_err(info->dev, "RTC cannot handle the year %d.\n",
+	/* RTC_YEAR register range is 0..199 representing years 2000-2199 */
+	/* Convert from Linux tm_year format (years since 1900) to RTC format */
+	if (tm->tm_year >= 100 && tm->tm_year <= 299) {
+		data[RTC_YEAR] = tm->tm_year - 100;
+	} else {
+		dev_err(info->dev, "RTC cannot handle the year %d (must be 2000-2199).\n",
 			1900 + tm->tm_year);
 		return -EINVAL;
 	}
@@ -322,9 +327,6 @@ static int max77851_rtc_read_time(struct device *dev, struct rtc_time *tm)
 	}
 
 	max77851_rtc_data_to_tm(data, tm, info);
-
-	ret = rtc_valid_tm(tm);
-
 out:
 	mutex_unlock(&info->lock);
 	return ret;
@@ -633,6 +635,13 @@ static int max77851_rtc_init_reg(struct max77851_rtc_info *info)
 		return ret;
 	}
 
+	ret = regmap_update_bits(info->rtc_regmap, info->drv_data->map[REG_RTC_CONFIG],
+				 RTC_CFG1_RTCWAKE, RTC_CFG1_RTCWAKE);
+	if (ret < 0) {
+		dev_err(info->dev, "RTC WAKE set failed: %d\n", ret);
+		return ret;
+	}
+
 	ret = max77851_rtc_update(info, MAX77851_RTC_WRITE);
 	ret = max77851_rtc_update(info, MAX77851_RTC_READ);
 
@@ -696,6 +705,16 @@ static int max77851_init_rtc_regmap(struct max77851_rtc_info *info)
 #endif
 
 init_rtc_exit:
+#if defined(CONFIG_REGMAP_IRQ)
+	ret = regmap_add_irq_chip(info->rtc_regmap, info->rtc_irq,
+				  IRQF_ONESHOT | IRQF_SHARED,
+				  0, info->drv_data->rtc_irq_chip,
+				  &info->rtc_irq_data);
+	if (ret < 0) {
+		dev_err(info->dev, "Failed to add RTC irq chip: %d\n", ret);
+		return ret;
+	}
+#endif
 	return 0;
 
 #if defined(CONFIG_I2C)
@@ -768,7 +787,7 @@ static int max77851_rtc_probe(struct platform_device *pdev)
 		goto err_rtc;
 	}
 #if defined(CONFIG_REGMAP_IRQ)
-	info->rtc_alarm1_virq = regmap_irq_get_virq(chip->top_irq_data, MAX77851_IRQ_TOP_RTC);
+	info->rtc_alarm1_virq = regmap_irq_get_virq(info->rtc_irq_data, MAX77851_RTCA1_I);
 	if (info->rtc_alarm1_virq <= 0) {
 		ret = -ENXIO;
 		goto err_rtc;
@@ -842,14 +861,12 @@ static int max77851_rtc_remove(struct platform_device *pdev)
 #ifdef CONFIG_PM_SLEEP
 static int max77851_rtc_suspend(struct device *dev)
 {
+#if defined(CONFIG_REGMAP_IRQ)
 	struct max77851_rtc_info *info = dev_get_drvdata(dev);
 
-#if defined(CONFIG_REGMAP_IRQ)
 	if (device_may_wakeup(dev))
 		return enable_irq_wake(info->rtc_alarm1_virq);
 #endif
-
-	regcache_sync(info->rtc_regmap);
 
 	return 0;
 }

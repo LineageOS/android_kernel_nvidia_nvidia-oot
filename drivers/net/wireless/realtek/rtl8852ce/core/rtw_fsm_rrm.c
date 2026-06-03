@@ -3846,7 +3846,7 @@ static int rrm_idle_st_hdl(void *obj, u16 event, void *param)
 		rtw_fsm_st_goto(prm, RRM_ST_DO_MEAS);
 		break;
 	case FSM_EV_ABORT:
-	case FSM_EV_DISCONNECTED:
+	case FSM_EV_DISCONNECT_START:
 		rtw_fsm_st_goto(prm, RRM_ST_END);
 		break;
 	case FSM_EV_STATE_OUT:
@@ -3988,7 +3988,7 @@ static int rrm_do_meas_st_hdl(void *obj, u16 event, void *param)
 		rtw_fsm_st_goto(prm, RRM_ST_END);
 		break;
 	case FSM_EV_ABORT:
-	case FSM_EV_DISCONNECTED:
+	case FSM_EV_DISCONNECT_START:
 		rm_set_rep_mode(prm, MEAS_REP_MOD_REFUSE);
 		rtw_fsm_st_goto(prm, RRM_ST_END);
 		break;
@@ -4026,7 +4026,7 @@ static int rrm_wait_meas_st_hdl(void *obj, u16 event, void *param)
 		FSM_INFO(prm, "request timeout\n");
 		fallthrough;
 	case FSM_EV_ABORT:
-	case FSM_EV_DISCONNECTED:
+	case FSM_EV_DISCONNECT_START:
 		rtw_fsm_st_goto(prm, RRM_ST_END);
 		break;
 	case FSM_EV_STATE_OUT:
@@ -4096,7 +4096,7 @@ static int rrm_send_report_st_hdl(void *obj, u16 event, void *param)
 		rtw_fsm_st_goto(prm, RRM_ST_DO_MEAS);
 		break;
 	case FSM_EV_ABORT:
-	case FSM_EV_DISCONNECTED:
+	case FSM_EV_DISCONNECT_START:
 		rtw_fsm_st_goto(prm, RRM_ST_END);
 		break;
 	case FSM_EV_STATE_OUT:
@@ -4151,7 +4151,7 @@ static int rrm_recv_report_st_hdl(void *obj, u16 event, void *param)
 		rtw_fsm_st_goto(prm, RRM_ST_END);
 		break;
 	case FSM_EV_ABORT:
-	case FSM_EV_DISCONNECTED:
+	case FSM_EV_DISCONNECT_START:
 		rtw_fsm_st_goto(prm, RRM_ST_END);
 		break;
 	case FSM_EV_STATE_OUT:

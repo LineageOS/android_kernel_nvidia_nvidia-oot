@@ -4,6 +4,7 @@
 #include "pva_kmd_device.h"
 #include "pva_kmd_context.h"
 #include "pva_kmd_constants.h"
+#include "pva_utils.h"
 
 static uint32_t get_max_dma_config_size(struct pva_kmd_device *pva)
 {
@@ -225,6 +226,7 @@ pva_kmd_release_resource(struct pva_kmd_resource_table *resource_table,
 	default:
 		FAULT("Unsupported resource type");
 		/* NOTREACHED */
+		break;
 	}
 
 	pva_kmd_free_resource_id(resource_table, resource_id);
@@ -313,6 +315,7 @@ void pva_kmd_update_fw_resource_table(struct pva_kmd_resource_table *res_table)
 			pva_kmd_log_err("Unsupported resource type");
 			pva_kmd_fault();
 			/* NOTREACHED */
+			break;
 		}
 	}
 }
@@ -482,6 +485,7 @@ pva_kmd_make_resource_entry(struct pva_kmd_resource_table *resource_table,
 		pva_kmd_log_err("Unsupported resource type");
 		pva_kmd_fault();
 		/* NOTREACHED */
+		break;
 	}
 
 	pva_kmd_drop_resource(resource_table, resource_id);
@@ -509,7 +513,8 @@ enum pva_error pva_kmd_add_dma_config_resource(
 	}
 	fw_dma_cfg = pva_kmd_get_devmem_va(&dma_cfg_mem);
 
-	ASSERT(((uintptr_t)(void *)fw_dma_cfg) % sizeof(uint64_t) == 0UL);
+	/* MISRA 11.6: Use union-based helper for pointer-integer conversion */
+	ASSERT((pva_ptr_to_uintptr(fw_dma_cfg) % sizeof(uint64_t)) == 0UL);
 
 	dma_aux = pva_kmd_zalloc(sizeof(struct pva_kmd_dma_resource_aux));
 	if (dma_aux == NULL) {

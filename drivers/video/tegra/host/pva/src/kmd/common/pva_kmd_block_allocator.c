@@ -3,6 +3,7 @@
 #include "pva_kmd_block_allocator.h"
 #include "pva_kmd_utils.h"
 #include "pva_api.h"
+#include "pva_utils.h"
 
 #define INVALID_ID 0xFFFFFFFFU
 enum pva_error
@@ -48,11 +49,12 @@ void pva_kmd_block_allocator_deinit(struct pva_kmd_block_allocator *allocator)
 static inline void *get_block(struct pva_kmd_block_allocator *allocator,
 			      uint32_t slot)
 {
-	uintptr_t base = (uintptr_t)(void *)allocator->blocks;
+	/* MISRA 11.6: Use union-based helpers for pointer-integer conversions */
+	uintptr_t base = pva_ptr_to_uintptr(allocator->blocks);
 	uint64_t offset =
 		safe_mulu64((uint64_t)slot, (uint64_t)allocator->block_size);
 	uint64_t addr = safe_addu64((uint64_t)base, offset);
-	return (void *)(uintptr_t)addr;
+	return pva_uintptr_to_ptr((uintptr_t)addr);
 }
 
 static inline uint32_t next_slot(struct pva_kmd_block_allocator *allocator,

@@ -66,14 +66,16 @@ shutdown_callback_func_t s_ext_fw_shutdown_cb;
 
 /*
  * Array of structs to register client callback function
- * for every sw unit/module within tsec
+ * for every sw unit/module within tsec. It includes one
+ * additional entry for command that is force sent to tsec.
  */
 struct callback_t {
 	callback_func_t cb_func;
 	void            *cb_ctx;
 	u8              cmd_type;
+	u8              unit_id;
 };
-static struct callback_t s_callbacks[RM_GSP_UNIT_END];
+static struct callback_t s_callbacks[RM_GSP_UNIT_END + 1];
 
 static int validate_cmd(struct RM_FLCN_QUEUE_HDR *cmd_hdr)
 {
@@ -346,6 +348,7 @@ static void invoke_init_cb(void *unused)
 	cb_ctx  = s_callbacks[RM_GSP_UNIT_INIT].cb_ctx;
 	s_callbacks[RM_GSP_UNIT_INIT].cb_func = NULL;
 	s_callbacks[RM_GSP_UNIT_INIT].cb_ctx  = NULL;
+	s_callbacks[RM_GSP_UNIT_INIT].unit_id = RM_GSP_UNIT_INVALID;
 	tsec_plat_release_comms_mutex();
 
 	if (cb_func)
@@ -359,6 +362,7 @@ void tsec_comms_drain_msg(bool invoke_cb)
 	u32 head = 0;
 	u32 msgq_head_reg;
 	u32 msgq_tail_reg;
+	u8 unit_id;
 	static u32 sMsgq_start;
 	struct RM_FLCN_QUEUE_HDR *msg_hdr;
 	struct RM_GSP_INIT_MSG_GSP_INIT *init_msg_body;
@@ -455,6 +459,7 @@ void tsec_comms_drain_msg(bool invoke_cb)
 				cb_ctx  = s_callbacks[msg_hdr->unitId].cb_ctx;
 				s_callbacks[msg_hdr->unitId].cb_func = NULL;
 				s_callbacks[msg_hdr->unitId].cb_ctx = NULL;
+				s_callbacks[msg_hdr->unitId].unit_id = RM_GSP_UNIT_INVALID;
 			}
 			tsec_plat_release_comms_mutex();
 			if (cb_func && invoke_cb)
@@ -488,10 +493,16 @@ void tsec_comms_drain_msg(bool invoke_cb)
 			/* Invoke the callback and clear it */
 			if (invoke_cb) {
 				tsec_plat_acquire_comms_mutex();
-				cb_func = s_callbacks[msg_hdr->unitId].cb_func;
-				cb_ctx  = s_callbacks[msg_hdr->unitId].cb_ctx;
-				s_callbacks[msg_hdr->unitId].cb_func = NULL;
-				s_callbacks[msg_hdr->unitId].cb_ctx = NULL;
+				if (s_callbacks[msg_hdr->unitId].cb_func ||
+					s_callbacks[RM_GSP_UNIT_FORCE_SEND_CMD].unit_id == msg_hdr->unitId) {
+					unit_id = s_callbacks[msg_hdr->unitId].cb_func ?
+						msg_hdr->unitId : RM_GSP_UNIT_FORCE_SEND_CMD;
+					cb_func = s_callbacks[unit_id].cb_func;
+					cb_ctx = s_callbacks[unit_id].cb_ctx;
+					s_callbacks[unit_id].cb_func = NULL;
+					s_callbacks[unit_id].cb_ctx = NULL;
+					s_callbacks[unit_id].unit_id = RM_GSP_UNIT_INVALID;
+				}
 				tsec_plat_release_comms_mutex();
 				/* shutdown must be done first and then invoke the cb */
 				if (cb_func && !shutdown_tsec)
@@ -639,6 +650,7 @@ int tsec_comms_send_cmd(void *cmd, u32 queue_id,
 	u32 cmd_size_aligned;
 	u32 cmdq_head_reg;
 	u32 cmdq_tail_reg;
+	u8 unit_id;
 	static u32 sCmdq_size = 0x80;
 	static u32 sCmdq_start;
 	struct RM_FLCN_QUEUE_HDR *cmd_hdr;
@@ -688,10 +700,18 @@ int tsec_comms_send_cmd(void *cmd, u32 queue_id,
 	cmd_hdr = (struct RM_FLCN_QUEUE_HDR *)cmd;
 	tsec_plat_acquire_comms_mutex();
 	if (s_callbacks[cmd_hdr->unitId].cb_func) {
+		if (s_callbacks[RM_GSP_UNIT_FORCE_SEND_CMD].cb_func) {
+			plat_print(LVL_ERR, "Force send cmd already pending, cannot send another one\n");
+			tsec_plat_release_comms_mutex();
+			return -TSEC_EINVAL;
+		}
 		plat_print(LVL_DBG, "Force sending to Unit:0x%x Cmd:0x%x, \
 			PendingCmd:0x%x",
 			cmd_hdr->unitId, cmd_type,
 			s_callbacks[cmd_hdr->unitId].cmd_type);
+		unit_id = RM_GSP_UNIT_FORCE_SEND_CMD;
+	} else {
+		unit_id = cmd_hdr->unitId;
 	}
 	tsec_plat_release_comms_mutex();
 	cmd_size = cmd_hdr->size;
@@ -743,14 +763,16 @@ rewind:
 
 enqueue:
 	tsec_plat_acquire_comms_mutex();
-	s_callbacks[cmd_hdr->unitId].cb_func  = cb_func;
-	s_callbacks[cmd_hdr->unitId].cb_ctx   = cb_ctx;
-	s_callbacks[cmd_hdr->unitId].cmd_type = cmd_type;
+	s_callbacks[unit_id].cb_func  = cb_func;
+	s_callbacks[unit_id].cb_ctx   = cb_ctx;
+	s_callbacks[unit_id].cmd_type = cmd_type;
+	s_callbacks[unit_id].unit_id = cmd_hdr->unitId;
 	tsec_plat_release_comms_mutex();
 	if (ipc_write(head, (u8 *)cmd, cmd_size)) {
 		tsec_plat_acquire_comms_mutex();
-		s_callbacks[cmd_hdr->unitId].cb_func = NULL;
-		s_callbacks[cmd_hdr->unitId].cb_ctx  = NULL;
+		s_callbacks[unit_id].cb_func = NULL;
+		s_callbacks[unit_id].cb_ctx  = NULL;
+		s_callbacks[unit_id].unit_id = RM_GSP_UNIT_INVALID;
 		tsec_plat_release_comms_mutex();
 		return -TSEC_EINVAL;
 	}
@@ -784,6 +806,7 @@ int tsec_comms_set_init_cb(callback_func_t cb_func, void *cb_ctx)
 
 	s_callbacks[RM_GSP_UNIT_INIT].cb_func = cb_func;
 	s_callbacks[RM_GSP_UNIT_INIT].cb_ctx = cb_ctx;
+	s_callbacks[RM_GSP_UNIT_INIT].unit_id = RM_GSP_UNIT_INIT;
 
 	if (s_init_msg_rcvd) {
 		plat_print(LVL_DBG, "Init msg already received invoking callback\n");
@@ -812,6 +835,7 @@ void tsec_comms_clear_init_cb(void)
 	tsec_plat_acquire_comms_mutex();
 	s_callbacks[RM_GSP_UNIT_INIT].cb_func = NULL;
 	s_callbacks[RM_GSP_UNIT_INIT].cb_ctx  = NULL;
+	s_callbacks[RM_GSP_UNIT_INIT].unit_id = RM_GSP_UNIT_INVALID;
 	tsec_plat_release_comms_mutex();
 }
 EXPORT_SYMBOL_COMMS(tsec_comms_clear_init_cb);

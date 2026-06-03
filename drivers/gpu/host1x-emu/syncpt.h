@@ -23,12 +23,16 @@
 struct host1x;
 
 struct host1x_syncpt_pool {
-    const char *name;
-    unsigned int sp_base;
-    unsigned int sp_end;
-    struct host1x *host;
-    struct delayed_work pool_work;
-    struct host1x_syncpt_list syncpt_list;
+	const char *name;
+	unsigned int sp_base;
+	unsigned int sp_end;
+#ifdef HOST1X_EMU_KTHREAD_FENCE_SCAN
+	unsigned long *sync_bmap;
+#endif
+	atomic_t polling_active;
+	struct host1x *host;
+	struct delayed_work pool_work;
+	struct host1x_syncpt_list syncpt_list;
 };
 
 struct host1x_syncpt {

@@ -4352,10 +4352,10 @@ int phy_load_tx_power_limit(_adapter *adapter, u8 chk_file)
 #ifdef CONFIG_HEXFILE_POWER_LIMIT
 	if (!rtw_config_tx_powerlimit_from_hex(adapter, RTW_HEXFILE_NAME)) {
 		RTW_INFO("hexfile power limit loaded\n");
+		adapter->power_init_success = true;
 		goto post_hdl;
 	} else {
 		RTW_WARN("config power limit from hexfile fail\n");
-		adapter->power_init_fail = true;
 		goto exit;
 	}
 #endif

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2021-2024, NVIDIA CORPORATION & AFFILIATES. All Rights Reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2021-2026, NVIDIA CORPORATION & AFFILIATES. All Rights Reserved.
  */
 
 #include <nvidia/conftest.h>
@@ -461,6 +461,12 @@ static __maybe_unused int nvjpg_runtime_resume(struct device *dev)
 	if (err < 0)
 		return err;
 
+	err = nvjpg_set_rate(nvjpg, ULONG_MAX);
+	if (err < 0) {
+		dev_err(dev, "failed to set clock rate: %d\n", err);
+		goto disable;
+	}
+
 	usleep_range(10, 20);
 
 	err = nvjpg_load_firmware(nvjpg);
@@ -471,8 +477,6 @@ static __maybe_unused int nvjpg_runtime_resume(struct device *dev)
 	if (err < 0)
 		goto disable;
 
-	/* Forcely set frequency as Fmax when device is resumed back */
-	nvjpg->devfreq->resume_freq = nvjpg->devfreq->scaling_max_freq;
 	err = devfreq_resume_device(nvjpg->devfreq);
 	if (err < 0)
 		goto disable;
@@ -486,6 +490,9 @@ static __maybe_unused int nvjpg_runtime_resume(struct device *dev)
 	return 0;
 
 disable:
+	if (nvjpg->icc_write)
+		icc_set_bw(nvjpg->icc_write, 0, 0);
+
 	clk_disable_unprepare(nvjpg->clk);
 	return err;
 }

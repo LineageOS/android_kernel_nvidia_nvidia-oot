@@ -11,7 +11,7 @@
 #include <uapi/misc/tegra_cec.h>
 
 #define TEGRA_CEC_FRAME_MAX_LENGTH  16
-#define TEGRA_CEC_RX_FIFO_LENGTH    64
+#define TEGRA_CEC_RX_FIFO_LENGTH    65
 
 struct tegra_cec {
 	struct device		*dev;
@@ -39,7 +39,6 @@ struct tegra_cec {
 	u8			tx_buf_cur;
 	u8			tx_buf_cnt;
 	struct reset_control    *reset;
-	bool			is_tegra_cec_suspended;
 	u16			rx_fifo[TEGRA_CEC_RX_FIFO_LENGTH];
 	u16			rx_fifo_data;
 };

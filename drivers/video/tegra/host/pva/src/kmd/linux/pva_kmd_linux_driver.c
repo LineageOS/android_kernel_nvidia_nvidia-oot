@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #include <nvidia/conftest.h>
 
 /* Linux headers */
@@ -26,7 +26,17 @@
 #if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 #include <linux/tegra-ivc.h>
 #else
+
+#ifdef NV_SOC_TEGRA_VIRT_TEGRA_HV_IVC_H_PRESENT
+#include <soc/tegra/virt/tegra_hv_ivc.h>
+#else
 #include <soc/tegra/virt/hv-ivc.h>
+#endif
+
+#ifdef NV_SOC_TEGRA_VIRT_TEGRA_HV_H_PRESENT
+#include <soc/tegra/virt/tegra_hv.h>
+#endif
+
 #endif
 
 /* PVA headers */

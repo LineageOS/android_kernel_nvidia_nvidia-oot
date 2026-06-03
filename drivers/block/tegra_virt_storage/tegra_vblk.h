@@ -32,15 +32,16 @@
 /* Set the max IOCTL size to (580KB + 512bytes)
  * For Micron eMMC, the max FFU size is 573KB.
  * For Samsung eMMC, the max FFU size is 512KB.
- * So, setting to 580.5KB to accomodate above.
+ * So, setting to 580.5KB to accommodate above.
  */
 #define EMMC_IOCTL_MAX_SIZE		(0x91200U)
-/* Set the max IOCTL size to 1MB
+/* Set the max IOCTL size to 2MB
  * For Micron UFS, the max FFU size is 936KB.
  * For Samsung UFS, the max FFU size is 504KB.
- * So, setting to 1MB to accomodate above.
+ * For Sandisk UFS, the max FFU size is 1MB.
+ * So, setting to 2MB to accommodate above.
  */
-#define UFS_IOCTL_MAX_SIZE_SUPPORTED	(0x100000)
+#define UFS_IOCTL_MAX_SIZE_SUPPORTED	(0x200000)
 
 struct vblk_ioctl_req {
 	uint32_t ioctl_id;
@@ -180,4 +181,23 @@ int vblk_ioctl_not_supported(struct block_device *bdev, fmode_t mode,
 	unsigned int cmd, unsigned long arg);
 int vblk_ffu_ioctl(struct block_device *bdev, fmode_t mode,
 	unsigned int cmd, unsigned long arg);
+
+int vblk_prep_rpmb_req(struct vblk_dev *vblkdev,
+		struct vblk_ioctl_req *ioctl_req,
+		struct vsc_request *vsc_req);
+
+int vblk_complete_rpmb_req(struct vblk_dev *vblkdev,
+	struct vsc_request *vsc_req, int status);
+
+int vblk_prep_rpmb_io(struct vblk_dev *vblkdev,
+		struct vblk_ioctl_req *ioctl_req,
+		void __user *user);
+
+int vblk_complete_rpmb_io(struct vblk_dev *vblkdev,
+		struct vblk_ioctl_req *ioctl_req,
+		void __user *user);
+
+int vblk_rpmb_ioctl(struct vblk_dev *vblkdev, fmode_t mode,
+		unsigned int cmd, unsigned long arg);
+
 #endif

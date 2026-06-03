@@ -298,8 +298,7 @@ void dce_hsp_ie_write_t264(struct tegra_dce *d, u32 val, u8 hsp_id, u8 id)
 		return;
 	}
 
-	dce_os_writel(d, hsp_int_ie_regs[hsp_id][id](),
-			val | dce_os_readl(d, hsp_int_ie_regs[hsp_id][id]()));
+	dce_os_writel(d, hsp_int_ie_regs[hsp_id][id](), val);
 }
 
 /**

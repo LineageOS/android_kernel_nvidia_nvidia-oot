@@ -367,6 +367,7 @@ static int host1x_pollfd_release(struct inode *inode, struct file *file)
 {
 	struct host1x_pollfd *pollfd = file->private_data;
 	struct host1x_pollfd_fence *pfd_fence, *pfd_fence_temp;
+	unsigned long irqflags;
 
 	mutex_lock(&pollfd->lock);
 
@@ -377,8 +378,8 @@ static int host1x_pollfd_release(struct inode *inode, struct file *file)
 			pfd_fence->callback_set = false;
 		}
 		/*The lock/unlock just ensures that the callback execution has finished*/
-		spin_lock(pfd_fence->fence->lock);
-		spin_unlock(pfd_fence->fence->lock);
+		spin_lock_irqsave(pfd_fence->fence->lock, irqflags);
+		spin_unlock_irqrestore(pfd_fence->fence->lock, irqflags);
 
 		dma_fence_put(pfd_fence->fence);
 		kfree(pfd_fence);
@@ -396,6 +397,7 @@ static unsigned int host1x_pollfd_poll(struct file *file, poll_table *wait)
 	struct host1x_pollfd *pollfd = file->private_data;
 	struct host1x_pollfd_fence *pfd_fence, *pfd_fence_temp;
 	unsigned int mask = 0;
+	unsigned long irqflags;
 
 	poll_wait(file, &pollfd->wq, wait);
 
@@ -412,8 +414,8 @@ static unsigned int host1x_pollfd_poll(struct file *file, poll_table *wait)
 				pfd_fence->callback_set = false;
 			}
 			/*The lock/unlock just ensures that the callback execution has finished*/
-			spin_lock(pfd_fence->fence->lock);
-			spin_unlock(pfd_fence->fence->lock);
+			spin_lock_irqsave(pfd_fence->fence->lock, irqflags);
+			spin_unlock_irqrestore(pfd_fence->fence->lock, irqflags);
 
 			dma_fence_put(pfd_fence->fence);
 			list_del(&pfd_fence->list);

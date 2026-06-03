@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  */
 
 #ifndef DCE_OS_DEVICE_H
@@ -9,6 +9,10 @@
 #include <linux/cdev.h>
 #include <linux/types.h>
 #include <dce.h>
+
+/* Forward declaration */
+struct reset_control;
+struct dce_psc_client;
 
 /**
  * struct dce_linux_device - DCE data structure for storing
@@ -38,6 +42,24 @@ struct dce_linux_device {
 	 * used for MMIO transactions to DCE elements.
 	 */
 	void __iomem *regs;
+	/**
+	 * @dce_fw_load_by_psc : decides whether dce fw is loaded by psc fw if
+	 * device tree set the property.
+	 */
+	bool dce_fw_load_by_psc;
+	/**
+	 * @rst : Pointer to DCE reset control for managing DCE reset.
+	 */
+	struct reset_control *rst;
+	/**
+	 * @psc : Pointer to DCE PSC client instance for communication with
+	 * Power Sequencing Controller.
+	 */
+	struct dce_psc_client *psc;
+	/**
+	 * @dev : Pointer to PSC Linux device struct.
+	 */
+	struct device *psc_dev;
 #ifdef CONFIG_DEBUG_FS
 	/**
 	 * @debugfs : Debugfs node for DCE Linux device.

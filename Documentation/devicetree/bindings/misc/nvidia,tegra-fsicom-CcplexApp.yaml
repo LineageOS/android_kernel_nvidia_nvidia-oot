@@ -38,14 +38,20 @@ select:
 properties:
 
     channelid_list:
-        $ref: "/schemas/types.yaml#/definitions/uint32"
-        minimum: 0x1
-        maximum: 0x2
+        description: |
+            List of IVC channel IDs that CcplexApp uses for communication. Only channel IDs 1 and 2 are defined for CcplexApp.
+        $ref: "/schemas/types.yaml#/definitions/uint32-array"
+        items:
+          - const: 1
 
 required:
     - compatible
+    - channelid_list
 
 examples:
     - |
-        FsiComAppChConfCcplexApp {
+        FsiComAppChConfCcplexApp{
+            compatible = "nvidia,tegra-fsicom-CcplexApp";
+            status = "okay";
+            channelid_list = <2 1>;
         };

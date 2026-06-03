@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #include "pva_api_cmdbuf.h"
 #include "pva_api_types.h"
 #include "pva_bit.h"
@@ -10,6 +10,7 @@
 #include "pva_utils.h"
 #include "pva_kmd_tegra_stats.h"
 #include "pva_kmd_debugfs.h"
+#include "pva_kmd_shim_debugfs.h"
 
 void pva_kmd_device_init_tegra_stats(struct pva_kmd_device *pva)
 {

@@ -27,7 +27,8 @@
  *    2Gbps is max speed for Gen 1 with 2.5GT/s at 8/10 encoding.
  *  Convert to milli seconds and add 1sec timeout
  */
-#define GET_SYNC_TIMEOUT(s)	((((s) * 8UL) / 2000000) + 1000)
+#define SAFE_BYTES_TO_BITS(s)	(((s) & 0xFFFFFFFFFFFFFFULL) * (8UL & 0xFULL))
+#define GET_SYNC_TIMEOUT(s)	((SAFE_BYTES_TO_BITS((s)) / 2000000) + 1000)
 
 #define INCR_DESC(idx, i) ((idx) = ((idx) + (i)) % (ch->desc_sz))
 
@@ -78,7 +79,7 @@ static inline void xdma_ll_ch_init(void __iomem *xdma_base, uint8_t ch, dma_addr
 	else
 		val &= ~XDMA_CHANNEL_CTRL_DMA_OPERATION;
 	/* All local channels mapped to same MSI and all remote mapped to same MSI */
-	val |= (is_remote_dma << XDMA_CHANNEL_CTRL_MSI_CHANNEL_SHIFT);
+	val |= (((u32)is_remote_dma & 0x1U) << XDMA_CHANNEL_CTRL_MSI_CHANNEL_SHIFT);
 	xdma_channel_wr(xdma_base, ch, val, XDMA_CHANNEL_CTRL);
 }
 
@@ -128,8 +129,8 @@ static inline void xdma_hw_deinit(void *cookie, u32 ch)
 	val &= ~XDMA_CHANNEL_CTRL_EN;
 	xdma_channel_wr(prv->xdma_base, ch, val, XDMA_CHANNEL_CTRL);
 
-	err = readl_poll_timeout_atomic(prv->xdma_base + XDMA_CHANNEL_CTRL + (0x4 * ch), val,
-			!(val & XDMA_CHANNEL_CTRL_EN), 1, 10000);
+	err = readl_poll_timeout_atomic(prv->xdma_base + XDMA_CHANNEL_CTRL + (0x4 * (ch &
+			0xFFU)), val, !(val & XDMA_CHANNEL_CTRL_EN), 1, 10000);
 	if (err)
 		dev_err(prv->dev, "failed to reset dma channel: %d st: 0x%x\n", ch, val);
 
@@ -208,7 +209,7 @@ static inline void process_ch_irq(struct xdma_prv *prv, u32 chan, struct xdma_ch
 	}
 
 	if (ch->st == TEGRA_PCIE_DMA_ABORT) {
-		dev_info(prv->dev, "Abort: ch %d at r_idx %d->idx %d, w_idx is %d\n", chan,
+		dev_info(prv->dev, "A: ch %d at r_idx %d->idx %d, w_idx is %d\n", chan,
 			 ch->r_idx, idx, ch->w_idx);
 		if (ch->r_idx == idx)
 			goto process_abort;
@@ -229,23 +230,21 @@ irqreturn_t xdma_irq(int irq, void *cookie)
 	return IRQ_WAKE_THREAD;
 }
 
-static void tegra_pcie_xdma_reset_channel(struct xdma_prv *prv, struct xdma_chan *ch, int bit, u32 i)
+static void tegra_pcie_xdma_reset_channel(struct xdma_prv *prv, struct xdma_chan *ch,
+					  u32 channel_idx, u32 i)
 {
-	u32 mode_cnt[2] = {TEGRA_PCIE_DMA_WR_CHNL_NUM, TEGRA_PCIE_DMA_RD_CHNL_NUM};
-	int channel_num = bit + (i * mode_cnt[0]);
-
 	ch->st = TEGRA_PCIE_DMA_ABORT;
-	xdma_hw_deinit(prv, channel_num);
+	xdma_hw_deinit(prv, channel_idx);
 
 	/* wait until existing xfer submit completed */
 	mutex_lock(&ch->lock);
 	mutex_unlock(&ch->lock);
 
-	process_ch_irq(prv, channel_num, ch, i);
+	process_ch_irq(prv, channel_idx, ch, i);
 
-	xdma_ch_init(prv, ch, channel_num);
+	xdma_ch_init(prv, ch, channel_idx);
 
-	xdma_ll_ch_init(prv->xdma_base, channel_num,
+	xdma_ll_ch_init(prv->xdma_base, channel_idx,
 			ch->dma_iova, (i == 0), prv->is_remote_dma);
 }
 
@@ -274,8 +273,9 @@ irqreturn_t xdma_irq_handler(int irq, void *cookie)
 			continue;
 
 		for (bit = 0; bit < mode_cnt[i]; bit++) {
-			u32 xfer_valid = val & (1 << (16 + bit + (i * mode_cnt[0])));
-			u32 err_status = val & (1 << (8 + bit + (i * mode_cnt[0])));
+			u32 channel_idx = (bit & 0x3U) + ((i & 0x1U) * (mode_cnt[0] & 0x7U));
+			u32 xfer_valid = val & (1 << (16 + channel_idx));
+			u32 err_status = val & (1 << (8 + channel_idx));
 
 			ch = chan[i] + bit;
 
@@ -286,20 +286,20 @@ irqreturn_t xdma_irq_handler(int irq, void *cookie)
 			if (err_status) {
 				u32 temp;
 
-				temp = xdma_channel_rd(prv->xdma_base, bit + (i * mode_cnt[0]),
+				temp = xdma_channel_rd(prv->xdma_base, channel_idx,
 						       XDMA_CHANNEL_FUNC_ERROR_STATUS);
 
 				dev_info(prv->dev, "MSI error %x seen for channel %d for mode %d\n",
 					 temp, bit, i);
 
-				tegra_pcie_xdma_reset_channel(prv, ch, bit, i);
+				tegra_pcie_xdma_reset_channel(prv, ch, channel_idx, i);
 			/*
 			 * If both xfer_valid and err_status are set, error recovery process
 			 * channel(process_ch_irq()), so we can skip else part when both xfer_valid
 			 * and err_status are set.
 			 */
 			} else {
-				process_ch_irq(prv, bit + (i * mode_cnt[0]), ch, i);
+				process_ch_irq(prv, channel_idx, ch, i);
 			}
 
 			/* Polling for the MSI_DISP_FSM to be set to 0 */
@@ -307,7 +307,7 @@ irqreturn_t xdma_irq_handler(int irq, void *cookie)
 					(debug_reg & XDMA_CHANNEL_DEBUG_REGISTER_4_INTR_ENGINE_MSI_CHAN_MSI_DISP_FSM) == 0, 1, 100);
 			if (err) {
 				dev_err(prv->dev, "MSI ack is not received on channel: 0 st: 0x%x\n", debug_reg);
-				tegra_pcie_xdma_reset_channel(prv, ch, bit, i);
+				tegra_pcie_xdma_reset_channel(prv, ch, channel_idx, i);
 			}
 		}
 	}
@@ -351,14 +351,14 @@ void *tegra264_pcie_xdma_initialize(struct tegra_pcie_dma_init_info *info, void 
 	chan_info[1] = &info->rx[0];
 
 	if (!info->dev) {
-		pr_err("%s: dev pointer is NULL\n", __func__);
+		pr_err("XDMA init failed as dev pointer is NULL\n");
 		goto free_priv;
 	}
 	prv->dev = info->dev;
 
 	if (info->remote != NULL) {
 		if (info->msi_irq > INT_MAX) {
-			pr_err("%s: msi_irq is out of range\n", __func__);
+			pr_err("XDMA init failed as msi_irq is out of range\n");
 			goto free_priv;
 		}
 		prv->irq = (int)info->msi_irq;
@@ -430,8 +430,15 @@ void *tegra264_pcie_xdma_initialize(struct tegra_pcie_dma_init_info *info, void 
 				continue;
 
 			if (ch_info->num_descriptors > SZ_32K) {
-				dev_err(prv->dev, "desc size cannot be greater than SZ_32K, ch: %d type: %d cur size: %ux\n",
+				dev_err(prv->dev, "desc size cannot be greater than the MAX value, ch: %d type: %d cur size: %ux\n",
 					i, j, ch_info->num_descriptors);
+				goto dma_iounmap;
+			}
+
+			if ((ch_info->ch_type < TEGRA_PCIE_DMA_CHAN_XFER_SYNC) ||
+			    (ch_info->ch_type > TEGRA_PCIE_DMA_CHAN_XFER_ASYNC)) {
+				dev_err(prv->dev, "invalid ch type, ch: %d rw: %d ch_type: %d\n",
+					i, j, ch_info->ch_type);
 				goto dma_iounmap;
 			}
 
@@ -445,8 +452,7 @@ void *tegra264_pcie_xdma_initialize(struct tegra_pcie_dma_init_info *info, void 
 							      ch->xdma_desc_size);
 				ch->desc = (__force void *)ch->remap_desc;
 				if (!ch->desc) {
-					dev_err(prv->dev, "desc region map failed, phy: 0x%llx\n",
-						ch_info->desc_phy_base);
+					dev_err(prv->dev, "desc region map failed\n");
 					goto dma_iounmap;
 				}
 			} else {
@@ -494,7 +500,7 @@ void *tegra264_pcie_xdma_initialize(struct tegra_pcie_dma_init_info *info, void 
 		mutex_init(&prv->rx[i].lock);
 		init_waitqueue_head(&prv->rx[i].wq);
 	}
-	dev_info(prv->dev, "%s: success", __func__);
+	dev_info(prv->dev, "XDMA init successful\n");
 
 	return prv;
 
@@ -514,7 +520,7 @@ free_dma_desc:
 			if (prv->is_remote_dma && ch->desc)
 				devm_iounmap(prv->dev, ch->remap_desc);
 			else if (ch->desc)
-				dma_free_coherent(prv->dev, ch->xdma_desc_size, ch->desc,
+				dma_free_coherent(prv->pdev, ch->xdma_desc_size, ch->desc,
 						  ch->dma_iova);
 		}
 	}
@@ -534,7 +540,7 @@ tegra_pcie_dma_status_t tegra264_pcie_xdma_set_msi(void *cookie, u64 msi_addr, u
 	u32 val;
 
 	if (!prv) {
-		pr_err("%s inval inputs\n", __func__);
+		pr_err("Cannot set MSI for XDMA as inval inputs\n");
 		return TEGRA_PCIE_DMA_FAIL_INVAL_INPUTS;
 	}
 
@@ -572,11 +578,12 @@ tegra_pcie_dma_status_t tegra264_pcie_xdma_submit_xfer(void *cookie,
 	struct tegra_pcie_dma_xfer_info *ring;
 	u32 mode_cnt[2] = {TEGRA_PCIE_DMA_WR_CHNL_NUM, TEGRA_PCIE_DMA_RD_CHNL_NUM};
 	long ret, to_jif;
+	uint64_t safe64AddVal = 0x7FFFFFFFFFFFFFFFULL;
 
 	if (!prv || !tx_info || tx_info->nents == 0 || !tx_info->desc ||
 	    (tx_info->type < TEGRA_PCIE_DMA_WRITE || tx_info->type > TEGRA_PCIE_DMA_READ) ||
 	    tx_info->channel_num >= mode_cnt[tx_info->type]) {
-		pr_err("%s inval inputs prv: 0x%px tx_info: 0x%px\n", __func__, prv, tx_info);
+		pr_err("Cannot submit XDMA transfers as inval inputs tx info\n");
 		return TEGRA_PCIE_DMA_FAIL_INVAL_INPUTS;
 	}
 
@@ -584,12 +591,13 @@ tegra_pcie_dma_status_t tegra264_pcie_xdma_submit_xfer(void *cookie,
 	     &prv->rx[tx_info->channel_num];
 
 	if (!ch->desc_sz) {
-		dev_err(prv->dev, "%s inval inputs desc_sz desc_sz: %u\n", __func__, ch->desc_sz);
+		dev_err(prv->dev, "Cannot submit XDMA transfers as inval desc_sz: %u\n",
+				ch->desc_sz);
 		return TEGRA_PCIE_DMA_FAIL_INVAL_INPUTS;
 	}
 
 	if ((tx_info->complete == NULL) && (ch->type == TEGRA_PCIE_DMA_CHAN_XFER_ASYNC)) {
-		dev_err(prv->dev, "%s inval inputs complete\n", __func__);
+		dev_err(prv->dev, "Cannot submit XDMA transfers as inval inputs complete\n");
 		return TEGRA_PCIE_DMA_FAIL_INVAL_INPUTS;
 	}
 
@@ -601,7 +609,7 @@ tegra_pcie_dma_status_t tegra264_pcie_xdma_submit_xfer(void *cookie,
 
 	if (ch->st != TEGRA_PCIE_DMA_SUCCESS) {
 		st = ch->st;
-		dev_err(prv->dev, "%s inval inputs st: %d\n", __func__, ch->st);
+		dev_err(prv->dev, "Cannot submit XDMA transfers as inval inputs st: %d\n", ch->st);
 		goto unlock;
 	}
 
@@ -617,8 +625,10 @@ tegra_pcie_dma_status_t tegra264_pcie_xdma_submit_xfer(void *cookie,
 		dma_ll_virt = (struct xdma_hw_desc *)ch->desc + ch->w_idx;
 		dma_ll_virt->size = tx_info->desc[i].sz;
 		/* calculate number of packets and add those many headers */
-		total_sz +=  (u64)(((tx_info->desc[i].sz / ch->desc_sz) + 1) * 30ULL);
-		total_sz += tx_info->desc[i].sz;
+		total_sz = (total_sz & safe64AddVal) + ((u64)((((tx_info->desc[i].sz / ch->desc_sz)
+			+ 1) & 0x7FFFFFFFFFFFFFULL) * 30ULL) & safe64AddVal);
+		total_sz = (total_sz & safe64AddVal) + (tx_info->desc[i].sz & safe64AddVal);
+
 		dma_ll_virt->sar_low = lower_32_bits(tx_info->desc[i].src);
 		dma_ll_virt->sar_high = upper_32_bits(tx_info->desc[i].src);
 		dma_ll_virt->dar_low = lower_32_bits(tx_info->desc[i].dst);
@@ -652,8 +662,8 @@ tegra_pcie_dma_status_t tegra264_pcie_xdma_submit_xfer(void *cookie,
 			 LONG_MAX : msecs_to_jiffies(to_ms) & LONG_MAX;
 		ret = wait_event_timeout(ch->wq, !ch->busy, to_jif);
 		if (ret == 0) {
-			dev_err(prv->dev, "%s: timeout at %d ch, w_idx(%d), r_idx(%d)\n",
-				__func__, tx_info->channel_num, ch->w_idx, ch->r_idx);
+			dev_err(prv->dev, "Timeout while submitting XDMA transfers at %d ch, w_idx(%d), r_idx(%d)\n",
+					tx_info->channel_num, ch->w_idx, ch->r_idx);
 			st = TEGRA_PCIE_DMA_FAIL_TIMEOUT;
 			goto unlock;
 		} else {
@@ -692,7 +702,7 @@ static void xdma_stop(struct xdma_prv *prv, tegra_pcie_dma_status_t st)
 			/** wait until exisitng xfer submit completed */
 			mutex_lock(&ch->lock);
 			mutex_unlock(&ch->lock);
-			xdma_hw_deinit(prv, i + j * TEGRA_PCIE_DMA_WR_CHNL_NUM);
+			xdma_hw_deinit(prv, (u8)((i + (j * TEGRA_PCIE_DMA_WR_CHNL_NUM)) & 0xFFU));
 		}
 	}
 
@@ -745,7 +755,7 @@ void tegra264_pcie_xdma_deinit(void *cookie, void *priv_dma)
 			if (prv->is_remote_dma && ch->desc)
 				devm_iounmap(prv->dev, ch->remap_desc);
 			else if (ch->desc)
-				dma_free_coherent(prv->dev, ch->xdma_desc_size,
+				dma_free_coherent(prv->pdev, ch->xdma_desc_size,
 						  ch->desc, ch->dma_iova);
 			kfree(ch->ring);
 		}

@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only
- * SPDX-FileCopyrightText: Copyright (c) 2020-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2020-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  */
 
 #ifndef TEGRA23X_PSC_H
@@ -39,17 +39,5 @@ static inline void psc_debugfs_remove(struct platform_device *pdev) { return; }
 #endif
 
 struct mbox_chan *psc_mbox_request_channel0(struct mbox_controller *mbox, struct mbox_client *cl);
-
-#if IS_ENABLED(CONFIG_NUMA)
-#define PSC_HAVE_NUMA
-#endif
-
-#if defined(PSC_HAVE_NUMA)
-u32 readl0(void __iomem *addr);
-void writel0(u32 value, void __iomem *addr);
-#else
-#define readl0(addr) readl((addr))
-#define writel0(value, addr) writel((value), (addr))
-#endif
 
 #endif

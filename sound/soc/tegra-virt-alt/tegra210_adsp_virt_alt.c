@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/*
- * Copyright (c) 2021-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- */
+// SPDX-FileCopyrightText: Copyright (c) 2021-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include <nvidia/conftest.h>
 
@@ -31,7 +29,6 @@
 #include <sound/core.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
-#include <linux/version.h>
 #include <soc/tegra/fuse.h>
 #include <sound/compress_driver.h>
 #include <sound/dmaengine_pcm.h>
@@ -1746,7 +1743,11 @@ static int tegra210_adsp_compr_copy(struct snd_soc_component *component,
 
 static int tegra210_adsp_compr_pointer(struct snd_soc_component *component,
 				       struct snd_compr_stream *cstream,
+#if defined(NV_SND_COMPRESS_OPS_STRUCT_POINTER_HAS_TSTAMP64_ARG) /* Linux v6.18 */
+				       struct snd_compr_tstamp64 *tstamp)
+#else
 				       struct snd_compr_tstamp *tstamp)
+#endif
 {
 	struct tegra210_adsp_compr_rtd *prtd = cstream->runtime->private_data;
 	struct tegra210_adsp_app *app = prtd->fe_apm;
@@ -3098,7 +3099,11 @@ static int tegra210_adsp_mux_get(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
 {
 	struct snd_soc_dapm_context *dapm =
-			snd_soc_dapm_kcontrol_dapm(kcontrol);
+#if defined(NV_SND_SOC_DAPM_KCONTROL_TO_DAPM) /* Linux v7.0 */
+		snd_soc_dapm_kcontrol_to_dapm(kcontrol);
+#else
+		snd_soc_dapm_kcontrol_dapm(kcontrol);
+#endif
 	struct snd_soc_component *cmpnt = snd_soc_dapm_to_component(dapm);
 	struct soc_enum *e =
 		(struct soc_enum *)kcontrol->private_value;
@@ -3114,7 +3119,11 @@ static int tegra210_adsp_mux_put(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
 {
 	struct snd_soc_dapm_context *dapm =
-			snd_soc_dapm_kcontrol_dapm(kcontrol);
+#if defined(NV_SND_SOC_DAPM_KCONTROL_TO_DAPM) /* Linux v7.0 */
+		snd_soc_dapm_kcontrol_to_dapm(kcontrol);
+#else
+		snd_soc_dapm_kcontrol_dapm(kcontrol);
+#endif
 	struct snd_soc_component *cmpnt = snd_soc_dapm_to_component(dapm);
 	uint32_t val = ucontrol->value.enumerated.item[0];
 	struct soc_enum *e = (struct soc_enum *)kcontrol->private_value;
@@ -3176,7 +3185,7 @@ err_put:
 static int tegra210_adsp_init_get(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *cmpnt = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *cmpnt = snd_kcontrol_chip(kcontrol);
 	struct tegra210_adsp *adsp = snd_soc_component_get_drvdata(cmpnt);
 
 	ucontrol->value.enumerated.item[0] = adsp->init_done;
@@ -3186,7 +3195,7 @@ static int tegra210_adsp_init_get(struct snd_kcontrol *kcontrol,
 static int tegra210_adsp_init_put(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *cmpnt = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *cmpnt = snd_kcontrol_chip(kcontrol);
 	struct tegra210_adsp *adsp = snd_soc_component_get_drvdata(cmpnt);
 	uint32_t init = ucontrol->value.enumerated.item[0];
 	int ret = 0;
@@ -3210,7 +3219,7 @@ static int tegra210_adsp_init_put(struct snd_kcontrol *kcontrol,
 static int tegra210_adsp_lpthread_init_get(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *cmpnt = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *cmpnt = snd_kcontrol_chip(kcontrol);
 	struct tegra210_adsp *adsp = snd_soc_component_get_drvdata(cmpnt);
 
 	if (!adsp->adsp_started)
@@ -3224,7 +3233,7 @@ exit:
 static int tegra210_adsp_lpthread_init_put(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *cmpnt = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *cmpnt = snd_kcontrol_chip(kcontrol);
 	struct tegra210_adsp *adsp = snd_soc_component_get_drvdata(cmpnt);
 	unsigned int init = ucontrol->value.enumerated.item[0];
 
@@ -4581,7 +4590,7 @@ static int tegra210_adsp_set_param(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
 {
 	struct tegra_soc_bytes *params = (void *)kcontrol->private_value;
-	struct snd_soc_component *cmpnt = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *cmpnt = snd_kcontrol_chip(kcontrol);
 	struct tegra210_adsp *adsp = snd_soc_component_get_drvdata(cmpnt);
 	struct tegra210_adsp_app *app = &adsp->apps[params->base];
 	apm_msg_t apm_msg;
@@ -4681,7 +4690,7 @@ static int tegra210_adsp_tlv_callback(struct snd_kcontrol *kcontrol,
 	int op_flag, unsigned int size, unsigned int __user *tlv)
 {
 	struct tegra_soc_bytes *params = (void *)kcontrol->private_value;
-	struct snd_soc_component *cmpnt = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *cmpnt = snd_kcontrol_chip(kcontrol);
 	struct tegra210_adsp *adsp = snd_soc_component_get_drvdata(cmpnt);
 	unsigned int count = size < params->num_regs ? size : params->num_regs;
 	struct tegra210_adsp_app *app = &adsp->apps[params->base];
@@ -4807,7 +4816,7 @@ static int tegra210_adsp_apm_get(struct snd_kcontrol *kcontrol,
 {
 	struct soc_mixer_control *mc =
 		(struct soc_mixer_control *)kcontrol->private_value;
-	struct snd_soc_component *cmpnt = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *cmpnt = snd_kcontrol_chip(kcontrol);
 	struct tegra210_adsp *adsp = snd_soc_component_get_drvdata(cmpnt);
 	struct tegra210_adsp_app *app = &adsp->apps[mc->reg];
 
@@ -4826,7 +4835,7 @@ static int tegra210_adsp_apm_put(struct snd_kcontrol *kcontrol,
 {
 	struct soc_mixer_control *mc =
 		(struct soc_mixer_control *)kcontrol->private_value;
-	struct snd_soc_component *cmpnt = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *cmpnt = snd_kcontrol_chip(kcontrol);
 	struct tegra210_adsp *adsp = snd_soc_component_get_drvdata(cmpnt);
 	struct tegra210_adsp_app *app = &adsp->apps[mc->reg];
 	int ret = 0;

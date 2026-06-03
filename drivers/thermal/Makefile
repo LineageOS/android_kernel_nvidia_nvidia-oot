@@ -6,4 +6,8 @@ obj-m += pex9749-thermal.o
 obj-m += tegra234-oc-event.o
 obj-m += thermal-trip-event.o
 endif
+
+# max77851 thermal driver needs REGMAP APIs
+ifdef CONFIG_REGMAP_IRQ
 obj-m += max77851_thermal.o
+endif

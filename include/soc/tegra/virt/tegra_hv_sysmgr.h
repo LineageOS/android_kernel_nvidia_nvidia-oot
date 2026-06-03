@@ -1,7 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/*
- * Copyright (c) 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- */
+/* SPDX-FileCopyrightText: Copyright (c) 2022-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
 
 #ifndef _TEGRA_HV_SYSMGR_H
 #define _TEGRA_HV_SYSMGR_H
@@ -93,10 +91,11 @@ enum system_function_id {
 	GUEST_PAUSE,
 	SYSTEM_SUSPEND_INIT,
 	SYSTEM_SUSPEND_COMPLETE,
+	GUEST_ENTER_VM_OP,
 	MAX_FUNC_ID,
 };
 
-typedef enum  {
+enum vm_state {
 	VM_STATE_BOOT,
 	VM_STATE_HALT,
 	VM_STATE_UNHALT,
@@ -106,7 +105,7 @@ typedef enum  {
 	VM_STATE_RESUME,
 	VM_STATE_INVALID,
 	VM_STATE_MAX
-} vm_state;
+};
 
 #define CREATE_CMD(func_id, vmid)	((func_id << 24U) | vmid)
 
@@ -130,4 +129,5 @@ typedef enum  {
 #define GUEST_PAUSE_CMD(vmid)		CREATE_CMD(GUEST_PAUSE, vmid)
 #define SYS_SUSPEND_INIT_CMD		CREATE_CMD(SYSTEM_SUSPEND_INIT, 0)
 #define SYS_SUSPEND_COMPLETE_CMD	CREATE_CMD(SYSTEM_SUSPEND_COMPLETE, 0)
+#define GUEST_ENTER_VM_OP_CMD		CREATE_CMD(GUEST_ENTER_VM_OP, 0)
 #endif /* _TEGRA_HV_SYSMGR_H */

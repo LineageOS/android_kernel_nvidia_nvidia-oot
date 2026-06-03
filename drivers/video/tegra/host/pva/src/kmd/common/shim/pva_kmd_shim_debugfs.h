@@ -24,12 +24,12 @@
  *                       Valid value: non-null
  * @param[in] name       Name of the debugfs entry to create
  *                       Valid value: non-null, null-terminated string
- * @param[in, out] val   Pointer to boolean variable to expose
+ * @param[in, out] pdata   Pointer to boolean variable to expose
  *                       Valid value: non-null pointer to bool
  */
 /* Shim function with platform-specific implementations (QNX, Linux, Native) */
 void pva_kmd_debugfs_create_bool(struct pva_kmd_device *pva, const char *name,
-				 bool *val);
+				 bool *pdata);
 
 /**
  * @brief Create a debugfs entry for a 32-bit unsigned integer variable.
@@ -50,12 +50,12 @@ void pva_kmd_debugfs_create_bool(struct pva_kmd_device *pva, const char *name,
  *                       Valid value: non-null
  * @param[in] name       Name of the debugfs entry to create
  *                       Valid value: non-null, null-terminated string
- * @param[in, out] val   Pointer to 32-bit unsigned integer variable to expose
+ * @param[in, out] pdata   Pointer to 32-bit unsigned integer variable to expose
  *                       Valid value: non-null pointer to uint32_t
  */
 /* Shim function with platform-specific implementations (QNX, Linux, Native) */
 void pva_kmd_debugfs_create_u32(struct pva_kmd_device *pva, const char *name,
-				uint32_t *val);
+				uint32_t *pdata);
 
 /**
  * @brief Create a debugfs file entry with custom file operations.

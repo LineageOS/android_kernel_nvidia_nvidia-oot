@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2022-2025 NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2022-2026 NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
  *
  * Tegra TSEC Module Support
  */
@@ -397,11 +397,6 @@ static int tsec_module_init(struct platform_device *dev)
 	}
 	pdata->reg_aperture = regs;
 
-	/* skip enabling clocks for T26x since PSC already does it*/
-	if (pdata->soc == TSEC_ON_T26x) {
-		return 0;
-	}
-
 	/* Get interrupt */
 	pdata->irq = platform_get_irq(dev, 0);
 	if (pdata->irq < 0) {
@@ -464,7 +459,7 @@ static int tsec_module_init(struct platform_device *dev)
 		pdata->reset_control = NULL;
 	tsec_deassert_reset(pdata);
 
-	/* disable the clocks after resetting the module */
+	/* For non-T26x devices, disable the clocks after resetting the module */
 	tsec_disable_clk(pdata);
 
 	return 0;
@@ -487,7 +482,7 @@ static const struct of_device_id tsec_of_match[] = {
 
 static int tsec_probe(struct platform_device *dev)
 {
-	int err;
+	int err = 0;
 	struct tsec_device_data *pdata = NULL;
 
 	/* Get device platform data */
@@ -503,12 +498,6 @@ static int tsec_probe(struct platform_device *dev)
 	pdata->pdev = dev;
 	platform_set_drvdata(dev, pdata);
 
-	err = tsec_module_init(dev);
-	if (err) {
-		dev_err(&dev->dev, "error %d in tsec_module_init\n", err);
-		return err;
-	}
-
 #ifdef CONFIG_DEBUG_FS
 	if (debugfs_initialized()) {
 		err = tsec_module_init_debugfs(dev);
@@ -521,9 +510,21 @@ static int tsec_probe(struct platform_device *dev)
 
 	switch (pdata->soc) {
 	case TSEC_ON_T26x:
+		err = tsec_module_init_t26x(dev);
+		if (err) {
+			dev_err(&dev->dev, "error %d in tsec_module_init_t26x\n", err);
+			break;
+		}
+
 		err = tsec_t264_init(dev);
 		break;
 	default:
+		err = tsec_module_init(dev);
+		if (err) {
+			dev_err(&dev->dev, "error %d in tsec_module_init\n", err);
+			break;
+		}
+
 		err = tsec_kickoff_boot(dev);
 		break;
 	}
@@ -533,11 +534,21 @@ static int tsec_probe(struct platform_device *dev)
 
 static int tsec_remove(struct platform_device *dev)
 {
+	int err = 0;
+	struct tsec_device_data *pdata = platform_get_drvdata(dev);
 #ifdef CONFIG_DEBUG_FS
 	tsec_module_deinit_debugfs(dev);
 #endif /* CONFIG_DEBUG_FS */
 
-	return tsec_poweroff(&dev->dev);
+	switch (pdata->soc) {
+	case TSEC_ON_T26x:
+		dev_dbg(&dev->dev, "Soc is T26x, skipping disabling the clocks\n");
+		break;
+	default:
+		err = tsec_poweroff(&dev->dev);
+		break;
+	}
+	return err;
 }
 
 #if defined(NV_PLATFORM_DRIVER_STRUCT_REMOVE_RETURNS_VOID) /* Linux v6.11 */
@@ -563,7 +574,11 @@ static struct platform_driver tsec_driver = {
 	}
 };
 
-module_platform_driver(tsec_driver);
+static int __init tsec_driver_init(void)
+{
+	return platform_driver_register(&tsec_driver);
+}
+module_init(tsec_driver_init);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Nikesh Oswal <noswal@nvidia.com>");

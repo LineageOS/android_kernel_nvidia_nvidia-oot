@@ -66,7 +66,7 @@ typedef enum {
 typedef enum {
 	TEGRA_PCIE_DMA_WRITE = 0,
 #ifndef DOXYGEN_ICD
-	TEGRA_PCIE_DMA_READ,
+	TEGRA_PCIE_DMA_READ = 1,
 #endif
 } tegra_pcie_dma_xfer_type_t;
 
@@ -77,7 +77,7 @@ typedef enum {
 #ifndef DOXYGEN_ICD
 	TEGRA_PCIE_DMA_CHAN_XFER_SYNC = 0,
 #endif
-	TEGRA_PCIE_DMA_CHAN_XFER_ASYNC,
+	TEGRA_PCIE_DMA_CHAN_XFER_ASYNC = 1,
 } tegra_pcie_dma_chan_type_t;
 
 /**
@@ -85,8 +85,10 @@ typedef enum {
  * in <a href="#tegra-pcie-dma-initialize">(tegra_pcie_dma_initialize())</a>
  */
 typedef enum {
+#ifndef DOXYGEN_ICD
 	NVPCIE_DMA_SOC_T234 = 0,
-	NVPCIE_DMA_SOC_T264,
+#endif
+	NVPCIE_DMA_SOC_T264 = 1,
 } nvpcie_dma_soc_t;
 
 /** Forward declaration */
@@ -159,13 +161,11 @@ struct tegra_pcie_dma_init_info {
 	nvpcie_dma_soc_t soc;
 	/**
 	 * MSI IRQ number for getting DMA interrupts.
-	 * Note:
-	 * - This param is applicable only for NVPCIE_DMA_SOC_T264 SoC and ignored
-	 *   for NVPCIE_DMA_SOC_T234 SoC.
+	 * - This param is applicable only for NVPCIE_DMA_SOC_T264 SoC.
 	 * - IRQ allocation notes:
 	 *  - For RP SoC, pcieport driver pre allocates MSI using pci_alloc_irq_vectors() and
 	 *    irq vector for the same is TEGRA_PCIE_DMA_MSI_IRQ_VEC.
-	 *  - For EP Soc allocate using platform_msi_domain_alloc_irqs()
+	 *  - For EP Soc, allocate using platform_msi_domain_alloc_irqs()
 	 *
 	 */
 	uint32_t msi_irq;
@@ -316,6 +316,15 @@ tegra_pcie_dma_status_t tegra_pcie_dma_set_msi(void *cookie, u64 msi_addr, u32 m
  *  - Initialization: Yes
  *  - Run time: Yes
  *  - De-initialization: Yes
+ *
+ * @pre
+ * This must be called after PCIe link is established, as only then the DMA transfers work
+ * correctly. If it is called before PCIe link up or post PCIe link down, the API return status
+ * will be reported as success when actually HW dropped the packets. This is a false positive
+ * report. Also, if link down happens for an exisiting transfer, then DMA driver returns false
+ * positive response saying all nents are submitted successfully. Caller of this API has to take
+ * care of this case using their own SoC synchronization methods and discard false positive
+ * transfer completion.
  *
  * @param[in] tx_info DMA Tx data structure. Refer struct tegra_pcie_dma_xfer_info for details.
  * @param[in] cookie Value at cookie pointer populated in

@@ -15,7 +15,6 @@
 #include <linux/init.h>
 #include <linux/iopoll.h>
 #include <linux/module.h>
-#include <linux/of_gpio.h>
 #include <linux/of_pci.h>
 #include <linux/of_platform.h>
 #include <linux/of_address.h>
@@ -31,6 +30,7 @@
 
 #include "pcie-tegra264-ep.h"
 
+#define SIZE_64K		0x10000U
 /* 5 msec PERST# gpio debounce */
 #define PERST_DEBOUNCE_TIME	5000
 
@@ -38,11 +38,6 @@
 #define PCIE_CBB_IDLE_DELAY	10000
 /* 1 sec timeout */
 #define PCIE_CBB_IDLE_TIMEOUT	1000000
-
-/* Poll for every 10 msec */
-#define PCIE_LTSSM_DELAY	10000
-/* 1 sec timeout */
-#define PCIE_LTSSM_TIMEOUT	1000000
 
 /* PCIe EP support 8 outbound ATU windows */
 #define NUM_OB_WINDOWS		8
@@ -96,10 +91,6 @@
 #define NV_XAL_EP_DM_E_ATU_REMOTE_TARGET_HI(idx)	(0xb50 + (0x20 * (idx)))
 #define NV_XAL_EP_DM_E_ATU_REMOTE_TARGET_LO(idx)	(0xb54 + (0x20 * (idx)))
 
-#define XPL_PL_LTSSM_STATE		0x1700
-#define XPL_PL_LTSSM_STATE_FULL			GENMASK(7, 0)
-#define XPL_PL_LTSSM_DETECT_QUIET		1
-
 #define NV_EP_PCFG_MSI_64_HEADER	0x48
 
 struct tegra264_pcie_ep {
@@ -116,6 +107,7 @@ struct tegra264_pcie_ep {
 	unsigned int pex_rst_irq;
 
 	phys_addr_t phys_base;
+	phys_addr_t phys_limit;
 	size_t phys_size;
 	size_t page_size;
 	dma_addr_t bar1_phys;
@@ -293,21 +285,20 @@ static int tegra264_pcie_ep_set_bar(struct pci_epc *epc, u8 fn,
 
 	if ((epf_bar->flags & 0xf) !=
 	    (PCI_BASE_ADDRESS_MEM_TYPE_64 | PCI_BASE_ADDRESS_MEM_PREFETCH)) {
-		dev_err(pcie->dev, "%s: Only 64-bit prefectable BAR is supported, flags: 0x%x\n",
-			__func__, epf_bar->flags);
+		dev_err(pcie->dev, "Un-supported BAR type received, flags: 0x%x\n",
+				epf_bar->flags);
 		return -EINVAL;
 	}
 
 	if (pcie->ep_state == EP_STATE_ENABLED) {
-		dev_err(pcie->dev, "%s: Allowed only when link is not up\n", __func__);
+		dev_err(pcie->dev, "Setting BAR not allowed only when link is established\n");
 		return -EINVAL;
 	}
 
 	if (bar == BAR_1) {
 		/* Fail set BAR if size is not power of 2 or out of [64MB,64GB] range */
 		if (!((size >= SZ_64M && size <= (SZ_32G * 2)) && !(size & (size - 1)))) {
-			dev_err(pcie->dev, "%s: Invalid BAR1 size requested: %ld\n",
-				__func__, size);
+			dev_err(pcie->dev, "Invalid BAR1 size requested\n");
 			return -EINVAL;
 		}
 		pcie->bar1_phys = epf_bar->phys_addr;
@@ -316,13 +307,12 @@ static int tegra264_pcie_ep_set_bar(struct pci_epc *epc, u8 fn,
 		pcie->bar1_size = (u8)(sz_bitmap & 0xFF);
 	} else if (bar == BAR_2) {
 		if (size != SZ_32M) {
-			dev_err(pcie->dev, "%s: Only 32MB BAR2 is supported, requested size: %ld\n",
-				__func__, size);
+			dev_err(pcie->dev, "Unsupported BAR2 size requested\n");
 			return -EINVAL;
 		}
 		pcie->bar2_phys = epf_bar->phys_addr;
 	} else {
-		dev_err(pcie->dev, "%s: BAR-%d is not configurable\n", __func__, bar);
+		dev_err(pcie->dev, "BAR-%d is not configurable\n", bar);
 		return -EINVAL;
 	}
 
@@ -363,14 +353,37 @@ static int tegra264_pcie_ep_map_addr(struct pci_epc *epc, u8 func_no,
 				     phys_addr_t addr, u64 pci_addr, size_t size)
 {
 	struct tegra264_pcie_ep *pcie = epc_get_drvdata(epc);
-	phys_addr_t limit = addr + size - 1;
+	phys_addr_t limit;
 	u32 free_win;
+	uint64_t phy_limit;
+
+	/* PCIe AMAP maximum range is 41-bit length. */
+	phy_limit = pcie->phys_limit & 0x1ffffffffff;
 
 	if (pcie->ep_state != EP_STATE_ENABLED) {
-		dev_err(pcie->dev, "%s: Allowed only when link is up\n", __func__);
+		dev_err(pcie->dev, "Setting EP map allowed only when link is up\n");
 		return -EINVAL;
 	}
 
+	// Checking physical base <= input addr < physical limit
+	if ((addr < pcie->phys_base) || (addr >= phy_limit)) {
+		dev_err(pcie->dev, "Address out of range: %llx\n", addr);
+		return -EINVAL;
+	}
+
+	// Checking 64K <= size <= (physical limit - input addr)
+	if ((size < SIZE_64K) || (size > (phy_limit - addr))) {
+		dev_err(pcie->dev, "Size out of range: %lx\n", size);
+		return -EINVAL;
+	}
+
+	// Checking size is 64K aligned
+	if ((size & (SIZE_64K - 1U)) != 0U) {
+		dev_err(pcie->dev, "Size not 64K aligned: %lx\n", size);
+		return -EINVAL;
+	}
+
+	limit = addr + size - 1;
 	free_win = find_first_zero_bit(pcie->ob_window_map, NUM_OB_WINDOWS);
 	if (free_win >= NUM_OB_WINDOWS) {
 		dev_err(pcie->dev, "No free outbound window\n");
@@ -406,7 +419,7 @@ static void tegra264_pcie_ep_unmap_addr(struct pci_epc *epc, u8 func_no,
 	u32 ob_idx;
 
 	if (pcie->ep_state != EP_STATE_ENABLED) {
-		dev_err(pcie->dev, "%s: Allowed only when link is up\n", __func__);
+		dev_err(pcie->dev, "EP Unmap is allowed only when link is up\n");
 		return;
 	}
 
@@ -603,14 +616,13 @@ static const struct pci_epc_ops tegra264_pcie_epc_ops = {
 static irqreturn_t tegra264_pcie_ep_irq_thread(int irq, void *arg)
 {
 	struct tegra264_pcie_ep *pcie = arg;
-	u32 val;
-	int ret;
 
-	ret = readl_poll_timeout(pcie->xpl_base + XPL_PL_LTSSM_STATE, val,
-			(val & XPL_PL_LTSSM_STATE_FULL) == XPL_PL_LTSSM_DETECT_QUIET,
-			 PCIE_LTSSM_DELAY, PCIE_LTSSM_TIMEOUT);
-	if (ret)
-		dev_err(pcie->dev, "PCIe LTSSM state not in detect reset, ltssm: 0x%x\n", val);
+	/*
+	 * PCI spec doesn't dictate how long secondary bus reset can be applied.
+	 * Linux bus driver pci_reset_secondary_bus() is applying for 2 msec using msleep function.
+	 * msleep() function usual sleeps for at least 20 msec. So, wait 20 msec here.
+	 */
+	msleep(20);
 
 	tegra264_pcie_ep_rst_assert(pcie);
 	/* Per PCIe CEM spec minimum time between PERST# toggle is 100 usec(TPERST) */
@@ -643,7 +655,7 @@ static int tegra264_pcie_ep_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct tegra264_pcie_ep *pcie;
 	struct resource *res;
-	char *name, *level;
+	char *name;
 	int ret = 0, irq;
 
 	pcie = devm_kzalloc(dev, sizeof(*pcie), GFP_KERNEL);
@@ -682,11 +694,10 @@ static int tegra264_pcie_ep_probe(struct platform_device *pdev)
 	if (IS_ERR(pcie->pex_rst_gpiod)) {
 		ret = PTR_ERR(pcie->pex_rst_gpiod);
 		if (ret == -EPROBE_DEFER)
-			level = KERN_DEBUG;
+			dev_dbg(dev, "Failed to get PERST GPIO: %d\n", ret);
 		else
-			level = KERN_ERR;
+			dev_err(dev, "Failed to get PERST GPIO: %d\n", ret);
 
-		dev_printk(level, dev, dev_fmt("Failed to get PERST GPIO: %d\n"), ret);
 		return ret;
 	}
 
@@ -760,6 +771,7 @@ static int tegra264_pcie_ep_probe(struct platform_device *pdev)
 	}
 
 	pcie->phys_base = res->start;
+	pcie->phys_limit = res->end;
 	pcie->phys_size = resource_size(res);
 	pcie->page_size = SZ_64K;
 

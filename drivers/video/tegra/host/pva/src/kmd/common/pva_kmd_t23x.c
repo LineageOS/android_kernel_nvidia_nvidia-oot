@@ -4,7 +4,7 @@
 #include "pva_kmd_constants.h"
 #include "pva_kmd_pfsd.h"
 
-struct vmem_region vmem_regions_tab_t23x[PVA_VMEM_REGION_COUNT_T23X] = {
+static struct vmem_region vmem_regions_tab_t23x[PVA_VMEM_REGION_COUNT_T23X] = {
 	{ .start = T23x_VMEM0_START, .end = T23x_VMEM0_END },
 	{ .start = T23x_VMEM1_START, .end = T23x_VMEM1_END },
 	{ .start = T23x_VMEM2_START, .end = T23x_VMEM2_END },

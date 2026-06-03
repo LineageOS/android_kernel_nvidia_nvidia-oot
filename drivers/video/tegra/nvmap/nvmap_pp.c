@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2009-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2009-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * Manage page pools to speed up page allocation.
  */
@@ -18,7 +18,6 @@
 #include <linux/debugfs.h>
 #include <linux/freezer.h>
 #include <linux/highmem.h>
-#include <linux/version.h>
 #include <linux/sched/clock.h>
 #include <uapi/linux/sched/types.h>
 #include <trace/events/nvmap.h>

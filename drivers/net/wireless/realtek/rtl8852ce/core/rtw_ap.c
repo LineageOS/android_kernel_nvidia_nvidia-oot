@@ -6235,10 +6235,15 @@ fwd_chk:
 					goto exit;
 			}
 		}
-	} else
+	}
 #endif
+
 #ifdef CONFIG_RTW_WDS
+#if CONFIG_RTW_AP_DATA_BMC_TO_UC
+	if (!is_da_bmc && adapter_use_wds(adapter) && !in_wds_tbl && !is_da_peer) {
+#else
 	if (adapter_use_wds(adapter) && !in_wds_tbl && !is_da_peer) {
+#endif
 		/* unknown DA, flood frame to every WDS STA except receiving one */
 		rtw_ap_data_flood_for_unknown_da(adapter
 			, da, sa, rframe->u.hdr.psta->phl_sta->mac_addr
@@ -6247,9 +6252,8 @@ fwd_chk:
 			goto set_act_fwd;
 		else
 			goto exit;
-	} else
+	}
 #endif
-	;
 
 	if (core_tx_alloc_xmitframe(adapter, &xframe, os_qid) == FAIL) {
 		#ifdef DBG_TX_DROP_FRAME

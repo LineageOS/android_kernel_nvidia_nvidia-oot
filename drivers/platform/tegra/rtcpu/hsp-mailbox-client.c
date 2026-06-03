@@ -1,9 +1,7 @@
-// SPDX-License-Identifier: GPL-2.0
-// Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-FileCopyrightText: Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include "linux/tegra-hsp-combo.h"
-
-#include <linux/version.h>
 
 #include <linux/device.h>
 #include <linux/kernel.h>

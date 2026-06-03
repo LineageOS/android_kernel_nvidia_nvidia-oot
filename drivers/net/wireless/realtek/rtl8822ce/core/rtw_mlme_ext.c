@@ -9175,7 +9175,7 @@ int issue_probereq_ex(_adapter *padapter, const NDIS_802_11_SSID *pssid, const u
 	int i = 0;
 	systime start = rtw_get_current_time();
 
-#if 0 /* DEBUG */
+#ifdef DBG_SITESURVEY
 	if (da && pssid)
 		RTW_INFO(FUNC_ADPT_FMT" to %s ("MAC_FMT") ch:%u\n",
 			FUNC_ADPT_ARG(padapter), pssid->Ssid, MAC_ARG(da), rtw_get_oper_ch(padapter));
@@ -15513,8 +15513,13 @@ void site_survey(_adapter *padapter, u8 survey_channel, RT_SCAN_TYPE ScanType)
 		return;
 
 	if (ss->reason & RTW_AUTO_SCAN_REASON_ROAM) {
+
+		/* roaming do not return when ScanType is SCAN_PASSIVE in DFS channel */
+#if 0
 		if (ScanType != SCAN_ACTIVE)
 			return;
+#endif
+
 #ifdef CONFIG_LAYER2_ROAMING
 		for (i = 0; i < RTW_SSID_SCAN_AMOUNT; i++) {
 			found = 0;

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include <linux/slab.h>
 #include <linux/gfp.h>
@@ -33,6 +33,11 @@ void pva_kmd_log_err(const char *msg)
 void pva_kmd_log_err_u64(const char *msg, uint64_t val)
 {
 	printk(KERN_ERR "%s: %llu\n", msg, val);
+}
+
+void pva_kmd_log_err_int(const char *msg, int val)
+{
+	printk(KERN_ERR "%s: %d\n", msg, val);
 }
 
 void pva_kmd_log_err_hex32(const char *msg, uint32_t val)
@@ -126,27 +131,32 @@ uint64_t pva_kmd_get_time_tsc(void)
 	return timestamp;
 }
 
-void pva_kmd_atomic_store(pva_kmd_atomic_t *atomic_val, int val)
+void pva_kmd_atomic_store(pva_kmd_atomic_t *a_var, int val)
 {
-	atomic_set(atomic_val, val);
+	atomic_set(a_var, val);
 }
 
-int pva_kmd_atomic_fetch_add(pva_kmd_atomic_t *atomic_val, int val)
+int pva_kmd_atomic_fetch_add(pva_kmd_atomic_t *a_var, int val)
 {
-	return atomic_fetch_add(val, atomic_val);
+	return atomic_fetch_add(val, a_var);
 }
 
-int pva_kmd_atomic_fetch_sub(pva_kmd_atomic_t *atomic_val, int val)
+int pva_kmd_atomic_fetch_sub(pva_kmd_atomic_t *a_var, int val)
 {
-	return atomic_fetch_sub(val, atomic_val);
+	return atomic_fetch_sub(val, a_var);
 }
 
-int pva_kmd_atomic_load(pva_kmd_atomic_t *atomic_val)
+int pva_kmd_atomic_load(pva_kmd_atomic_t *a_var)
 {
-	return atomic_read(atomic_val);
+	return atomic_read(a_var);
 }
 
-bool pva_kmd_is_ops_allowed(struct pva_kmd_context *ctx, uint32_t opcode)
+bool pva_kmd_is_ops_allowed(struct pva_kmd_context *ctx, uint64_t opcode)
 {
 	return true;
+}
+
+void pva_kmd_shim_memory_barrier_order(void)
+{
+	mb();
 }

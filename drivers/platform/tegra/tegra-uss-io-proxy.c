@@ -2,7 +2,7 @@
 /*
  * Tegra Ultrasonics Sensor Subsystem IO-Proxy driver
  *
- * SPDX-FileCopyrightText: Copyright (c) 2021-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2021-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  */
 
 #include <nvidia/conftest.h>
@@ -21,7 +21,6 @@
 #include <linux/wait.h>
 #include <linux/gpio.h>
 #include <linux/delay.h>
-#include <linux/of_gpio.h>
 
 #define SAFETY_I2S_CTRL_0	(0x114)
 #define   MASTER		(1 << 5)

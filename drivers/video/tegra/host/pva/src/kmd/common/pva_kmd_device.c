@@ -324,12 +324,14 @@ static void pva_kmd_print_version_info(struct pva_kmd_device *pva)
 	enum pva_error err;
 	char fw_version[PVA_VERSION_BUFFER_SIZE];
 	char kmd_version[PVA_VERSION_BUFFER_SIZE];
-
 	/* Query and print firmware version */
 	const char *prefix = "PVA FW version: ";
 	const char *kmd_prefix = "PVA KMD version: ";
+	/* MISRA C-2023 Rule 7.4: Use const char * for string literal */
+	const char *commit_id = PVA_SYSSW_COMMIT_ID;
 	uint32_t prefix_len = (uint32_t)strlen(prefix);
 	uint32_t kmd_prefix_len = (uint32_t)strlen(kmd_prefix);
+
 	/* Store initial string */
 	(void)memcpy(fw_version, prefix, prefix_len);
 
@@ -345,7 +347,7 @@ static void pva_kmd_print_version_info(struct pva_kmd_device *pva)
 
 	/* Print PVA KMD version */
 	(void)memcpy(kmd_version, kmd_prefix, kmd_prefix_len);
-	(void)memcpy(kmd_version + kmd_prefix_len, PVA_SYSSW_COMMIT_ID,
+	(void)memcpy(kmd_version + kmd_prefix_len, commit_id,
 		     sizeof(PVA_SYSSW_COMMIT_ID));
 	kmd_version[kmd_prefix_len + sizeof(PVA_SYSSW_COMMIT_ID)] = '\0';
 	pva_kmd_log_info(kmd_version);

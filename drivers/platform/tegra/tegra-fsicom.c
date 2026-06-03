@@ -74,9 +74,11 @@ static int fsicom_fsi_pm_notify(u32 state)
 	pdata[3] = PM_STATE_UNI_CODE;
 
 	/* send pm state to fsi */
-	for (lCoreId = fsi_core.notify_cnt - 1; lCoreId >= 0; lCoreId--) {
-		ret = mbox_send_message(fsi_hsp_v[lCoreId]->tx.chan,
-				(void *)pdata);
+	if (fsi_core.notify_cnt > 0U) {
+		for (lCoreId = (int8_t)(fsi_core.notify_cnt - 1U); lCoreId >= 0; lCoreId--) {
+			ret = mbox_send_message(fsi_hsp_v[lCoreId]->tx.chan,
+					(void *)pdata);
+		}
 	}
 	return ret < 0 ? ret : 0;
 }
@@ -401,6 +403,10 @@ static int fsicom_client_probe(struct platform_device *pdev)
 					continue;
 				if (fsi_core_list[iterator] >= MAX_FSI_CORE) {
 					pr_err("invalid fsi core id configured as notification core\n");
+					return -1;
+				}
+				if (index >= MAX_FSI_CORE) {
+					pr_err("notify list index out of bounds\n");
 					return -1;
 				}
 				fsi_core.notify_list[index] = fsi_core_list[iterator];

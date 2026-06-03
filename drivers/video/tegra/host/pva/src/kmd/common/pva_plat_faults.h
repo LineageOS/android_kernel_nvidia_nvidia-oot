@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
+/* SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
 
 #ifndef PVA_PLAT_FAULTS_H
 #define PVA_PLAT_FAULTS_H
@@ -27,7 +27,7 @@
  */
 #define ASSERT(x)                                                              \
 	if (!(x)) {                                                            \
-		pva_kmd_log_err_u64("PVA KMD ASSERT at " __FILE__, __LINE__);  \
+		pva_kmd_log_err_u64(__func__, __LINE__);                       \
 		pva_kmd_fault();                                               \
 	}
 
@@ -53,8 +53,8 @@
  */
 #define FAULT(msg)                                                             \
 	do {                                                                   \
-		pva_kmd_log_err_u64("PVA KMD FAULT at " __FILE__, __LINE__);   \
 		pva_kmd_log_err(msg);                                          \
+		pva_kmd_log_err_u64(__func__, __LINE__);                       \
 		pva_kmd_fault();                                               \
 	} while (false)
 
@@ -77,17 +77,22 @@
  *
  * @param x        Boolean expression to evaluate
  *                 Valid values: Any expression that evaluates to true or false
- * @param err_file Pointer to null-terminated string containing source file name
+ * @param err_func Pointer to null-terminated string containing the calling
+ *                 function name (typically @c __func__)
  *                 Valid value: non-null string
  * @param err_line Line number where the error occurred
  *                 Valid range: [1 .. UINT64_MAX]
  */
-#define ASSERT_WITH_LOC(x, err_file, err_line)                                 \
-	if (!(x)) {                                                            \
-		pva_kmd_log_err_u64("Error at line", err_line);                \
-		pva_kmd_log_err(err_file);                                     \
-		pva_kmd_log_err("PVA KMD ASSERT");                             \
-		pva_kmd_fault();                                               \
+static inline void pva_kmd_assert_with_loc(bool condition, const char *err_func,
+					   uint64_t err_line)
+{
+	if (!condition) {
+		pva_kmd_log_err_u64(err_func, err_line);
+		pva_kmd_fault();
 	}
+}
+
+#define ASSERT_WITH_LOC(x, err_func, err_line)                                 \
+	pva_kmd_assert_with_loc((bool)(x), (err_func), (err_line))
 
 #endif

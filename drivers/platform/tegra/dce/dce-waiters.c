@@ -28,7 +28,7 @@ int dce_waiters_init(struct tegra_dce *d)
 	int ret = 0;
 	int i;
 
-	if (dce_os_cond_init(&d->dce_bootstrap_done)) {
+	if (dce_os_cond_init(&d->dce_bootstrap_done) != 0) {
 		dce_os_err(d, "dce boot wait condition init failed");
 		ret = -1;
 		goto exit;
@@ -37,7 +37,7 @@ int dce_waiters_init(struct tegra_dce *d)
 	for (i = 0; i < DCE_MAX_WAIT; i++) {
 		struct dce_wait_cond *wait = &d->ipc_waits[i];
 
-		if (dce_wait_cond_init(d, wait)) {
+		if (dce_wait_cond_init(d, wait) != 0) {
 			dce_os_err(d, "dce wait condition %d init failed", i);
 			ret = -1;
 			goto init_error;

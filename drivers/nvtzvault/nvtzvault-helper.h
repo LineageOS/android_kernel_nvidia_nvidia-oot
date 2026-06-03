@@ -4,6 +4,7 @@
 #ifndef NVTZVAULT_HELPER_H
 #define NVTZVAULT_HELPER_H
 
+#include "teec-soc-plugin.h"
 #include <linux/types.h>
 #include <uapi/misc/nvtzvault-ioctl.h>
 
@@ -11,6 +12,8 @@
 #define UINT32_MAX (0xFFFFFFFFU)
 
 #define NVTZVAULT_TEE_PARAM_MAX_COUNT	(8U)
+
+#define NVTZVAULT_ERR(...) pr_err("nvtzvault: " __VA_ARGS__)
 
 /**
  * @brief Error codes returned by SA operations
@@ -103,6 +106,19 @@ struct nvtzvault_tee_buf_context {
  *         0 on success, negative error code on failure
  */
 int nvtzvault_tee_translate_saerror_to_syserror(const uint32_t tzv_error);
+
+/**
+ * @brief Translates TeeClientStatus codes to system error codes
+ *
+ * Maps TeeClientStatus error codes to appropriate Linux errno values
+ * to facilitate proper userspace error handling.
+ *
+ * @param[in] tee_status The TeeClientStatus code to translate
+ *
+ * @return The corresponding system error code (negative errno value)
+ *         0 on success, negative error code on failure
+ */
+int nvtzvault_tee_translate_teeclient_to_syserror(const TeeClientStatus tee_status);
 
 /**
  * @brief Writes data to the buffer context with overflow checking

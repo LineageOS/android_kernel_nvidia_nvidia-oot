@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
+/* SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
 
 #ifndef PVA_CONSTANTS_H
 #define PVA_CONSTANTS_H
@@ -103,22 +103,40 @@
 
 #define PVA_NUM_VMEM_REGIONS_T23X (3U)
 
-#define PVA_MAX(a, b) ((a) > (b) ? (a) : (b))
+/* MISRA C-2023 Rule 14.3: Use preprocessor #if to evaluate max at compile time
+ * instead of runtime ternary which creates invariant controlling expressions */
 
-#define PVA_MAX_NUM_DYNAMIC_ADB_BUFFS                                          \
-	PVA_MAX(PVA_NUM_DYNAMIC_ADB_BUFFS_T26X, PVA_NUM_DYNAMIC_ADB_BUFFS_T23X)
+#if PVA_NUM_DYNAMIC_ADB_BUFFS_T26X >= PVA_NUM_DYNAMIC_ADB_BUFFS_T23X
+#define PVA_MAX_NUM_DYNAMIC_ADB_BUFFS PVA_NUM_DYNAMIC_ADB_BUFFS_T26X
+#else
+#define PVA_MAX_NUM_DYNAMIC_ADB_BUFFS PVA_NUM_DYNAMIC_ADB_BUFFS_T23X
+#endif
 
-#define PVA_MAX_NUM_ADB_BUFFS                                                  \
-	PVA_MAX(PVA_NUM_DMA_ADB_BUFFS_T26X, PVA_NUM_DMA_ADB_BUFFS_T23X)
+#if PVA_NUM_DMA_ADB_BUFFS_T26X >= PVA_NUM_DMA_ADB_BUFFS_T23X
+#define PVA_MAX_NUM_ADB_BUFFS PVA_NUM_DMA_ADB_BUFFS_T26X
+#else
+#define PVA_MAX_NUM_ADB_BUFFS PVA_NUM_DMA_ADB_BUFFS_T23X
+#endif
 
-#define PVA_MAX_NUM_HWSEQ_WORDS                                                \
-	PVA_MAX(PVA_NUM_HWSEQ_WORDS_T26X, PVA_NUM_HWSEQ_WORDS_T23X)
+#if PVA_NUM_HWSEQ_WORDS_T26X >= PVA_NUM_HWSEQ_WORDS_T23X
+#define PVA_MAX_NUM_HWSEQ_WORDS PVA_NUM_HWSEQ_WORDS_T26X
+#else
+#define PVA_MAX_NUM_HWSEQ_WORDS PVA_NUM_HWSEQ_WORDS_T23X
+#endif
 
-#define PVA_MAX_NUM_DMA_CHANNELS                                               \
-	PVA_MAX(PVA_DMA_NUM_CHANNELS_T26X, PVA_DMA_NUM_CHANNELS_T23X)
+#if PVA_DMA_NUM_CHANNELS_T26X >= PVA_DMA_NUM_CHANNELS_T23X
+#define PVA_MAX_NUM_DMA_CHANNELS PVA_DMA_NUM_CHANNELS_T26X
+#else
+#define PVA_MAX_NUM_DMA_CHANNELS PVA_DMA_NUM_CHANNELS_T23X
+#endif
 
-#define PVA_MAX_NUM_DMA_DESC                                                   \
-	PVA_MAX(PVA_NUM_DMA_DESC_T26X, PVA_NUM_DMA_DESC_T23X)
+/* MISRA C-2023 Rule 14.3: Preprocessor-evaluated max to avoid invariant
+ * controlling expression from PVA_MAX macro expansion at runtime */
+#if PVA_NUM_DMA_DESC_T26X >= PVA_NUM_DMA_DESC_T23X
+#define PVA_MAX_NUM_DMA_DESC PVA_NUM_DMA_DESC_T26X
+#else
+#define PVA_MAX_NUM_DMA_DESC PVA_NUM_DMA_DESC_T23X
+#endif
 
 #define PVA_MAX_NUM_USER_DMA_DESC                                              \
 	MAX(PVA_NUM_USER_DMA_DESC_T26X, PVA_NUM_USER_DMA_DESC_T23X)

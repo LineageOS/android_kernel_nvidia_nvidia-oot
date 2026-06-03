@@ -469,7 +469,7 @@
 							 SE_CFG_SM4_ENCRYPT)
 
 #define SE_CFG_SM4_XTS_DECRYPT				(SE_AES_DEC_MODE_XTS | \
-							 SE_CFG_SM4_ENCRYPT)
+							 SE_CFG_SM4_DECRYPT)
 
 #define SE_CRYPTO_CFG_ECB_ENCRYPT			(SE_AES_INPUT_SEL_MEMORY | \
 							 SE_AES_XOR_POS_BYPASS | \
@@ -502,12 +502,6 @@
 							 SE_AES_VCTRAM_SEL_TWEAK | \
 							 SE_AES_XOR_POS_BOTH | \
 							 SE_AES_CORE_SEL_ENCRYPT | \
-							 SE_AES_IV_SEL_REG)
-
-#define SE_CRYPTO_CFG_XTS_DECRYPT			(SE_AES_INPUT_SEL_MEMORY | \
-							 SE_AES_VCTRAM_SEL_TWEAK | \
-							 SE_AES_XOR_POS_BOTH | \
-							 SE_AES_CORE_SEL_DECRYPT | \
 							 SE_AES_IV_SEL_REG)
 
 #define SE_CRYPTO_CFG_XTS_DECRYPT			(SE_AES_INPUT_SEL_MEMORY | \
@@ -589,13 +583,13 @@ enum se_hash_alg {
 	SE_ALG_SHA1,		/* Secure Hash Algorithm-1 (SHA1) mode */
 	SE_ALG_SHA224,		/* Secure Hash Algorithm-224  (SHA224) mode */
 	SE_ALG_SHA256,		/* Secure Hash Algorithm-256  (SHA256) mode */
+	SE_ALG_SM3_256,		/* ShangMi 3 - 256 */
 	SE_ALG_SHA384,		/* Secure Hash Algorithm-384  (SHA384) mode */
 	SE_ALG_SHA512,		/* Secure Hash Algorithm-512  (SHA512) mode */
 	SE_ALG_SHA3_224,	/* Secure Hash Algorithm3-224 (SHA3-224) mode */
 	SE_ALG_SHA3_256,	/* Secure Hash Algorithm3-256 (SHA3-256) mode */
 	SE_ALG_SHA3_384,	/* Secure Hash Algorithm3-384 (SHA3-384) mode */
 	SE_ALG_SHA3_512,	/* Secure Hash Algorithm3-512 (SHA3-512) mode */
-	SE_ALG_SM3_256,		/* ShangMi 3 - 256 */
 	SE_ALG_SHAKE128,	/* Secure Hash Algorithm3 (SHAKE128) mode */
 	SE_ALG_SHAKE256,	/* Secure Hash Algorithm3 (SHAKE256) mode */
 	SE_ALG_HMAC_SHA224,	/* Hash based MAC (HMAC) - 224 */

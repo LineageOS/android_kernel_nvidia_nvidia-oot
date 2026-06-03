@@ -1465,8 +1465,9 @@ static void rtw_core_tx_power_tbl_loaded(void *drv_priv, bool target_loaded, boo
 
 	RTW_INFO("%s target=%d limit=%d\n", __func__, target_loaded, limit_loaded);
 
-	if (target_loaded)
-		;
+	if (target_loaded) {
+		/* TODO: handle target_loaded */
+	}
 #if CONFIG_TXPWR_LIMIT
 	if (limit_loaded)
 		rtw_txpwr_update_cur_lmt_regs(dvobj, true);

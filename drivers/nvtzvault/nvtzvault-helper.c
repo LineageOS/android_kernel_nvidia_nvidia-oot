@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include "nvtzvault-helper.h"
-#include "nvtzvault-common.h"
+#include "teec-soc-plugin.h"
 #include <linux/errno.h>
 #include <linux/printk.h>
 #include <linux/uaccess.h>
@@ -68,6 +68,47 @@ int nvtzvault_tee_translate_saerror_to_syserror(const uint32_t tzv_error)
 	} else {
 		NVTZVAULT_ERR("Unknown SA error code: 0x%x\n", tzv_error);
 		sys_error = -EUSERS;
+	}
+
+	return sys_error;
+}
+
+int nvtzvault_tee_translate_teeclient_to_syserror(const TeeClientStatus tee_status)
+{
+	int sys_error = 0;
+
+	switch (tee_status) {
+	case TEE_CLIENT_STATUS_OK:
+		sys_error = 0;
+		break;
+	case TEE_CLIENT_STATUS_GENERIC_ERROR:
+		sys_error = -EIO;  /* Hardware/communication failure */
+		break;
+	case TEE_CLIENT_STATUS_BAD_PARAMETERS:
+		sys_error = -EINVAL;  /* Invalid argument */
+		break;
+	case TEE_CLIENT_STATUS_BAD_STATE:
+		sys_error = -ENOTCONN;  /* Hardware not ready or busy */
+		break;
+	case TEE_CLIENT_STATUS_NO_RESPONSE_FROM_TOS:
+		sys_error = -ETIMEDOUT;  /* TEE communication timeout */
+		break;
+	case TEE_CLIENT_STATUS_LIST_EMPTY:
+		sys_error = -ENOENT;  /* No such file or directory */
+		break;
+	case TEE_CLIENT_STATUS_OUT_OF_MEMORY:
+		sys_error = -ENOMEM;  /* Memory allocation failure */
+		break;
+	case TEE_CLIENT_STATUS_ACCESS_DENIED:
+		sys_error = -EACCES;  /* Permission denied */
+		break;
+	case TEE_CLIENT_STATUS_TOS_TIMEOUT:
+		sys_error = -ETIMEDOUT;  /* TEE processing timeout */
+		break;
+	default:
+		NVTZVAULT_ERR("Unknown TeeClientStatus error code: %d\n", tee_status);
+		sys_error = -EIO;  /* Fallback for unknown transport errors */
+		break;
 	}
 
 	return sys_error;
@@ -170,7 +211,6 @@ int nvtzvault_tee_check_overflow_and_write(struct nvtzvault_tee_buf_context *ctx
 {
 	int result = 0;
 	uint32_t i;
-	void *local_buf = NULL;
 
 	if (size == 0)
 		goto end;
@@ -202,7 +242,6 @@ int nvtzvault_tee_check_overflow_and_write(struct nvtzvault_tee_buf_context *ctx
 	ctx->current_offset += size;
 
 end:
-	kfree(local_buf);
 	return result;
 }
 

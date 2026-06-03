@@ -101,26 +101,14 @@ int capture_buffer_request(
 	uint32_t flag);
 
 /**
- * @brief Add a capture surface buffer to the buffer management table.
- *
- * @param[in,out]	t	Surface buffer management table
- * @param[in]		fd	FD or NvRm handle to buffer
- *
- * @returns		0 (success), neg. errno (failure)
- */
-int capture_buffer_add(
-	struct capture_buffer_table *t,
-	uint32_t fd);
-
-/**
  * @brief Decrement refcount for buffer mapping, and release it if it reaches
  * zero, unless it is a preserved mapping.
  *
- * @param[in,out]	t	Surface buffer management table
- * @param[in,out]	pin	Surface buffer to unpin
+ * @param[in,out]	tab	Surface buffer management table
+ * @param[in,out]	pin	Capture mapping to unpin
  */
-void put_mapping(
-	struct capture_buffer_table *t,
+void capture_common_put_mapping(
+	struct capture_buffer_table *tab,
 	struct capture_mapping *pin);
 
 /**
@@ -231,10 +219,13 @@ void capture_common_unpin_memory(
  * @param[out] 		meminfo_size 		Size of iova range, excluding offset
  * @param[in,out]	unpins			Unpin data used to unref/unmap buffer
  * 						after capture
+ * @param[in]		flags			Access mode to be used for mapping.
+ *						Valid bit flags: {BUFFER_READ, BUFFER_WRITE}
  */
 int capture_common_pin_and_get_iova(struct capture_buffer_table *buf_ctx,
 		uint32_t mem_handle, uint64_t mem_offset,
 		uint64_t *meminfo_base_address, uint64_t *meminfo_size,
-		struct capture_common_unpins *unpins);
+		struct capture_common_unpins *unpins,
+		uint32_t const flags);
 
 #endif /* __FUSA_CAPTURE_COMMON_H__*/

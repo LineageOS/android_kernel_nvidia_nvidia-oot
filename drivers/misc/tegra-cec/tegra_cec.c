@@ -44,6 +44,13 @@
  */
 #define CEC_XFER_TIMEOUT_MS (5 * 400 + 100)
 
+/*
+ * The expected minimum delay is 4 cycles of CEC_CLK for the signal to
+ * synchronize from APB_CLK to CEC_CLK, which is 4*(1/32000), 125us.
+ * Here we choose 200us for more headroom.
+ */
+#define CEC_PACK_FILTER_DELAY_US 200
+
 static bool post_recovery, text_view_on_sent;
 static u8 text_view_on_command[] = {
 	LOGICAL_ADDRESS_RESERVED2 << 4 | LOGICAL_ADDRESS_TV,
@@ -259,6 +266,7 @@ static irqreturn_t tegra_cec_irq_handler(int irq, void *data)
 	struct device *dev = data;
 	struct tegra_cec *cec = dev_get_drvdata(dev);
 	u32 status, mask, i;
+	u16 block_count, rx_buffer;
 
 	status = tegra_cec_readl(cec->cec_base + TEGRA_CEC_INT_STAT);
 	mask = tegra_cec_readl(cec->cec_base + TEGRA_CEC_INT_MASK);
@@ -336,23 +344,26 @@ static irqreturn_t tegra_cec_irq_handler(int irq, void *data)
 		 TEGRA_CEC_INT_STAT_RX_REGISTER_FULL sets only once and not for
 		 every block if there are more than 1 block in FIFO.
 		 */
-		cec->rx_fifo_data =
+		block_count =
 			tegra_cec_readl(cec->cec_base + TEGRA_CEC_RX_BUFFER_STAT_0);
-		for (i = 0; i < cec->rx_fifo_data; i++) {
-			cec->rx_fifo[i] =
-				readw(cec->cec_base + TEGRA_CEC_RX_REGISTER);
+		for (i = 0; i < block_count; i++) {
+			if (cec->rx_fifo_data < TEGRA_CEC_RX_FIFO_LENGTH) {
+				cec->rx_fifo[cec->rx_fifo_data] =
+					readw(cec->cec_base + TEGRA_CEC_RX_REGISTER);
+				cec->rx_fifo_data++;
+			} else {
+				rx_buffer = readw(cec->cec_base + TEGRA_CEC_RX_REGISTER);
+				dev_err(dev, "rx_fifo is full! %x", rx_buffer);
+			}
 		}
 
-		if (cec->rx_fifo_data == 0) {
+		if (block_count == 0) {
 			dev_info(dev, "rx_fifo_data is empty.\n");
 			readw(cec->cec_base + TEGRA_CEC_RX_REGISTER);
 		}
 
 		tegra_cec_writel(TEGRA_CEC_INT_STAT_RX_REGISTER_FULL,
 			cec->cec_base + TEGRA_CEC_INT_STAT);
-
-		if (cec->is_tegra_cec_suspended)
-			pm_wakeup_event(dev, 0);
 
 		cec->rx_wake = 1;
 		wake_up_interruptible(&cec->rx_waitq);
@@ -867,6 +878,8 @@ static int tegra_cec_suspend(struct platform_device *pdev, pm_message_t state)
 		((cec->physical_addr & 0xFF00) >> 8) | ((cec->physical_addr & 0x00FF) << 8);
 	/* Re-set the filter control */
 	tegra_cec_writel(0x0, cec->cec_base + TEGRA_CEC_MESSAGE_FILTER_CTRL_0);
+	/* Explict delay between unsetting and setting TEGRA_CEC_MESSAGE_FILTER_CTRL_0 */
+	usleep_range(CEC_PACK_FILTER_DELAY_US, (5 * CEC_PACK_FILTER_DELAY_US) / 4);
 	tegra_cec_writel(0x1, cec->cec_base + TEGRA_CEC_MESSAGE_FILTER_CTRL_0);
 	/* Set wake mask enable only for packet filter*/
 	tegra_cec_writel(0x40000, cec->cec_base + TEGRA_CEC_WAKE_MASK_0);
@@ -883,7 +896,6 @@ static int tegra_cec_suspend(struct platform_device *pdev, pm_message_t state)
 	enable_irq_wake(cec->tegra_cec_irq);
 
 	dev_notice(&pdev->dev, "suspended\n");
-	cec->is_tegra_cec_suspended = true;
 	return 0;
 }
 
@@ -900,7 +912,6 @@ static int tegra_cec_resume(struct platform_device *pdev)
 	 * Don't do anything after exiting suspend.
 	 */
 	schedule_work(&cec->work);
-	cec->is_tegra_cec_suspended = false;
 	return 0;
 }
 #endif

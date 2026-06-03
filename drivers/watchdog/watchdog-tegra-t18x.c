@@ -13,6 +13,7 @@
 #include <linux/of_device.h>
 #include <linux/of_irq.h>
 #include <linux/platform_device.h>
+#include <linux/pm.h>
 #include <linux/slab.h>
 #include <linux/syscore_ops.h>
 #include <linux/uaccess.h>
@@ -94,7 +95,11 @@ static bool default_disable;
 module_param(default_disable, bool, 0644);
 MODULE_PARM_DESC(default_disable, "Default state of watchdog");
 
+#if NV_IS_EXPORT_SYMBOL_PRESENT_register_syscore
+static struct syscore tegra_wdt_t18x_syscore;
+#else
 static struct syscore_ops tegra_wdt_t18x_syscore_ops;
+#endif
 
 static struct tegra_wdt_t18x *to_tegra_wdt_t18x(struct watchdog_device *wdt)
 {
@@ -721,7 +726,11 @@ static int tegra_wdt_t18x_probe(struct platform_device *pdev)
 	tegra_wdt_t18x_debugfs_init(twdt_t18x);
 
 	if (twdt_t18x->extended_suspend)
+#if NV_IS_EXPORT_SYMBOL_PRESENT_register_syscore
+		register_syscore(&tegra_wdt_t18x_syscore);
+#else
 		register_syscore_ops(&tegra_wdt_t18x_syscore_ops);
+#endif
 
 	ret = devm_watchdog_register_device(&pdev->dev, &twdt_t18x->wdt);
 	if (ret) {
@@ -737,7 +746,11 @@ cleanup:
 	__tegra_wdt_t18x_disable(twdt_t18x);
 
 	if (twdt_t18x->extended_suspend)
+#if NV_IS_EXPORT_SYMBOL_PRESENT_register_syscore
+		unregister_syscore(&tegra_wdt_t18x_syscore);
+#else
 		unregister_syscore_ops(&tegra_wdt_t18x_syscore_ops);
+#endif
 
 	debugfs_remove_recursive(twdt_t18x->root);
 
@@ -768,14 +781,17 @@ static int tegra_wdt_t18x_remove(struct platform_device *pdev)
 	__tegra_wdt_t18x_disable(twdt_t18x);
 
 	if (twdt_t18x->extended_suspend)
+#if NV_IS_EXPORT_SYMBOL_PRESENT_register_syscore
+		unregister_syscore(&tegra_wdt_t18x_syscore);
+#else
 		unregister_syscore_ops(&tegra_wdt_t18x_syscore_ops);
+#endif
 
 	debugfs_remove_recursive(twdt_t18x->root);
 
 	return 0;
 }
 
-#ifdef CONFIG_PM_SLEEP
 static int tegra_wdt_t18x_suspend(struct device *dev)
 {
 	struct tegra_wdt_t18x *twdt_t18x = dev_get_drvdata(dev);
@@ -805,7 +821,11 @@ static int tegra_wdt_t18x_resume(struct device *dev)
 	return 0;
 }
 
+#if NV_IS_EXPORT_SYMBOL_PRESENT_register_syscore
+static int tegra_wdt_t18x_syscore_suspend(void *data)
+#else
 static int tegra_wdt_t18x_syscore_suspend(void)
+#endif
 {
 	if (t18x_wdt && t18x_wdt->extended_suspend)
 		__tegra_wdt_t18x_disable(t18x_wdt);
@@ -813,28 +833,33 @@ static int tegra_wdt_t18x_syscore_suspend(void)
 	return 0;
 }
 
+#if NV_IS_EXPORT_SYMBOL_PRESENT_register_syscore
+static void tegra_wdt_t18x_syscore_resume(void *data)
+#else
 static void tegra_wdt_t18x_syscore_resume(void)
+#endif
 {
 	if (t18x_wdt && t18x_wdt->extended_suspend)
 		__tegra_wdt_t18x_enable(t18x_wdt);
 }
+
+#if NV_IS_EXPORT_SYMBOL_PRESENT_register_syscore
+static const struct syscore_ops tegra_wdt_t18x_syscore_ops = {
 #else
-static int tegra_wdt_t18x_syscore_suspend(void)
-{
-	return 0;
-}
-
-static void tegra_wdt_t18x_syscore_resume(void) { }
-#endif
-
 static struct syscore_ops tegra_wdt_t18x_syscore_ops = {
+#endif
 	.suspend =	tegra_wdt_t18x_syscore_suspend,
 	.resume =	tegra_wdt_t18x_syscore_resume,
 };
 
-static const struct dev_pm_ops tegra_wdt_t18x_pm_ops = {
-	SET_SYSTEM_SLEEP_PM_OPS(tegra_wdt_t18x_suspend, tegra_wdt_t18x_resume)
+#if NV_IS_EXPORT_SYMBOL_PRESENT_register_syscore
+static struct syscore tegra_wdt_t18x_syscore = {
+	.ops = &tegra_wdt_t18x_syscore_ops,
 };
+#endif
+
+DEFINE_SIMPLE_DEV_PM_OPS(tegra_wdt_t18x_pm_ops, tegra_wdt_t18x_suspend,
+			 tegra_wdt_t18x_resume);
 
 static const struct tegra_wdt_t18x_soc t264_wdt_silicon = {
 	.unmask_hw_irq	= true,
@@ -885,7 +910,7 @@ static struct platform_driver tegra_wdt_t18x_driver = {
 	.driver		= {
 		.owner	= THIS_MODULE,
 		.name	= "tegra_wdt_t18x",
-		.pm	= &tegra_wdt_t18x_pm_ops,
+		.pm	= pm_sleep_ptr(&tegra_wdt_t18x_pm_ops),
 		.of_match_table = of_match_ptr(tegra_wdt_t18x_match),
 	},
 };

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (C) 2023-2024 NVIDIA CORPORATION.  All rights reserved.
+// SPDX-FileCopyrightText: Copyright (C) 2023-2025 NVIDIA CORPORATION.  All rights reserved.
 
 #include <nvidia/conftest.h>
 
@@ -24,7 +24,6 @@
 #include <linux/spi/spi.h>
 #include <linux/acpi.h>
 #include <linux/property.h>
-#include <linux/version.h>
 #if defined(CONFIG_TEGRA_PROD_LEGACY)
 #include <linux/tegra_prod.h>
 #endif

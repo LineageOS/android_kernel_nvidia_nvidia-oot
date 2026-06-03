@@ -179,7 +179,7 @@ static long tegra_hv_vcpu_yield_ioctl(struct file *filp, unsigned int cmd,
 	struct vcpu_yield_dev *data =
 		(struct vcpu_yield_dev *)filp->private_data;
 	struct vcpu_yield_start_ctl yield_start_ctl_data;
-#if defined(NV_WORK_ON_CPU_KEY_PRESENT) /* Linux v6.7 */
+#if defined(NV_WORK_ON_CPU_KEY_PRESENT) /* Linux v6.17 */
 	static struct lock_class_key __key;
 #endif
 
@@ -210,7 +210,7 @@ static long tegra_hv_vcpu_yield_ioctl(struct file *filp, unsigned int cmd,
 			if (data->timeout_us > max_timeout_us)
 				data->timeout_us = max_timeout_us;
 
-#if defined(NV_WORK_ON_CPU_KEY_PRESENT) /* Linux v6.7 */
+#if defined(NV_WORK_ON_CPU_KEY_PRESENT) /* Linux v6.17 */
 			cpus_read_lock();
 			if (cpu_online(data->vcpu))
 				ret = work_on_cpu_key(data->vcpu, vcpu_yield_func,
@@ -469,8 +469,10 @@ static int tegra_hv_vcpu_yield_probe(struct platform_device *pdev)
 	}
 
 out:
-	memset(dt_array_mem, 0, 3 * MAX_YIELD_VM_COUNT * sizeof(int));
-	kfree(dt_array_mem);
+	if (dt_array_mem != NULL) {
+		memset(dt_array_mem, 0, 3 * MAX_YIELD_VM_COUNT * sizeof(int));
+		kfree(dt_array_mem);
+	}
 
 	if (result)
 		tegra_hv_vcpu_yield_remove(pdev);

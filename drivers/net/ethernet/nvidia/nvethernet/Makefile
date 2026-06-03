@@ -1,5 +1,5 @@
 #SPDX-License-Identifier: GPL-2.0-only
-#Copyright (c) 2019-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+#Copyright (c) 2019-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 OSI_COMMON := nvethernetrm/osi/common
 OSI_CORE := nvethernetrm/osi/core

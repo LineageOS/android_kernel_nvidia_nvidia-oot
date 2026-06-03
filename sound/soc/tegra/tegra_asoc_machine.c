@@ -7,7 +7,6 @@
 
 #include <linux/module.h>
 #include <linux/of.h>
-#include <linux/version.h>
 #include <sound/simple_card_utils.h>
 #include <sound/jack.h>
 #include <sound/soc.h>
@@ -52,19 +51,17 @@ static int dpcm_runtime_set_dai_fmt(struct snd_soc_pcm_runtime *rtd,
 #else
 	struct snd_soc_dai *dai = asoc_rtd_to_cpu(rtd, 0);
 #endif
-	struct snd_soc_dapm_widget_list *list = NULL;
+	struct snd_soc_dapm_widget_list *list;
 	int stream = SNDRV_PCM_STREAM_PLAYBACK;
 	struct snd_soc_pcm_runtime *be;
 	struct snd_soc_dapm_widget *widget;
-	int i, ret = 0;
+	int i, ret;
 
 	/* nothing to be done if it is a normal sound card */
 	if (!rtd->card->component_chaining)
 		return 0;
 
-	ret = snd_soc_dapm_dai_get_connected_widgets(dai, stream, &list, NULL);
-	if (ret < 0)
-		return ret;
+	snd_soc_dapm_dai_get_connected_widgets(dai, stream, &list, NULL);
 
 	for_each_dapm_widgets(list, i, widget) {
 		if (widget->id != snd_soc_dapm_dai_in &&
@@ -77,12 +74,10 @@ static int dpcm_runtime_set_dai_fmt(struct snd_soc_pcm_runtime *rtd,
 
 		ret = snd_soc_runtime_set_dai_fmt(be, fmt);
 		if (ret < 0)
-			goto out;
+			return ret;
 	}
 
-out:
-	snd_soc_dapm_dai_free_widgets(&list);
-	return (ret < 0) ? ret : 0;
+	return 0;
 }
 
 static int tegra_machine_codec_set_dai_fmt(struct snd_soc_pcm_runtime *rtd,
@@ -257,7 +252,7 @@ int tegra_machine_add_i2s_codec_controls(struct snd_soc_card *card)
 	struct snd_soc_pcm_runtime *rtd;
 	struct device_node *np;
 	char name[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
-	unsigned int id;
+	const char *prefix;
 	int ret;
 
 	list_for_each_entry(rtd, &card->rtd_list, list) {
@@ -274,17 +269,18 @@ int tegra_machine_add_i2s_codec_controls(struct snd_soc_card *card)
 		data->frame_mode = 0;
 		data->master_mode = 0;
 
-		if (of_property_read_u32(np, "nvidia,ahub-i2s-id", &id) < 0)
+		if ((of_property_read_string(np, "sound-name-prefix", &prefix) < 0)
+			|| (!strstr(prefix, "I2S")))
 			continue;
 
-		snprintf(name, sizeof(name), "I2S%d codec frame mode", id+1);
+		snprintf(name, sizeof(name), "%s codec frame mode", prefix);
 
 		ret = tegra_machine_add_frame_mode_ctl(card, rtd, name, data);
 		if (ret)
 			dev_warn(card->dev, "Failed to add control: %s!\n",
 				 name);
 
-		snprintf(name, sizeof(name), "I2S%d codec master mode", id+1);
+		snprintf(name, sizeof(name), "%s codec master mode", prefix);
 
 		ret = tegra_machine_add_master_mode_ctl(card, rtd, name, data);
 		if (ret) {

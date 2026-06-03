@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include "pva_api_types.h"
 #include "pva_fw.h"
@@ -7,6 +7,7 @@
 #include "pva_kmd_device.h"
 #include "pva_kmd_constants.h"
 #include "pva_kmd_fw_tracepoints.h"
+#include "pva_kmd_shim_debugfs.h"
 
 static int64_t update_fw_trace_level(struct pva_kmd_device *pva,
 				     void *file_data, const uint8_t *in_buffer,
@@ -16,8 +17,9 @@ static int64_t update_fw_trace_level(struct pva_kmd_device *pva,
 	unsigned long retval;
 	size_t copy_size;
 	uint32_t base = 10;
-	char strbuf[11]; // 10 bytes for the highest 32bit value and another 1 byte for the Null character
-	strbuf[10] = '\0';
+	char trace_level_buf
+		[11]; // 10 bytes for the highest 32bit value and another 1 byte for the Null character
+	trace_level_buf[10] = '\0';
 
 	if (size == 0U) {
 		pva_kmd_log_err("Write failed, no data provided");
@@ -25,17 +27,18 @@ static int64_t update_fw_trace_level(struct pva_kmd_device *pva,
 	}
 
 	/* Copy minimum of buffer size and input size */
-	copy_size =
-		(size < (sizeof(strbuf) - 1U)) ? size : (sizeof(strbuf) - 1U);
+	copy_size = (size < (sizeof(trace_level_buf) - 1U)) ?
+				  size :
+				  (sizeof(trace_level_buf) - 1U);
 
-	retval = pva_kmd_copy_data_from_user(strbuf, in_buffer + offset,
-					     copy_size);
+	retval = pva_kmd_copy_data_from_user(trace_level_buf,
+					     in_buffer + offset, copy_size);
 	if (retval != 0UL) {
 		pva_kmd_log_err("Failed to copy write buffer from user");
 		return -1;
 	}
 
-	trace_level = (uint32_t)pva_kmd_strtol(strbuf, base);
+	trace_level = (uint32_t)pva_kmd_strtol(trace_level_buf, base);
 
 	pva->fw_trace_level = trace_level;
 
@@ -115,8 +118,9 @@ void pva_kmd_process_fw_tracepoint(struct pva_kmd_device *pva,
 				   struct pva_fw_tracepoint *tp)
 {
 	char msg_string[200] = { '\0' };
+	int ret;
 
-	snprintf(
+	ret = snprintf(
 		msg_string, sizeof(msg_string),
 		"pva fw tracepoint: type=%s flags=%s slot=%s ccq=%u queue=%u engine=%u arg1=0x%x arg2=0x%x",
 		pva_fw_tracepoint_type_to_string(PVA_BIT(tp->type)),
@@ -125,6 +129,10 @@ void pva_kmd_process_fw_tracepoint(struct pva_kmd_device *pva,
 		(uint32_t)tp->ccq_id, (uint32_t)tp->queue_id,
 		(uint32_t)tp->engine_id, (uint32_t)tp->arg1,
 		(uint32_t)tp->arg2);
+
+	if (ret < 0) {
+		return;
+	}
 
 	pva_kmd_print_str(msg_string);
 }

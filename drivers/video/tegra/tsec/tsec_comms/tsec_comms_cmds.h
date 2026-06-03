@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2022-2024 NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2022-2025 NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
  *
  * Tegra TSEC Module Support
  */
@@ -17,11 +17,25 @@ struct RM_FLCN_QUEUE_HDR {
 
 #define RM_FLCN_QUEUE_HDR_SIZE          sizeof(struct RM_FLCN_QUEUE_HDR)
 
-
+/* Unit ID for the rewind command */
 #define RM_GSP_UNIT_REWIND      (0x00)
+
+/* Unit ID for the init command */
 #define RM_GSP_UNIT_INIT        (0x02)
+
+/* Unit ID for commamds related to HDCP22 */
 #define RM_GSP_UNIT_HDCP22WIRED (0x06)
+
+/* Unit ID to denote the end of all units */
 #define RM_GSP_UNIT_END         (0x11)
+
+/* Unit ID to denote an invalid unit */
+#define RM_GSP_UNIT_INVALID     (0xff)
+
+/* Unit ID for a command that is force sent.
+ * This is used only in the callback structure
+ */
+#define RM_GSP_UNIT_FORCE_SEND_CMD  RM_GSP_UNIT_END
 
 #define RM_GSP_LOG_QUEUE_NUM    (2)
 

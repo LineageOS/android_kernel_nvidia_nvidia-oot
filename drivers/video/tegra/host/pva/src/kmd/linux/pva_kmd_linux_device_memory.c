@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #include "pva_kmd_device_memory.h"
 #include "pva_kmd_utils.h"
 #include "pva_kmd_linux_device.h"
@@ -70,11 +70,11 @@ err_out:
 }
 
 /**
- * memory_handle is dma fd in Linux, NvRM import_id in QNX, shard memory fd in
+ * mem_handle is dma fd in Linux, NvRM import_id in QNX, shard memory fd in
  * sim and native.
  */
 struct pva_kmd_device_memory *
-pva_kmd_device_memory_acquire(uint64_t memory_handle, uint64_t offset,
+pva_kmd_device_memory_acquire(uint64_t mem_handle, uint64_t offset,
 			      uint64_t size, struct pva_kmd_context *ctx)
 {
 	struct dma_buf *dma_buf;
@@ -85,7 +85,13 @@ pva_kmd_device_memory_acquire(uint64_t memory_handle, uint64_t offset,
 		goto err_out;
 	}
 
-	dma_buf = dma_buf_get(memory_handle);
+	/* Validate mem_handle fits in int range for dma_buf_get() */
+	if (mem_handle > (uint64_t)INT_MAX) {
+		pva_kmd_log_err("Invalid memory handle value");
+		goto free_mem;
+	}
+
+	dma_buf = dma_buf_get((int)mem_handle);
 	if (IS_ERR_OR_NULL(dma_buf)) {
 		pva_kmd_log_err("Failed to acquire memory");
 		goto free_mem;
@@ -139,10 +145,10 @@ void pva_kmd_device_memory_free(struct pva_kmd_device_memory *mem)
 }
 
 enum pva_error
-pva_kmd_device_memory_cpu_map(struct pva_kmd_device_memory *memory)
+pva_kmd_device_memory_cpu_map(struct pva_kmd_device_memory *dev_memory)
 {
 	struct pva_kmd_device_memory_impl *mem_impl = container_of(
-		memory, struct pva_kmd_device_memory_impl, dev_mem);
+		dev_memory, struct pva_kmd_device_memory_impl, dev_mem);
 	int ret;
 
 	ret = dma_buf_vmap(mem_impl->dmabuf, &mem_impl->iosysmap);
@@ -151,30 +157,30 @@ pva_kmd_device_memory_cpu_map(struct pva_kmd_device_memory *memory)
 		return PVA_NOMEM;
 	}
 
-	memory->va =
+	dev_memory->va =
 		pva_offset_pointer(mem_impl->iosysmap.vaddr, mem_impl->offset);
 	return PVA_SUCCESS;
 }
 
-void pva_kmd_device_memory_cpu_unmap(struct pva_kmd_device_memory *memory)
+void pva_kmd_device_memory_cpu_unmap(struct pva_kmd_device_memory *dev_memory)
 {
 	struct pva_kmd_device_memory_impl *mem_impl = container_of(
-		memory, struct pva_kmd_device_memory_impl, dev_mem);
+		dev_memory, struct pva_kmd_device_memory_impl, dev_mem);
 
 	ASSERT(mem_impl->dmabuf != NULL);
 
 	dma_buf_vunmap(mem_impl->dmabuf, &mem_impl->iosysmap);
-	memory->va = NULL;
+	dev_memory->va = NULL;
 }
 
 enum pva_error
-pva_kmd_device_memory_iova_map(struct pva_kmd_device_memory *memory,
+pva_kmd_device_memory_iova_map(struct pva_kmd_device_memory *dev_memory,
 			       struct pva_kmd_device *pva,
 			       uint32_t access_flags, uint8_t smmu_ctx_idx)
 {
 	pva_math_error math_err = MATH_OP_SUCCESS;
 	struct pva_kmd_device_memory_impl *mem_impl = container_of(
-		memory, struct pva_kmd_device_memory_impl, dev_mem);
+		dev_memory, struct pva_kmd_device_memory_impl, dev_mem);
 	struct device *dev = get_context_device(pva, smmu_ctx_idx);
 	struct dma_buf_attachment *attach;
 	struct sg_table *sgt;
@@ -235,10 +241,10 @@ err_out:
 	return err;
 }
 
-void pva_kmd_device_memory_iova_unmap(struct pva_kmd_device_memory *memory)
+void pva_kmd_device_memory_iova_unmap(struct pva_kmd_device_memory *dev_memory)
 {
 	struct pva_kmd_device_memory_impl *mem_impl = container_of(
-		memory, struct pva_kmd_device_memory_impl, dev_mem);
+		dev_memory, struct pva_kmd_device_memory_impl, dev_mem);
 
 	ASSERT(mem_impl->dmabuf != NULL);
 

@@ -2508,7 +2508,7 @@ sint validate_recv_frame(_adapter *adapter, union recv_frame *precv_frame)
 	case WIFI_CTRL_TYPE: /* ctrl */
 
 		if (subtype == 0xd4)
-			printk("ACK %02x %02x\n",type, subtype);
+			RTW_INFO("ACK %02x %02x\n",type, subtype);
 
 #ifdef CONFIG_LAYER2_ROAMING
 		if (pmlmepriv->roam_network)

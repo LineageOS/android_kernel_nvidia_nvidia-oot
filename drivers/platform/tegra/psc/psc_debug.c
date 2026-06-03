@@ -109,12 +109,12 @@ setup_extcfg(struct platform_device *pdev)
 	if (!device_property_read_u8_array(&pdev->dev, NV(sidtable),
 				(u8 *)&value, sizeof(value))) {
 		dev_dbg(&pdev->dev, "sidtable:%08x\n", value);
-		writel0(value, base + EXT_CFG_SIDTABLE); /* PSC_EXT_CFG_SIDTABLE_VM0_0 */
+		writel(value, base + EXT_CFG_SIDTABLE); /* PSC_EXT_CFG_SIDTABLE_VM0_0 */
 	}
 
 	if (!device_property_read_u32(&pdev->dev, NV(sidconfig), &value)) {
 		dev_dbg(&pdev->dev, "sidcfg:%08x\n", value);
-		writel0(value, base + EXT_CFG_SIDCONFIG);    /* PSC_EXT_CFG_SIDCONFIG_VM0_0 */
+		writel(value, base + EXT_CFG_SIDCONFIG);    /* PSC_EXT_CFG_SIDCONFIG_VM0_0 */
 	}
 
 	return 0;
@@ -161,10 +161,10 @@ static int psc_mbox_setup_mutex_channel0(struct mbox_controller *mbox,
 	}
 
 	vm_chan = chan->con_priv;
-	writel0(value, vm_chan->base + MBOX_CHAN_AP1_MUTEX);
+	writel(value, vm_chan->base + MBOX_CHAN_AP1_MUTEX);
 
 	/* Check if mutex is acquired/released successfully */
-	value = readl0(vm_chan->base + MBOX_CHAN_AP1_MUTEX);
+	value = readl(vm_chan->base + MBOX_CHAN_AP1_MUTEX);
 	if ((value & MBOX_MUTEX_STATE) != expected_state)
 		return -EBUSY;
 

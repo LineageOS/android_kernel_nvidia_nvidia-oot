@@ -14,12 +14,12 @@
 #include <linux/kernel.h>
 #include <linux/list.h>
 #include <linux/mm.h>
+#include <linux/sched/mm.h>
 #include <linux/rbtree.h>
 #include <linux/dma-buf.h>
 #include <linux/moduleparam.h>
 #include <linux/slab.h>
 #include <linux/nvmap.h>
-#include <linux/version.h>
 #include <linux/vmalloc.h>
 #include <linux/wait.h>
 #include <soc/tegra/fuse.h>
@@ -340,56 +340,101 @@ static void remove_handle_ref(struct nvmap_client *client,
 	nvmap_ref_unlock(client);
 }
 
+static bool nvmap_validate_vma_and_request_flags(
+	struct vm_area_struct *vma, u32 request_flags)
+{
+	vm_flags_t vm_flags = vma->vm_flags;
+
+	if ((vm_flags & VM_EXEC) != 0) {
+		pr_debug("Executable memory is not allowed\n");
+		return false;
+	}
+
+	/*
+	 * vm_flags should have VM_READ or VM_WRITE bit set otherwise
+	 * it indicates PROT_NONE i.e hole in the address space.
+	 */
+	if (!(vm_flags & VM_READ) && !(vm_flags & VM_WRITE)) {
+		pr_debug("vm_flags should have VM_READ or VM_WRITE bit set\n");
+		return false;
+	}
+
+	if (!(vm_flags & VM_WRITE) && !(request_flags & NVMAP_HANDLE_RO)) {
+		pr_debug("Attempt to create RW handle from RO memory failed\n");
+		return false;
+	}
+
+	return true;
+}
+
 struct nvmap_handle_ref *nvmap_create_handle_from_va(struct nvmap_client *client,
 						     ulong vaddr, size_t size,
 						     u32 flags)
 {
 	struct vm_area_struct *vma;
+	struct vm_area_struct *prev_vma = NULL;
 	struct nvmap_handle_ref *ref;
-	vm_flags_t vm_flags;
 	struct mm_struct *mm = current->mm;
+	VMA_ITERATOR(vmi, mm, vaddr);
 
 	/* don't allow non-page aligned addresses. */
-	if (vaddr & ~PAGE_MASK)
-		return ERR_PTR(-EINVAL);
+	if (vaddr & ~PAGE_MASK) {
+		ref = ERR_PTR(-EINVAL);
+		goto fail;
+	}
 
-	nvmap_acquire_mmap_read_lock(mm);
 	vma = find_vma(mm, vaddr);
 	if (unlikely(!vma)) {
-		nvmap_release_mmap_read_lock(mm);
-		return ERR_PTR(-EINVAL);
+		ref = ERR_PTR(-EINVAL);
+		goto fail;
+	}
+
+	if (vma->vm_start > vaddr) {
+		pr_debug("vma->vm_start is greater than vaddr\n");
+		ref = ERR_PTR(-EINVAL);
+		goto fail;
 	}
 
 	if (size == 0U)
 		size = vma->vm_end - vaddr;
 
+	/* Check for wrap-arounds. */
+	if (vaddr + size < vaddr) {
+		pr_debug("vaddr + size wraps-around\n");
+		ref = ERR_PTR(-EINVAL);
+		goto fail;
+	}
+
+	for_each_vma(vmi, vma) {
+		if (!nvmap_validate_vma_and_request_flags(vma, flags)) {
+			ref = ERR_PTR(-EINVAL);
+			goto fail;
+		}
+
+		if (prev_vma && prev_vma->vm_end != vma->vm_start) {
+			pr_debug("Requested virtual address range has holes\n");
+			ref = ERR_PTR(-EINVAL);
+			goto fail;
+		}
+
+		if ((vma->vm_end - vaddr) >= size)
+			break;
+
+		prev_vma = vma;
+	};
+
 	/* Don't allow exuberantly large sizes. */
 	if (!is_nvmap_memory_available(size, NVMAP_HEAP_IOVMM, NUMA_NO_NODE)) {
 		pr_debug("Cannot allocate %zu bytes.\n", size);
-		nvmap_release_mmap_read_lock(mm);
-		return ERR_PTR(-ENOMEM);
+		ref = ERR_PTR(-ENOMEM);
+		goto fail;
 	}
-
-	vm_flags = vma->vm_flags;
-	if ((vm_flags & VM_EXEC) != 0) {
-		pr_err("Executable memory is not allowed\n");
-		nvmap_release_mmap_read_lock(mm);
-		return ERR_PTR(-EINVAL);
-	}
-
-	nvmap_release_mmap_read_lock(mm);
-
-	/*
-	 * If buffer is malloc/mprotect as RO but alloc flag is not passed
-	 * as RO, don't create handle.
-	 */
-	if (!(vm_flags & VM_WRITE) && !(flags & NVMAP_HANDLE_RO))
-		return ERR_PTR(-EINVAL);
 
 	ref = nvmap_create_handle(client, size, flags & NVMAP_HANDLE_RO);
 	if (!IS_ERR(ref))
 		ref->handle->orig_size = size;
 
+fail:
 	return ref;
 }
 
@@ -467,6 +512,49 @@ ref_alloc_fail:
 	return err;
 }
 
+/*
+ * Get handle from ivm_id.
+ *
+ * Input:
+ * 1. u64 ivm_id: The ivm_id of the handle to be get.
+ *
+ * Processing:
+ * 1. Traverse the handles tree to find the handle with the given ivm_id.
+ * 2. If the handle is found, increment the handle refcount and return the handle.
+ * 3. If the handle is not found, return NULL.
+ *
+ * Refcount Updates:
+ * 1. If call is successful, h->ref += 1, else, no updates to any refcount.
+ *
+ * Output:
+ * 1. Returns a pointer to nvmap_handle if successful else NULL.
+ */
+struct nvmap_handle *nvmap_get_handle_from_ivm_id(u64 ivm_id)
+{
+	struct nvmap_handle *h = NULL;
+	struct rb_node *n;
+
+	spin_lock(&nvmap_dev->handle_lock);
+	for (n = rb_first(&nvmap_dev->handles); n; n = rb_next(n)) {
+		h = rb_entry(n, struct nvmap_handle, node);
+		if (h->ivm_id == ivm_id) {
+			BUG_ON(!virt_addr_valid(h));
+
+			pr_debug("Found handle for ivm_id %llu\n", ivm_id);
+
+			/* get handle's ref only if non-zero */
+			if (atomic_inc_not_zero(&h->ref) == 0)
+				break;
+
+			spin_unlock(&nvmap_dev->handle_lock);
+			return h;
+		}
+	}
+	spin_unlock(&nvmap_dev->handle_lock);
+
+	return NULL;
+}
+
 struct nvmap_handle_ref *nvmap_try_duplicate_by_ivmid(
 		struct nvmap_client *client, u64 ivm_id,
 		struct nvmap_heap_block **block)
@@ -540,6 +628,59 @@ fail:
 	mutex_unlock(&h->lock);
 	nvmap_handle_put(h);
 	return NULL;
+}
+
+/*
+ * This function is used to create a handle from an IVM ID.
+ */
+struct nvmap_handle_ref *nvmap_create_handle_from_ivm_id(struct nvmap_client *client,
+	u64 ivm_id, bool is_ro)
+{
+	struct nvmap_handle_ref *ref = NULL;
+	struct nvmap_heap_block *block = NULL;
+	phys_addr_t offs;
+	size_t size = 0;
+	unsigned int peer;
+
+	/*
+	 * See nvmap_heap_alloc() for encoding details.
+	 */
+	offs = ((ivm_id &
+			~((u64)NVMAP_IVM_IVMID_MASK << NVMAP_IVM_IVMID_SHIFT)) >>
+		NVMAP_IVM_LENGTH_WIDTH) << (ffs(NVMAP_IVM_ALIGNMENT) - 1);
+	size = (ivm_id &
+		((1ULL << NVMAP_IVM_LENGTH_WIDTH) - 1)) << PAGE_SHIFT;
+	peer = (ivm_id >> NVMAP_IVM_IVMID_SHIFT);
+
+	ref = nvmap_create_handle(client, size, is_ro);
+	if (IS_ERR_OR_NULL(ref))
+		return ref;
+
+	ref->handle->orig_size = size;
+	ref->handle->peer = peer;
+
+	block = nvmap_carveout_alloc(client, ref->handle,
+				NVMAP_HEAP_CARVEOUT_IVM, &offs);
+	if (IS_ERR_OR_NULL(block)) {
+		nvmap_free_handle(client, ref->handle, is_ro);
+		return ERR_PTR(-ENOMEM);
+	}
+
+	ref->handle->heap_type = NVMAP_HEAP_CARVEOUT_IVM;
+	ref->handle->heap_pgalloc = false;
+	ref->handle->ivm_id = ivm_id;
+	pr_debug("Created handle from IVM ID: %llu\n", ref->handle->ivm_id);
+	ref->handle->carveout = block;
+	nvmap_set_heap_block_handle(block, ref->handle);
+	/*
+	 * barrier to ensure all handle alloc data
+	 * is visible before alloc is seen by other
+	 * processors.
+	 */
+	mb();
+	ref->handle->alloc = true;
+
+	return ref;
 }
 
 struct nvmap_handle_ref *nvmap_duplicate_handle(struct nvmap_client *client,
@@ -1070,10 +1211,21 @@ static void _nvmap_handle_free(struct nvmap_handle *h)
 		h->vaddr = NULL;
 	}
 
-	nvmap_alloc_free(h->pgalloc.pages, nr_page, h->from_va, h->is_subhandle);
+	nvmap_alloc_free(h->pgalloc.pages, nr_page, h->from_va, h->is_subhandle,
+		h->has_hugetlbfs_pages);
 out:
 	NVMAP_TAG_TRACE(trace_nvmap_destroy_handle,
 		NULL, get_current()->pid, 0, NVMAP_TP_ARGS_H(h));
+
+	if (h->heap_type == NVMAP_HEAP_CARVEOUT_IVM &&
+		atomic_read(&h->imported_from_peer)) {
+		/*
+		 * Send a signal to the exporter to decrement its handle refcount
+		 * as importer will not be using the shared buffer anymore.
+		 */
+		nvmap_decrement_handle_refcount_by_ivm_id(h->ivm_id, h->peer);
+	}
+
 	kfree(h);
 }
 

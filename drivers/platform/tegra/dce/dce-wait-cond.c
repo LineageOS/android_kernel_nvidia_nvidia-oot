@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2019-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2019-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -102,12 +102,18 @@ void dce_wait_cond_signal_interruptible(struct tegra_dce *d, struct dce_wait_con
  * @wait : DCE OS wait condition to init.
  *
  * Return : void
+ *
+ * Note: This function resets both the wait condition's complete flag
+ * and the underlying OS condition's complete flag. This is necessary
+ * when a signal was sent but not consumed by a wait (e.g., during
+ * early boot when DCE FW is already running and the wait path is skipped).
  */
 void dce_wait_cond_reset(struct tegra_dce *d, struct dce_wait_cond *wait)
 {
 	DCE_WARN_ON_NULL(d);
 
 	dce_os_atomic_set(&wait->complete, 0);
+	dce_os_cond_reset(&wait->cond_wait);
 }
 
 /**
@@ -122,7 +128,7 @@ int dce_wait_cond_init(struct tegra_dce *d, struct dce_wait_cond *wait)
 {
 	int ret = 0;
 
-	if (dce_os_cond_init(&wait->cond_wait)) {
+	if (dce_os_cond_init(&wait->cond_wait) != 0) {
 		dce_os_err(d, "dce boot wait condition init failed");
 		ret = -1;
 		goto fail;

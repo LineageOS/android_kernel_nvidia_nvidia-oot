@@ -210,6 +210,24 @@ int32_t nvdla_pm_get_lpwr_config(struct platform_device *pdev,
 	return 0;
 }
 
+int32_t nvdla_pm_set_dvfs_config(struct platform_device *pdev,
+	struct dla_dvfs_config *config)
+{
+	(void) pdev;
+	(void) config;
+
+	return 0;
+}
+
+int32_t nvdla_pm_get_dvfs_config(struct platform_device *pdev,
+	struct dla_dvfs_config *config)
+{
+	(void) pdev;
+	(void) config;
+
+	return 0;
+}
+
 int32_t nvdla_pm_reset(struct platform_device *pdev)
 {
 	(void) pdev;

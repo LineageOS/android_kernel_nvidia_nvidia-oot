@@ -31,7 +31,6 @@
 #include <linux/swapops.h>
 #include <linux/of.h>
 #include <linux/iommu.h>
-#include <linux/version.h>
 #include <soc/tegra/fuse.h>
 #include <linux/sched/clock.h>
 #include <linux/sched/mm.h>
@@ -307,7 +306,6 @@ static int nvmap_open(struct inode *inode, struct file *filp)
 	struct nvmap_device *dev = dev_get_drvdata(miscdev->parent);
 	struct nvmap_client *priv;
 	int ret;
-	__attribute__((unused)) struct rlimit old_rlim, new_rlim;
 
 	ret = nonseekable_open(inode, filp);
 	if (unlikely(ret))
@@ -605,6 +603,7 @@ int __init nvmap_probe(struct platform_device *pdev)
 	plat = pdev->dev.platform_data;
 
 	nvmap_dev = dev;
+	nvmap_dev->dev = &pdev->dev;
 	nvmap_dev->plat = plat;
 
 	/*
@@ -692,13 +691,11 @@ fail_heaps:
 		struct nvmap_carveout_node *node = dev->heaps[i];
 
 		nvmap_heap_destroy(nvmap_get_heap_ptr(node));
-		kfree(node);
 	}
 fail:
 #ifdef NVMAP_CONFIG_PAGE_POOLS
 	nvmap_page_pool_fini(nvmap_dev);
 #endif
-	kfree(dev->heaps);
 	if (dev->dev_user.minor != MISC_DYNAMIC_MINOR)
 		misc_deregister(&dev->dev_user);
 	nvmap_dev = NULL;
@@ -738,9 +735,7 @@ int nvmap_remove(struct platform_device *pdev)
 		struct nvmap_carveout_node *node = dev->heaps[i];
 
 		nvmap_heap_destroy(nvmap_get_heap_ptr(node));
-		kfree(node);
 	}
-	kfree(dev->heaps);
 	of_reserved_mem_device_release(&pdev->dev);
 
 	nvmap_dev = NULL;

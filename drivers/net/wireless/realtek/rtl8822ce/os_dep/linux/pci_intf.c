@@ -1492,7 +1492,7 @@ NO_DECLARE:
 		RTW_INFO("rtw_pci_primary_adapter_init Failed!\n");
 		goto free_dvobj;
 	}
-	if (padapter->power_init_fail) {
+	if (!padapter->power_init_success) {
 		printk("power init fail\n");
 		goto free_if_vir;
 	}

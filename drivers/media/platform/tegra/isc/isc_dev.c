@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
-// Copyright (c) 2015-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-FileCopyrightText: Copyright (c) 2015-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include <nvidia/conftest.h>
 
@@ -14,7 +14,6 @@
 #include <linux/regmap.h>
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
-#include <linux/version.h>
 #include <media/isc-dev.h>
 #include <uapi/media/isc-mgr.h>
 

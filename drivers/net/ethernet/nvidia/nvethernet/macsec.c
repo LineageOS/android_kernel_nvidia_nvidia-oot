@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2019-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2019-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #ifdef MACSEC_SUPPORT
 #include "ether_linux.h"
@@ -212,7 +212,7 @@ int macsec_close(struct macsec_priv_data *macsec_pdata)
 }
 
 int macsec_coe_config(struct macsec_priv_data *macsec_pdata,
-		uint32_t coe_enable, uint32_t coe_hdr_offset)
+		      u32 coe_enable, u32 coe_hdr_offset)
 {
 	int ret = 0;
 	struct ether_priv_data *pdata = macsec_pdata->ether_pdata;
@@ -220,15 +220,14 @@ int macsec_coe_config(struct macsec_priv_data *macsec_pdata,
 
 	/* Input is already validated */
 	ret = osi_macsec_coe_config(pdata->osi_core, coe_enable,
-			coe_hdr_offset);
-	if (ret < 0) {
+				    coe_hdr_offset);
+	if (ret < 0)
 		dev_err(dev, "osi_macsec_coe_config failed, %d\n", ret);
-	}
 	return ret;
 }
 
 int macsec_coe_lc(struct macsec_priv_data *macsec_pdata,
-		uint32_t ch, uint32_t lc1, uint32_t lc2)
+		  u32 ch, u32 lc1, u32 lc2)
 {
 	int ret = 0;
 	struct ether_priv_data *pdata = macsec_pdata->ether_pdata;
@@ -236,11 +235,9 @@ int macsec_coe_lc(struct macsec_priv_data *macsec_pdata,
 
 	/* Input is already validated */
 	ret = osi_macsec_coe_lc(pdata->osi_core, ch, lc1, lc2);
-	if (ret < 0) {
+	if (ret < 0)
 		dev_err(dev, "osi_macsec_coe_lc failed, %d\n", ret);
-	}
 	return ret;
-
 }
 
 int macsec_open(struct macsec_priv_data *macsec_pdata,
@@ -289,8 +286,6 @@ int macsec_open(struct macsec_priv_data *macsec_pdata,
 		dev_info(dev, "%s: requested ns_irq %d: %s\n", __func__,
 			 macsec_pdata->ns_irq, macsec_pdata->irq_name[1]);
 		macsec_pdata->is_irq_allocated |= OSI_BIT(1);
-		disable_irq(macsec_pdata->s_irq);
-		disable_irq(macsec_pdata->ns_irq);
 	}
 	/* Invoke OSI HW initialization, initialize standard BYP entries */
 	ret = osi_macsec_init(pdata->osi_core, pdata->osi_core->mtu,
@@ -424,11 +419,20 @@ static struct macsec_priv_data *genl_to_macsec_pdata(struct genl_info *info)
 	struct net_device *ndev;
 	struct ether_priv_data *pdata = NULL;
 	struct macsec_priv_data *macsec_pdata = NULL;
-	char ifname[IFNAMSIZ];
+	char ifname[IFNAMSIZ] = {0};
+	long ret = 0;
 
 	PRINT_ENTRY();
 
-	nla_strscpy(ifname, attrs[NV_MACSEC_ATTR_IFNAME], sizeof(ifname));
+	if (!attrs[NV_MACSEC_ATTR_IFNAME]) {
+		pr_err("%s: Interface name is not passed in nlmessage\n", __func__);
+		goto exit;
+	}
+	ret = nla_strscpy(ifname, attrs[NV_MACSEC_ATTR_IFNAME], sizeof(ifname));
+	if (ret < 0) {
+		pr_err("%s: Failed in copying interface name\n", __func__);
+		goto exit;
+	}
 	ndev = dev_get_by_name(genl_info_net(info),
 			       ifname);
 	if (!ndev) {
@@ -609,22 +613,17 @@ int macsec_dis_rx_sa(struct sk_buff *skb, struct genl_info *info)
 		goto exit;
 	}
 
-	if (!attrs[NV_MACSEC_ATTR_IFNAME] ||
-	    parse_sa_config(attrs, tb_sa, &rx_sa, &pkcs)) {
+	if (parse_sa_config(attrs, tb_sa, &rx_sa, &pkcs)) {
 		dev_err(dev, "%s: failed to parse nlattrs", __func__);
 		ret = -EINVAL;
 		goto exit;
 	}
 
 	dev_info(dev, "%s:\n"
-		"\tsci: %02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n"
 		"\tan: %u\n"
 		"\tpn: %u",
 		__func__,
-		rx_sa.sci[0], rx_sa.sci[1], rx_sa.sci[2], rx_sa.sci[3],
-		rx_sa.sci[4], rx_sa.sci[5], rx_sa.sci[6], rx_sa.sci[7],
 		rx_sa.curr_an, rx_sa.next_pn);
-	dev_info(dev, "\tkey: " KEYSTR, KEY2STR(rx_sa.sak));
 
 	rx_sa.vlan_in_clear = macsec_pdata->vlan_in_clear;
 	mutex_lock(&macsec_pdata->lock);
@@ -725,8 +724,7 @@ int macsec_create_rx_sa(struct sk_buff *skb, struct genl_info *info)
 		goto exit;
 	}
 
-	if (!attrs[NV_MACSEC_ATTR_IFNAME] ||
-	    parse_sa_config(attrs, tb_sa, &rx_sa, &pkcs)) {
+	if (parse_sa_config(attrs, tb_sa, &rx_sa, &pkcs)) {
 		dev_err(dev, "%s: failed to parse nlattrs", __func__);
 		ret = -EINVAL;
 		goto exit;
@@ -735,16 +733,12 @@ int macsec_create_rx_sa(struct sk_buff *skb, struct genl_info *info)
 	rx_sa.pn_window = macsec_pdata->pn_window;
 	rx_sa.vlan_in_clear = macsec_pdata->vlan_in_clear;
 	dev_info(dev, "%s:\n"
-		"\tsci: %02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n"
 		"\tan: %u\n"
 		"\tpn: %u\n"
 		"\tlowest pn: %u\n"
 		"\twindow: %u",
 		__func__,
-		rx_sa.sci[0], rx_sa.sci[1], rx_sa.sci[2], rx_sa.sci[3],
-		rx_sa.sci[4], rx_sa.sci[5], rx_sa.sci[6], rx_sa.sci[7],
 		rx_sa.curr_an, rx_sa.next_pn, rx_sa.lowest_pn, rx_sa.pn_window);
-	dev_info(dev, "\tkey: " KEYSTR, KEY2STR(rx_sa.sak));
 
 #ifdef MACSEC_KEY_PROGRAM
 	ret = hkey_generation(rx_sa.sak, rx_sa.hkey);
@@ -818,8 +812,7 @@ int macsec_en_rx_sa(struct sk_buff *skb, struct genl_info *info)
 		goto exit;
 	}
 
-	if (!attrs[NV_MACSEC_ATTR_IFNAME] ||
-	    parse_sa_config(attrs, tb_sa, &rx_sa, NULL)) {
+	if (parse_sa_config(attrs, tb_sa, &rx_sa, NULL)) {
 		dev_err(dev, "%s: failed to parse nlattrs", __func__);
 		ret = -EINVAL;
 		goto exit;
@@ -876,22 +869,17 @@ int macsec_dis_tx_sa(struct sk_buff *skb, struct genl_info *info)
 		goto exit;
 	}
 
-	if (!attrs[NV_MACSEC_ATTR_IFNAME] ||
-	    parse_sa_config(attrs, tb_sa, &tx_sa, &pkcs)) {
+	if (parse_sa_config(attrs, tb_sa, &tx_sa, &pkcs)) {
 		dev_err(dev, "%s: failed to parse nlattrs", __func__);
 		ret = -EINVAL;
 		goto exit;
 	}
 
 	dev_info(dev, "%s:\n"
-		"\tsci: %02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n"
 		"\tan: %u\n"
 		"\tpn: %u",
 		__func__,
-		tx_sa.sci[0], tx_sa.sci[1], tx_sa.sci[2], tx_sa.sci[3],
-		tx_sa.sci[4], tx_sa.sci[5], tx_sa.sci[6], tx_sa.sci[7],
 		tx_sa.curr_an, tx_sa.next_pn);
-	dev_info(dev, "\tkey: " KEYSTR, KEY2STR(tx_sa.sak));
 
 	tx_sa.vlan_in_clear = macsec_pdata->vlan_in_clear;
 	mutex_lock(&macsec_pdata->lock);
@@ -959,8 +947,7 @@ int macsec_create_tx_sa(struct sk_buff *skb, struct genl_info *info)
 		goto exit;
 	}
 
-	if (!attrs[NV_MACSEC_ATTR_IFNAME] ||
-	    parse_sa_config(attrs, tb_sa, &tx_sa, &pkcs)) {
+	if (parse_sa_config(attrs, tb_sa, &tx_sa, &pkcs)) {
 		dev_err(dev, "%s: failed to parse nlattrs", __func__);
 		ret = -EINVAL;
 		goto exit;
@@ -969,14 +956,10 @@ int macsec_create_tx_sa(struct sk_buff *skb, struct genl_info *info)
 	tx_sa.pn_window = macsec_pdata->pn_window;
 	tx_sa.vlan_in_clear = macsec_pdata->vlan_in_clear;
 	dev_info(dev, "%s:\n"
-		"\tsci: %02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n"
 		"\tan: %u\n"
 		"\tpn: %u",
 		__func__,
-		tx_sa.sci[0], tx_sa.sci[1], tx_sa.sci[2], tx_sa.sci[3],
-		tx_sa.sci[4], tx_sa.sci[5], tx_sa.sci[6], tx_sa.sci[7],
 		tx_sa.curr_an, tx_sa.next_pn);
-	dev_info(dev, "\tkey: " KEYSTR, KEY2STR(tx_sa.sak));
 
 #ifdef MACSEC_KEY_PROGRAM
 	tx_sa.flags = OSI_CREATE_SA;
@@ -1050,8 +1033,7 @@ int macsec_en_tx_sa(struct sk_buff *skb, struct genl_info *info)
 		goto exit;
 	}
 
-	if (!attrs[NV_MACSEC_ATTR_IFNAME] ||
-	    parse_sa_config(attrs, tb_sa, &tx_sa, NULL)) {
+	if (parse_sa_config(attrs, tb_sa, &tx_sa, NULL)) {
 		dev_err(dev, "%s: failed to parse nlattrs", __func__);
 		ret = -EINVAL;
 		goto exit;
@@ -1079,7 +1061,6 @@ exit:
 
 int macsec_deinit(struct sk_buff *skb, struct genl_info *info)
 {
-	struct nlattr **attrs = info->attrs;
 	struct macsec_priv_data *macsec_pdata = NULL;
 	struct macsec_supplicant_data *supplicant;
 	struct ether_priv_data *pdata;
@@ -1087,11 +1068,6 @@ int macsec_deinit(struct sk_buff *skb, struct genl_info *info)
 	int ref_count_lcl = 0;
 
 	PRINT_ENTRY();
-
-	if (!attrs[NV_MACSEC_ATTR_IFNAME]) {
-		ret = -EINVAL;
-		goto exit;
-	}
 
 	macsec_pdata = genl_to_macsec_pdata(info);
 	if (!macsec_pdata) {
@@ -1150,7 +1126,6 @@ exit:
 
 int macsec_init(struct sk_buff *skb, struct genl_info *info)
 {
-	struct nlattr **attrs = info->attrs;
 	struct macsec_priv_data *macsec_pdata = NULL;
 	struct macsec_supplicant_data *supplicant;
 	struct ether_priv_data *pdata = NULL;
@@ -1158,11 +1133,6 @@ int macsec_init(struct sk_buff *skb, struct genl_info *info)
 	int ret = 0;
 
 	PRINT_ENTRY();
-
-	if (!attrs[NV_MACSEC_ATTR_IFNAME]) {
-		ret = -EINVAL;
-		goto exit;
-	}
 
 	macsec_pdata = genl_to_macsec_pdata(info);
 	if (!macsec_pdata) {
@@ -1444,6 +1414,13 @@ int macsec_probe(struct ether_priv_data *pdata)
 		ret = 1;
 		goto init_err;
 	}
+	if (macsec_pdata->is_macsec_enabled_in_dt > 1U) {
+		dev_info(dev,
+			 "macsec parameter value out of range: %u\n",
+			 macsec_pdata->is_macsec_enabled_in_dt);
+		ret = 1;
+		goto init_err;
+	}
 
 	ret = of_property_read_u32(np, "nvidia,macsec_vlan_in_clear",
 				   &macsec_pdata->vlan_in_clear);
@@ -1688,8 +1665,7 @@ int macsec_get_tx_next_pn(struct sk_buff *skb, struct genl_info *info)
 		goto exit;
 	}
 
-	if (!attrs[NV_MACSEC_ATTR_IFNAME] ||
-	    parse_sa_config(attrs, tb_sa, &tx_sa, NULL)) {
+	if (parse_sa_config(attrs, tb_sa, &tx_sa, NULL)) {
 		dev_err(dev, "%s: failed to parse nlattrs", __func__);
 		ret = -EINVAL;
 		goto exit;

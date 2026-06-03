@@ -52,12 +52,6 @@
 
 /* Maximum number of ISP instances supported */
 #define MAX_ISP_INSTANCES 2  /* Support up to 2 ISP instances */
-/**
- * Enable second ISP instance
- * Currently second ISP is disabled, because support needs to be added to RCE to run PFSD vectors
- * on second ISP instance.
- */
-#define ISP_SECOND_INSTANCE_ENABLED 0
 
 /* Device index for ISP0 */
 #define ISP_0_DEVICE_INDEX 0
@@ -116,6 +110,10 @@ struct camera_diag_channel {
 	int num_isp_instances;
 	/* Flag to track whether diagnostics were running before suspend */
 	bool diag_was_running;
+	/* SDL vector management */
+	bool sdl_vectors_loaded;
+	/* Size of the SDL vector */
+	size_t sdl_vector_size;
 };
 
 /* Static CRC table to avoid recalculation */
@@ -455,11 +453,6 @@ static int camera_diag_channel_init(struct camera_diag_channel *ch)
 	/* Find ISP devices - try to get up to max_allowed_instances */
 	for (i = 0; i < max_allowed_instances; i++) {
 		u32 isp_device_index;
-		/* Skip second instance if not enabled */
-		if (i > 0 && !ISP_SECOND_INSTANCE_ENABLED) {
-			dev_info(&ch->dev, "Second ISP instance support is disabled\n");
-			break;
-		}
 
 		if (i == 0)
 			isp_device_index = ISP_0_DEVICE_INDEX;
@@ -575,25 +568,22 @@ error_cleanup:
 }
 
 /**
- * @brief Setup ISP SDL diagnostics.
+ * @brief Load and validate SDL vectors from file.
  *
- * This function sets up the ISP Safety Diagnostic Library (SDL) tests. It
- * loads the appropriate test vectors from a file, validates the CRC,
- * and sends setup commands to the firmware for each ISP instance.
+ * This function loads the appropriate SDL test vectors from a file and
+ * validates the CRC and version. This is the heavy I/O part that can be
+ * done in probe() without requiring IVC notifications.
  *
  * @param[in,out] ch Pointer to the camera diagnostic channel.
  *
- * @retval 0        Success (at least one ISP instance was set up successfully)
+ * @retval 0        Success - vectors loaded and validated
  * @retval -EINVAL  Invalid parameters, CRC validation failed, or version mismatch
- * @retval -ENODEV  No ISP instances available or all setup attempts failed
  * @retval -EFBIG   Test vector file too large for allocated memory
  * @retval -EIO     File read error
- * @retval Other    Error codes from file operations or IVC communication
+ * @retval Other    Error codes from file operations
  */
-static int camera_diag_isp_sdl_setup(struct camera_diag_channel *ch)
+static int camera_diag_sdl_load_vectors(struct camera_diag_channel *ch)
 {
-	struct camrtc_diag_msg req, resp;
-	int err, i;
 	struct file *filp;
 	ssize_t read_size;
 	const struct isp5_sdl_header *header;
@@ -601,17 +591,22 @@ static int camera_diag_isp_sdl_setup(struct camera_diag_channel *ch)
 	char *default_vectors_path = NULL;
 	u32 crc = 0;
 	char *crc_ptr;
-	bool setup_success = false;
-	int chip_id = __tegra_get_chip_id();  /* Use fuse-helper function instead of hardcoded value */
+	int chip_id = __tegra_get_chip_id();
 	u32 expected_version;
+	int err;
 
 	if (ch == NULL || !ch->is_initialized || ch->num_isp_instances == 0) {
 		pr_err("Invalid channel handle or not initialized\n");
 		return -EINVAL;
 	}
 
-	dev_info(&ch->dev, "Setting up ISP SDL diagnostics for %d instance(s)\n",
-		 ch->num_isp_instances);
+	/* Skip if already loaded */
+	if (ch->sdl_vectors_loaded) {
+		dev_dbg(&ch->dev, "SDL vectors already loaded, skipping\n");
+		return 0;
+	}
+
+	dev_dbg(&ch->dev, "Loading SDL vectors from file\n");
 
 	/* Choose the appropriate vector file based on chip ID */
 	switch (chip_id) {
@@ -624,8 +619,8 @@ static int camera_diag_isp_sdl_setup(struct camera_diag_channel *ch)
 		expected_version = DIAG_ISP7_PFSD_VERSION;
 		break;
 	default:
-		dev_err(&ch->dev, "Unsupported chip ID: %d, using default\n", chip_id);
-		default_vectors_path = DEFAULT_ISP7_SDL_VECTORS; // Default to latest
+		dev_err(&ch->dev, "Unsupported chip ID: %d\n", chip_id);
+		default_vectors_path = DEFAULT_ISP7_SDL_VECTORS;
 		expected_version = DIAG_ISP7_PFSD_VERSION;
 		break;
 	}
@@ -636,7 +631,6 @@ static int camera_diag_isp_sdl_setup(struct camera_diag_channel *ch)
 
 	dev_dbg(&ch->dev, "Using ISP SDL vectors from: %s\n", ch->isp_file);
 
-	/* Open the firmware file */
 	filp = filp_open(ch->isp_file, O_RDONLY, 0);
 	if (IS_ERR(filp)) {
 		err = PTR_ERR(filp);
@@ -645,7 +639,6 @@ static int camera_diag_isp_sdl_setup(struct camera_diag_channel *ch)
 		return err;
 	}
 
-	/* Read the file into memory */
 	read_size = kernel_read(filp, ch->mem.ptr, ch->mem.size, &pos);
 	filp_close(filp, NULL);
 
@@ -655,14 +648,10 @@ static int camera_diag_isp_sdl_setup(struct camera_diag_channel *ch)
 	}
 
 	if (read_size > ch->mem.size) {
-		dev_err(&ch->dev, "File too large for allocated memory: %zd > %zu\n",
-				read_size, ch->mem.size);
+		dev_err(&ch->dev, "File too large: %zd > %zu\n", read_size, ch->mem.size);
 		return -EFBIG;
 	}
 
-	dev_dbg(&ch->dev, "Successfully read %zd bytes from ISP SDL vector file\n", read_size);
-
-	/* Validate CRC */
 	header = (struct isp5_sdl_header *)ch->mem.ptr;
 	crc_ptr = (char *)ch->mem.ptr + sizeof(struct isp5_sdl_header);
 
@@ -684,47 +673,77 @@ static int camera_diag_isp_sdl_setup(struct camera_diag_channel *ch)
 		return -EINVAL;
 	}
 
+	ch->sdl_vector_size = read_size;
+	ch->sdl_vectors_loaded = true;
 
+	dev_dbg(&ch->dev, "SDL vectors loaded successfully (%zd bytes)\n", read_size);
+	return 0;
+}
+
+/**
+ * @brief Setup SDL diagnostics with firmware.
+ *
+ * This function sends IVC messages to setup SDL diagnostics with the RTCPU
+ * firmware. This is the lightweight communication part that requires
+ * IVC notifications to work properly.
+ *
+ * @param[in,out] ch Pointer to the camera diagnostic channel.
+ *
+ * @retval 0        Success (at least one ISP instance was set up successfully)
+ * @retval -EINVAL  Invalid parameters
+ * @retval -ENOENT  SDL vectors not loaded yet
+ * @retval -ENODEV  No ISP instances available or all setup attempts failed
+ * @retval Other    Error codes from IVC communication
+ */
+static int camera_diag_sdl_setup_firmware(struct camera_diag_channel *ch)
+{
+	struct camrtc_diag_msg req, resp;
+	int err, i;
+	bool setup_success = false;
+
+	if (ch == NULL || !ch->is_initialized || ch->num_isp_instances == 0) {
+		pr_err("Invalid channel handle or not initialized\n");
+		return -EINVAL;
+	}
+
+	if (!ch->sdl_vectors_loaded) {
+		dev_err(&ch->dev, "SDL vectors not loaded yet\n");
+		return -ENOENT;
+	}
+
+	dev_dbg(&ch->dev, "Setting up SDL diagnostics with firmware\n");
+
+	/* Prepare the setup request */
+	memset(&req, 0, sizeof(req));
+	req.msg_type = CAMRTC_DIAG_ISP5_SDL_SETUP_REQ;
+	req.transaction_id = CAMRTC_DIAG_ISP5_SDL_SETUP_REQ;
+
+	/* Use the different IOVAs for RCE and ISP */
+	req.isp5_sdl_setup_req.rce_iova = ch->mem.iova;
 	/* Set up SDL for each ISP instance */
 	for (i = 0; i < ch->num_isp_instances; i++) {
-		/* Skip second instance if not enabled */
-		if (i > 0 && !ISP_SECOND_INSTANCE_ENABLED) {
-			dev_info(&ch->dev, "Skipping second ISP instance setup (disabled)\n");
-			break;
-		}
-
-		/* Send the setup request to the firmware */
-		memset(&req, 0, sizeof(req));
-		req.msg_type = CAMRTC_DIAG_ISP5_SDL_SETUP_REQ;
-		req.transaction_id = CAMRTC_DIAG_ISP5_SDL_SETUP_REQ + i; /* Unique ID per instance */
-
-		/* Use the different IOVAs for RCE and ISP */
-		req.isp5_sdl_setup_req.rce_iova = ch->mem.iova;
-		req.isp5_sdl_setup_req.isp_iova = ch->mem_isp[i].iova;
-		req.isp5_sdl_setup_req.size = read_size;
-		req.isp5_sdl_setup_req.period = DIAG_ISP_PFSD_PERIOD;
-
-		dev_dbg(&ch->dev, "Sending ISP%d SDL setup request: rce_iova=0x%llx, isp_iova=0x%llx, size=%u\n",
-				i, req.isp5_sdl_setup_req.rce_iova, req.isp5_sdl_setup_req.isp_iova,
-				req.isp5_sdl_setup_req.size);
-
-		err = camera_diag_submit_msg(ch, &req, &resp);
-		if (err != 0) {
-			dev_err(&ch->dev, "Failed to submit ISP%d SDL setup request: %d\n", i, err);
-			/* Continue with next instance if this one fails */
-			continue;
-		}
-
-		if (resp.isp5_sdl_setup_resp.result != CAMRTC_DIAG_SUCCESS) {
-			dev_err(&ch->dev, "ISP%d SDL setup response returned error: %u\n",
-					i, resp.isp5_sdl_setup_resp.result);
-			/* Continue with next instance if this one fails */
-			continue;
-		}
-
-		dev_info(&ch->dev, "ISP%d SDL diagnostics setup successful\n", i);
-		setup_success = true;
+		req.isp5_sdl_setup_req.isp_iova[i] = ch->mem_isp[i].iova;
 	}
+	req.isp5_sdl_setup_req.size = ch->sdl_vector_size;
+	req.isp5_sdl_setup_req.period = DIAG_ISP_PFSD_PERIOD;
+
+	dev_dbg(&ch->dev, "Sending SDL setup request: rce_iova=0x%llx, size=%u\n",
+			req.isp5_sdl_setup_req.rce_iova, req.isp5_sdl_setup_req.size);
+
+	err = camera_diag_submit_msg(ch, &req, &resp);
+	if (err != 0) {
+		dev_err(&ch->dev, "Failed to submit SDL setup request: %d\n", err);
+		return err;
+	}
+
+	if (resp.isp5_sdl_setup_resp.result != CAMRTC_DIAG_SUCCESS) {
+		dev_err(&ch->dev, "SDL setup response returned error: %u\n",
+				resp.isp5_sdl_setup_resp.result);
+		return translate_diag_code(resp.isp5_sdl_setup_resp.result);
+	}
+
+	dev_dbg(&ch->dev, "SDL diagnostics setup successful\n");
+	setup_success = true;
 
 	if (!setup_success) {
 		dev_err(&ch->dev, "Failed to set up SDL diagnostics on any ISP instance\n");
@@ -743,17 +762,15 @@ static int camera_diag_isp_sdl_setup(struct camera_diag_channel *ch)
  *
  * @param[in]     ch          Pointer to the camera diagnostic channel.
  * @param[out]    status      Pointer to store the SDL status information.
- * @param[in]     instance_id ISP instance ID (0 for primary, 1 for secondary if supported).
  *
  * @retval 0        Success
- * @retval -EINVAL  Invalid parameters or second ISP instance not enabled
+ * @retval -EINVAL  Invalid parameters
  * @retval Other    Error codes from camera_diag_submit_msg or translated diagnostic codes
  */
 static int camera_diag_isp_sdl_status(struct camera_diag_channel *ch,
-					 struct camrtc_diag_isp5_sdl_status_resp *status,
-					 int instance_id)
+					 struct camrtc_diag_isp5_sdl_status_resp *status)
 {
-	int err;
+	int err, i;
 	struct camrtc_diag_msg req, resp;
 
 	if (ch == NULL || status == NULL) {
@@ -761,41 +778,31 @@ static int camera_diag_isp_sdl_status(struct camera_diag_channel *ch,
 		return -EINVAL;
 	}
 
-	/* Validate instance_id */
-	if (instance_id >= ch->num_isp_instances) {
-		dev_err(&ch->dev, "Invalid ISP instance ID: %d (max: %d)\n",
-			instance_id, ch->num_isp_instances - 1);
-		return -EINVAL;
-	}
-
-	/* Skip second instance if not enabled */
-	if (instance_id > 0 && !ISP_SECOND_INSTANCE_ENABLED) {
-		dev_info(&ch->dev, "Second ISP instance is disabled\n");
-		return -EINVAL;
-	}
-
-	dev_dbg(&ch->dev, "Getting ISP%d SDL status\n", instance_id);
+	dev_dbg(&ch->dev, "Getting ISP SDL status\n");
 
 	/* Prepare and send the status request */
 	memset(&req, 0, sizeof(req));
 	req.msg_type = CAMRTC_DIAG_ISP5_SDL_STATUS_REQ;
-	req.transaction_id = CAMRTC_DIAG_ISP5_SDL_STATUS_REQ + instance_id; /* Unique ID per instance */
+	req.transaction_id = CAMRTC_DIAG_ISP5_SDL_STATUS_REQ;
 
 	err = camera_diag_submit_msg(ch, &req, &resp);
 	if (err != 0) {
-		dev_err(&ch->dev, "Failed to submit ISP%d SDL status request: %d\n", instance_id, err);
+		dev_err(&ch->dev, "Failed to submit ISP SDL status request: %d\n", err);
 		return err;
 	}
 
 	if (resp.isp5_sdl_status_resp.result != CAMRTC_DIAG_SUCCESS) {
-		dev_err(&ch->dev, "ISP%d SDL status response returned error: %u\n",
-			instance_id, resp.isp5_sdl_status_resp.result);
+		dev_err(&ch->dev, "ISP SDL status response returned error: %u\n",
+			resp.isp5_sdl_status_resp.result);
 		return translate_diag_code(resp.isp5_sdl_status_resp.result);
 	}
 
 	*status = resp.isp5_sdl_status_resp;
-	dev_dbg(&ch->dev, "ISP%d SDL status: running=%u, executed=%llu, passed=%llu\n",
-		instance_id, status->running, status->executed, status->passed);
+	for (i = 0; i < ch->num_isp_instances; i++) {
+		dev_dbg(&ch->dev, "ISP SDL status: running=%u, executed=%llu, passed=%llu for ISP unit %d\n",
+			status->running, status->executed[i],
+			status->passed[i], i);
+	}
 	return 0;
 }
 
@@ -815,7 +822,7 @@ static int camera_diag_isp_sdl_status(struct camera_diag_channel *ch,
 static int __maybe_unused camera_diag_check_status(struct camera_diag_channel *ch)
 {
 	struct camrtc_diag_isp5_sdl_status_resp status_before, status_after;
-	int err;
+	int err, i;
 
 	if (ch == NULL) {
 		pr_err("Invalid channel handle\n");
@@ -825,8 +832,7 @@ static int __maybe_unused camera_diag_check_status(struct camera_diag_channel *c
 	/* Allow at least 1 test to run */
 	msleep(2 * DIAG_ISP_PFSD_PERIOD * 1000);
 
-	/* Use instance 0 (primary ISP) */
-	err = camera_diag_isp_sdl_status(ch, &status_before, 0);
+	err = camera_diag_isp_sdl_status(ch, &status_before);
 	if (err != 0) {
 		pr_err("Diag channel get status failed\n");
 		return err;
@@ -835,24 +841,31 @@ static int __maybe_unused camera_diag_check_status(struct camera_diag_channel *c
 	/* Allow another test scheduling */
 	msleep(2 * DIAG_ISP_PFSD_PERIOD * 1000);
 
-	/* Use instance 0 (primary ISP) */
-	err = camera_diag_isp_sdl_status(ch, &status_after, 0);
+	err = camera_diag_isp_sdl_status(ch, &status_after);
 	if (err != 0) {
 		pr_err("Diag channel get status failed\n");
 		return err;
 	}
 
-	if ((status_after.executed <= status_before.executed) ||
-		(status_after.passed <= status_before.passed)) {
-		pr_err("Error: Number of executed or passed tests is not increasing\n");
-		return -EINVAL;
-	}
+	for (i = 0; i < ch->num_isp_instances; i++) {
+		if ((status_after.executed[i] <= status_before.executed[i]) ||
+			(status_after.passed[i] <= status_before.passed[i])) {
+			pr_err("Error: Number of executed or passed tests is not increasing for ISP unit %d\n",
+				i);
+			return -EINVAL;
+		}
 
-	dev_info(&ch->dev, "Number of executed tests: %llu\n", status_after.executed);
-	dev_info(&ch->dev, "Number of passed tests: %llu\n", status_after.passed);
-	dev_info(&ch->dev, "Number of crc failed tests: %u\n", status_after.crc_failed);
-	dev_info(&ch->dev, "Number of running tests: %u\n", status_after.running);
-	dev_info(&ch->dev, "Number of scheduled tests: %llu\n", status_after.scheduled);
+		dev_info(&ch->dev, "Number of executed tests: %llu for ISP unit %d\n",
+			status_after.executed[i], i);
+		dev_info(&ch->dev, "Number of passed tests: %llu for ISP unit %d\n",
+			status_after.passed[i], i);
+		dev_info(&ch->dev, "Number of crc failed tests: %u for ISP unit %d\n",
+			status_after.crc_failed[i], i);
+		dev_info(&ch->dev, "Number of running tests: %u for ISP unit %d\n",
+			status_after.running, i);
+		dev_info(&ch->dev, "Number of scheduled tests: %llu for ISP unit %d\n",
+			status_after.scheduled[i], i);
+	}
 
 	return 0;
 }
@@ -885,27 +898,19 @@ static ssize_t status_show(struct device *dev, struct device_attribute *attr, ch
 	/* Print status header */
 	pos += sprintf(buf + pos, "Camera diagnostic status:\n");
 
-	/* Get status for each active ISP instance */
+	start_time = jiffies;
+	err = camera_diag_isp_sdl_status(ch, &status);
+
+	end_time = 0U;
+	(void)__builtin_add_overflow(start_time, msecs_to_jiffies(1000), &end_time);
+	if (time_after(jiffies, end_time) || err != 0) {
+		pos += sprintf(buf + pos, "\nError getting diagnostic status: %d\n", err);
+		return pos;
+	}
+
 	for (i = 0; i < ch->num_isp_instances; i++) {
-		/* Skip second instance if not enabled */
-		if (i > 0 && !ISP_SECOND_INSTANCE_ENABLED) {
-			int len = sprintf(buf + pos, "\nISP%d: DISABLED\n", i);
-			(void)__builtin_add_overflow(pos, len, &pos);
-			continue;
-		}
-
-		start_time = jiffies;
-		err = camera_diag_isp_sdl_status(ch, &status, i);
-
-		end_time = 0U;
-		(void)__builtin_add_overflow(start_time, msecs_to_jiffies(1000), &end_time);
-		if (time_after(jiffies, end_time) || err != 0) {
-			pos += sprintf(buf + pos, "\nISP%d: Error getting diagnostic status: %d\n", i, err);
-			continue;
-		}
-
 		/* Calculate diagnostic status */
-		all_tests_pass = (status.executed > 0 && status.passed == status.executed);
+		all_tests_pass = (status.executed[i] > 0 && status.passed[i] == status.executed[i]);
 
 		/* Print detailed status information for this ISP */
 		pos += sprintf(buf + pos,
@@ -918,10 +923,10 @@ static ssize_t status_show(struct device *dev, struct device_attribute *attr, ch
 			"  Status: %s\n",
 			i,
 			status.running,
-			status.scheduled,
-			status.executed,
-			status.passed,
-			status.crc_failed,
+			status.scheduled[i],
+			status.executed[i],
+			status.passed[i],
+			status.crc_failed[i],
 			all_tests_pass ? "All tests passing" :
 			  (status.running ? "Tests running" : "Not active"));
 	}
@@ -958,13 +963,8 @@ static int camera_diag_isp_sdl_release(struct camera_diag_channel *ch)
 
 	/* Release SDL for each ISP instance */
 	for (i = 0; i < ch->num_isp_instances; i++) {
-		/* Skip second instance if not enabled */
-		if (i > 0 && !ISP_SECOND_INSTANCE_ENABLED) {
-			dev_info(&ch->dev, "Skipping second ISP instance release (disabled)\n");
-			break;
-		}
 
-		dev_info(&ch->dev, "Releasing SDL for ISP instance %d\n", i);
+		dev_dbg(&ch->dev, "Releasing SDL for ISP instance %d\n", i);
 
 		/* Prepare and send the release request */
 		memset(&req, 0, sizeof(req));
@@ -1081,7 +1081,7 @@ static ssize_t diag_control_store(struct device *dev, struct device_attribute *a
 
 
 	/* Get current status first */
-	err = camera_diag_isp_sdl_status(ch, &status, 0);
+	err = camera_diag_isp_sdl_status(ch, &status);
 	if (err == 0)
 		is_running = (status.running != 0);
 
@@ -1092,7 +1092,7 @@ static ssize_t diag_control_store(struct device *dev, struct device_attribute *a
 			return count;
 		}
 
-		dev_info(&ch->dev, "Stopping ISP SDL diagnostics\n");
+		dev_dbg(&ch->dev, "Stopping ISP SDL diagnostics\n");
 		err = camera_diag_isp_sdl_release(ch);
 		if (err != 0) {
 			dev_err(&ch->dev, "Failed to stop ISP SDL diagnostics: %d\n", err);
@@ -1108,8 +1108,8 @@ static ssize_t diag_control_store(struct device *dev, struct device_attribute *a
 			return count;
 		}
 
-		dev_info(&ch->dev, "Starting ISP SDL diagnostics\n");
-		err = camera_diag_isp_sdl_setup(ch);
+		dev_dbg(&ch->dev, "Starting ISP SDL diagnostics\n");
+		err = camera_diag_sdl_setup_firmware(ch);
 		if (err != 0) {
 			dev_err(&ch->dev, "Failed to start ISP SDL diagnostics: %d\n", err);
 			return err;
@@ -1144,8 +1144,8 @@ static ssize_t diag_control_show(struct device *dev, struct device_attribute *at
 	if (ch == NULL || !ch->is_initialized)
 		return -EINVAL;
 
-	/* Try to get status for primary ISP instance */
-	err = camera_diag_isp_sdl_status(ch, &status, 0);
+	/* Try to get status for all ISP instances */
+	err = camera_diag_isp_sdl_status(ch, &status);
 	if (err == 0)
 		is_running = (status.running != 0);
 
@@ -1209,6 +1209,8 @@ static int camera_diag_probe(struct tegra_ivc_channel *chan)
 
 	dev_dbg(&chan->dev, "Allocated channel structure\n");
 
+	/* Initialize the device first before setting name */
+	device_initialize(&ch->dev);
 	dev_set_name(&ch->dev, "camera-diag");
 	ch->dev.parent = &chan->dev;
 	ch->dev.type = &tegra_ivc_channel_type;
@@ -1237,6 +1239,8 @@ static int camera_diag_probe(struct tegra_ivc_channel *chan)
 		/* Clean up and return EPROBE_DEFER to try again later */
 		dev_dbg(&chan->dev, "Deferring probe until ISP is ready\n");
 		mutex_destroy(&ch->mutex);
+		/* Clean up device (put_device will free the device name) */
+		put_device(&ch->dev);
 		devm_kfree(&chan->dev, ch->resp_msg);
 		devm_kfree(&chan->dev, ch);
 		return -EPROBE_DEFER;
@@ -1245,20 +1249,19 @@ static int camera_diag_probe(struct tegra_ivc_channel *chan)
 		goto error;
 	}
 
-	/* Set up ISP SDL diagnostics */
-	err = camera_diag_isp_sdl_setup(ch);
+	/* Load SDL vectors (heavy I/O, no firmware communication) */
+	err = camera_diag_sdl_load_vectors(ch);
 	if (err != 0) {
-		dev_err(&chan->dev, "Failed to set up ISP SDL diagnostics: %d\n", err);
-		/* We can continue even if this fails */
-		dev_warn(&chan->dev, "Continuing without ISP SDL diagnostics\n");
+		dev_warn(&chan->dev, "Failed to load SDL vectors: %d\n", err);
+		/* Continue without SDL - can still provide basic status */
 	}
 
 	dev_dbg(&chan->dev, "Set driver data\n");
 
-	/* Create the device */
-	err = device_register(&ch->dev);
+	/* Add the device (already initialized above) */
+	err = device_add(&ch->dev);
 	if (err) {
-		dev_err(&chan->dev, "Failed to register device: %d\n", err);
+		dev_err(&chan->dev, "Failed to add device: %d\n", err);
 		goto error;
 	}
 
@@ -1269,19 +1272,57 @@ static int camera_diag_probe(struct tegra_ivc_channel *chan)
 	err = sysfs_create_group(&ch->dev.kobj, &camera_diag_attr_group);
 	if (err) {
 		dev_err(&chan->dev, "Failed to create sysfs attributes: %d\n", err);
-		device_unregister(&ch->dev);
+		device_del(&ch->dev);
 		goto error;
 	}
 
-	dev_info(&chan->dev, "Camera diagnostics channel ready\n");
+	dev_dbg(&chan->dev, "Camera diagnostics channel ready\n");
 	return 0;
 
 error:
 	dev_err(&chan->dev, "Probe failed with error: %d\n", err);
+	/* Clean up device (put_device will free the device name) */
+	put_device(&ch->dev);
 	/* Destroy mutex */
 	mutex_destroy(&ch->mutex);
 	/* No need to manually free ch as it was allocated with devm_kzalloc */
 	return err;
+}
+
+/**
+ * @brief Late initialization for camera-diagnostics driver.
+ *
+ * This function is called after the IVC ops pointer is set and notifications
+ * are available. It performs the firmware communication part of SDL setup.
+ *
+ * @param[in] chan IVC channel for late initialization.
+ *
+ * @retval 0     Success
+ * @retval Other Error codes from firmware communication
+ */
+static int camera_diag_late_init(struct tegra_ivc_channel *chan)
+{
+	struct camera_diag_channel *ch = tegra_ivc_channel_get_drvdata(chan);
+	int err;
+
+	if (ch == NULL) {
+		dev_err(&chan->dev, "No channel context in late_init\n");
+		return -EINVAL;
+	}
+
+	if (!ch->sdl_vectors_loaded) {
+		dev_err(&chan->dev, "SDL vectors not loaded, diagnostic driver unusable\n");
+		return -ENOENT;
+	}
+
+	err = camera_diag_sdl_setup_firmware(ch);
+	if (err != 0) {
+		dev_err(&chan->dev, "Failed to setup SDL with firmware: %d\n", err);
+		return err;
+	}
+
+	dev_dbg(&chan->dev, "Late initialization completed\n");
+	return 0;
 }
 
 /**
@@ -1307,8 +1348,9 @@ static void camera_diag_remove(struct tegra_ivc_channel *chan)
 	/* Remove sysfs attribute group */
 	sysfs_remove_group(&ch->dev.kobj, &camera_diag_attr_group);
 
-	/* Unregister the device */
-	device_unregister(&ch->dev);
+	/* Remove and cleanup the device */
+	device_del(&ch->dev);
+	put_device(&ch->dev);
 
 	dev_dbg(&chan->dev, "Releasing diagnostics resources\n");
 	camera_diag_channel_deinit(ch);
@@ -1321,7 +1363,7 @@ static void camera_diag_remove(struct tegra_ivc_channel *chan)
 
 	/* No need to free ch as it was allocated with devm_kzalloc */
 
-	dev_info(&chan->dev, "Camera diagnostics driver removed\n");
+	dev_dbg(&chan->dev, "Camera diagnostics driver removed\n");
 }
 
 /**
@@ -1356,7 +1398,7 @@ static int camera_diag_pm_suspend(struct device *dev)
 	/* Check if diagnostics are running */
 	ch->diag_was_running = false;
 	if (ch->num_isp_instances > 0) {
-		err = camera_diag_isp_sdl_status(ch, &status, 0);
+		err = camera_diag_isp_sdl_status(ch, &status);
 		if (err == 0 && status.running != 0) {
 			ch->diag_was_running = true;
 
@@ -1381,13 +1423,13 @@ static int camera_diag_pm_suspend(struct device *dev)
  * This function is called when the system is resuming. It restarts
  * ISP SDL diagnostics if they were running before suspend.
  *
- * Uses the same start API function (camera_diag_isp_sdl_setup) that
- * is called when user writes "start" to the sysfs control interface.
+ * Uses only the firmware communication part (camera_diag_sdl_setup_firmware)
+ * since SDL vectors are already loaded in memory.
  *
  * @param[in] dev Device to resume.
  *
  * @retval 0        Success
- * @retval Other    Error codes from camera_diag_isp_sdl_setup
+ * @retval Other    Error codes from camera_diag_sdl_setup_firmware
  */
 static int camera_diag_pm_resume(struct device *dev)
 {
@@ -1404,9 +1446,8 @@ static int camera_diag_pm_resume(struct device *dev)
 
 	/* Restart diagnostics if they were running before suspend */
 	if (ch->diag_was_running) {
-		/* Start diagnostics using the same API as sysfs control interface */
 		dev_info(dev, "Restarting ISP SDL diagnostics after resume\n");
-		err = camera_diag_isp_sdl_setup(ch);
+		err = camera_diag_sdl_setup_firmware(ch);
 		if (err != 0) {
 			dev_err(dev, "Failed to restart ISP SDL diagnostics after resume: %d\n", err);
 			/* Continue with resume process even if this fails */
@@ -1426,6 +1467,7 @@ static const struct dev_pm_ops camera_diag_pm_ops = {
 /* Operations for camera-diagnostics IVC channel */
 static const struct tegra_ivc_channel_ops camera_diag_ops = {
 	.probe = camera_diag_probe,
+	.late_init = camera_diag_late_init,
 	.remove = camera_diag_remove,
 	.notify = camera_diag_notify,
 };

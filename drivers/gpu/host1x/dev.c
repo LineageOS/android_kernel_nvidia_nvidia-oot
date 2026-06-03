@@ -95,6 +95,15 @@ u32 host1x_sync_readl(struct host1x *host1x, u32 r)
 	return readl(sync_regs + r);
 }
 
+#ifdef CONFIG_64BIT
+u64 host1x_sync_readq(struct host1x *host1x, u32 r)
+{
+	void __iomem *sync_regs = host1x->regs + host1x->info->sync_offset;
+
+	return readq(sync_regs + r);
+}
+#endif
+
 void host1x_ch_writel(struct host1x_channel *ch, u32 v, u32 r)
 {
 	writel(v, ch->regs + r);
@@ -1171,10 +1180,17 @@ static int host1x_probe(struct platform_device *pdev)
 
 	host1x_bo_cache_init(&host->cache);
 
+	/* Create dedicated workqueue for CDMA operations */
+	host->cdma_wq = alloc_workqueue("host1x_cdma", 0, 0);
+	if (!host->cdma_wq) {
+		err = -ENOMEM;
+		goto destroy_cache;
+	}
+
 	err = host1x_iommu_init(host);
 	if (err < 0) {
 		dev_err(&pdev->dev, "failed to setup IOMMU: %d\n", err);
-		goto destroy_cache;
+		goto destroy_wq;
 	}
 
 	err = host1x_channel_list_init(&host->channel_list,
@@ -1245,6 +1261,8 @@ free_channels:
 	host1x_channel_list_free(&host->channel_list);
 iommu_exit:
 	host1x_iommu_exit(host);
+destroy_wq:
+	destroy_workqueue(host->cdma_wq);
 destroy_cache:
 	host1x_bo_cache_destroy(&host->cache);
 
@@ -1265,6 +1283,7 @@ static int host1x_remove(struct platform_device *pdev)
 	host1x_memory_context_list_free(&host->context_list);
 	host1x_channel_list_free(&host->channel_list);
 	host1x_iommu_exit(host);
+	destroy_workqueue(host->cdma_wq);
 	host1x_bo_cache_destroy(&host->cache);
 
 	return 0;

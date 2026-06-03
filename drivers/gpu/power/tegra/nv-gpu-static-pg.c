@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include <nvidia/conftest.h>
 
@@ -31,6 +31,8 @@ struct tegra_gpu_pg_profile {
 
 	/* lock to protect the gpu_pg_mask */
 	struct mutex lock;
+
+	struct tegra_bpmp *gpu_pg_bpmp;
 };
 
 struct tegra_gpu_pg_profile_drv_data {
@@ -81,22 +83,18 @@ static ssize_t gpu_pg_mask_show(struct kobject *kobj, struct kobj_attribute *att
 static ssize_t gpu_pg_mask_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf,
 			     size_t count)
 {
-	struct device *dev = container_of(kobj, struct device, kobj);
-	struct platform_device *pdev = to_platform_device(dev);
-	struct tegra_gpu_pg_profile_drv_data *gpu_pg_profile_drv_data;
 	struct tegra_gpu_pg_profile *gpu_pg_profile;
 	uint32_t gpu_pg_mask;
 	int ret = 0;
 
-	gpu_pg_profile_drv_data = platform_get_drvdata(pdev);
-	gpu_pg_profile = gpu_pg_profile_drv_data->gpu_pg_profile;
+	gpu_pg_profile = container_of(attr, struct tegra_gpu_pg_profile, attr);
 
 	ret = kstrtou32(buf, 0, &gpu_pg_mask);
 	if (ret)
 		return ret;
 
 	mutex_lock(&gpu_pg_profile->lock);
-	ret = bpmp_set_gpu_pg_mask(gpu_pg_profile_drv_data->gpu_pg_bpmp, gpu_pg_mask);
+	ret = bpmp_set_gpu_pg_mask(gpu_pg_profile->gpu_pg_bpmp, gpu_pg_mask);
 	if (ret) {
 		pr_warn("Failed to send the BPMP MRQ for GPU PG mask\n");
 		mutex_unlock(&gpu_pg_profile->lock);
@@ -149,6 +147,7 @@ static int gpu_static_pg_init(struct platform_device *pdev)
 	}
 	mutex_unlock(&gpu_pg_profile->lock);
 
+	gpu_pg_profile->gpu_pg_bpmp = gpu_pg_profile_drv_data->gpu_pg_bpmp;
 	gpu_pg_profile_drv_data->gpu_pg_profile = gpu_pg_profile;
 
 	/* Create sysfs interface for gpu pg mask */

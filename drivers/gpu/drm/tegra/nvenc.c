@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2021-2024, NVIDIA CORPORATION & AFFILIATES. All Rights Reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2021-2026, NVIDIA CORPORATION & AFFILIATES. All Rights Reserved.
  */
 
 #include <linux/bitops.h>
@@ -488,6 +488,12 @@ static __maybe_unused int nvenc_runtime_resume(struct device *dev)
 	if (err < 0)
 		return err;
 
+	err = nvenc_set_rate(nvenc, ULONG_MAX);
+	if (err < 0) {
+		dev_err(dev, "failed to set clock rate: %d\n", err);
+		goto disable;
+	}
+
 	usleep_range(10, 20);
 
 	err = nvenc_load_firmware(nvenc);
@@ -498,8 +504,6 @@ static __maybe_unused int nvenc_runtime_resume(struct device *dev)
 	if (err < 0)
 		goto disable;
 
-	/* Forcely set frequency as Fmax when device is resumed back */
-	nvenc->devfreq->resume_freq = nvenc->devfreq->scaling_max_freq;
 	err = devfreq_resume_device(nvenc->devfreq);
 	if (err < 0)
 		goto disable;
@@ -516,6 +520,9 @@ static __maybe_unused int nvenc_runtime_resume(struct device *dev)
 	return 0;
 
 disable:
+	if (nvenc->icc_write)
+		icc_set_bw(nvenc->icc_write, 0, 0);
+
 	clk_disable_unprepare(nvenc->clk);
 	return err;
 }

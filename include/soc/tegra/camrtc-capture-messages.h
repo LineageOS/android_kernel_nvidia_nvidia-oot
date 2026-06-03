@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0-only
-/* SPDX-FileCopyrightText: Copyright (c) 2016-2025 NVIDIA CORPORATION & AFFILIATES.
+/* SPDX-License-Identifier: GPL-2.0-only
+ * SPDX-FileCopyrightText: Copyright (c) 2016-2026 NVIDIA CORPORATION & AFFILIATES.
  * All rights reserved.
  *
  *
@@ -313,7 +313,8 @@ struct CAPTURE_MSG_HEADER {
  * - @ref CAPTURE_CONTROL_MSG@b::@ref CAPTURE_MSG_HEADER "header"
  *   - @ref CAPTURE_MSG_HEADER::msg_id "msg_id" = @ref CAPTURE_COE_CHANNEL_RESET_REQ
  *   - @ref CAPTURE_MSG_HEADER::channel_id "channel_id" =
- *     @ref CAPTURE_COE_CHANNEL_SETUP_RESP_MSG@b::@ref CAPTURE_MSG_HEADER "header"@b::@ref CAPTURE_MSG_HEADER::channel_id "channel_id"
+ *     @ref CAPTURE_COE_CHANNEL_SETUP_RESP_MSG@b::@ref CAPTURE_MSG_HEADER "header"@b::
+ *                                                @ref CAPTURE_MSG_HEADER::channel_id "channel_id"
  *
  * @par Payload
  * - @ref CAPTURE_COE_CHANNEL_RESET_REQ_MSG
@@ -336,7 +337,8 @@ struct CAPTURE_MSG_HEADER {
  * - @ref CAPTURE_CONTROL_MSG@b::@ref CAPTURE_MSG_HEADER "header"
  *   - @ref CAPTURE_MSG_HEADER::msg_id "msg_id" = @ref CAPTURE_COE_CHANNEL_RESET_RESP
  *   - @ref CAPTURE_MSG_HEADER::channel_id "channel_id" =
- *     @ref CAPTURE_COE_CHANNEL_RESET_REQ_MSG@b::@ref CAPTURE_MSG_HEADER "header"@b::@ref CAPTURE_MSG_HEADER::channel_id "channel_id"
+ *     @ref CAPTURE_COE_CHANNEL_RESET_REQ_MSG@b::@ref CAPTURE_MSG_HEADER "header"@b::
+ *                                               @ref CAPTURE_MSG_HEADER::channel_id "channel_id"
  *
  * @par Payload
  * - @ref CAPTURE_COE_CHANNEL_RESET_RESP_MSG
@@ -357,7 +359,8 @@ struct CAPTURE_MSG_HEADER {
  * - @ref CAPTURE_CONTROL_MSG@b::@ref CAPTURE_MSG_HEADER "header"
  *   - @ref CAPTURE_MSG_HEADER::msg_id "msg_id" = @ref CAPTURE_COE_CHANNEL_RELEASE_REQ
  *   - @ref CAPTURE_MSG_HEADER::channel_id "channel_id" =
- *     @ref CAPTURE_COE_CHANNEL_SETUP_RESP_MSG@b::@ref CAPTURE_MSG_HEADER "header"@b::@ref CAPTURE_MSG_HEADER::channel_id "channel_id"
+ *     @ref CAPTURE_COE_CHANNEL_SETUP_RESP_MSG@b::@ref CAPTURE_MSG_HEADER "header"@b::
+ *                                                @ref CAPTURE_MSG_HEADER::channel_id "channel_id"
  *
  * @par Payload
  * - @ref CAPTURE_COE_CHANNEL_RELEASE_REQ_MSG
@@ -380,7 +383,8 @@ struct CAPTURE_MSG_HEADER {
  * - @ref CAPTURE_CONTROL_MSG@b::@ref CAPTURE_MSG_HEADER "header"
  *   - @ref CAPTURE_MSG_HEADER::msg_id "msg_id" = @ref CAPTURE_COE_CHANNEL_RELEASE_RESP
  *   - @ref CAPTURE_MSG_HEADER::channel_id "channel_id" =
- *     @ref CAPTURE_COE_CHANNEL_RELEASE_REQ_MSG@b::@ref CAPTURE_MSG_HEADER "header"@b::@ref CAPTURE_MSG_HEADER::channel_id "channel_id"
+ *     @ref CAPTURE_COE_CHANNEL_RELEASE_REQ_MSG@b::@ref CAPTURE_MSG_HEADER "header"@b::
+ *                                                 @ref CAPTURE_MSG_HEADER::channel_id "channel_id"
  *
  * @par Payload
  * - @ref CAPTURE_COE_CHANNEL_RELEASE_RESP_MSG
@@ -991,12 +995,33 @@ struct CAPTURE_MSG_HEADER {
  * - @ref CAPTURE_MSG@b::@ref CAPTURE_MSG_HEADER "header"
  *   - @ref CAPTURE_MSG_HEADER::msg_id "msg_id" = @ref CAPTURE_COE_STATUS_IND
  *   - @ref CAPTURE_MSG_HEADER::channel_id "channel_id" =
- *     @ref CAPTURE_COE_REQUEST_MSG@b::@ref CAPTURE_MSG_HEADER "header"@b::@ref CAPTURE_MSG_HEADER::channel_id "channel_id"
+ *     @ref CAPTURE_COE_REQUEST_MSG@b::@ref CAPTURE_MSG_HEADER "header"@b::
+ *                                     @ref CAPTURE_MSG_HEADER::channel_id "channel_id"
  *
  * @par Payload
  * - @ref CAPTURE_COE_STATUS_IND_MSG
  */
 #define CAPTURE_COE_STATUS_IND      MK_U32(0x0B)
+
+/**
+ * @brief Cancel the oldest pending CoE capture request.
+ *
+ * This is a @ref CapMsgType "capture channel message" sent from kernel to RCE
+ * when a capture timeout occurs. RCE will silently clean up its HW and FIFO state,
+ * freeing up FIFO space.
+ *
+ * @pre A CoE capture channel has been set up with a
+ *     @ref CAPTURE_COE_CHANNEL_SETUP_REQ.
+ *
+ * @par Header
+ * - @ref CAPTURE_MSG@b::@ref CAPTURE_MSG_HEADER "header"
+ *   - @ref CAPTURE_MSG_HEADER::msg_id "msg_id" = @ref CAPTURE_COE_CANCEL_REQ
+ *   - @ref CAPTURE_MSG_HEADER::channel_id "channel_id" = CoE channel ID
+ *
+ * @par Payload
+ * - None (header only)
+ */
+#define CAPTURE_COE_CANCEL_REQ      MK_U32(0x0C)
 /** @} */
 
 /**

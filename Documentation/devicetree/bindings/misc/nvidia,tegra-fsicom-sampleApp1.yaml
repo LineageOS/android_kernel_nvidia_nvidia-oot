@@ -38,16 +38,20 @@ select:
 properties:
 
     channelid_list:
+        description: |
+            IVC channel ID that this Sample Application uses for communication. Only channel ID 3 is defined for sampleApp1.
         $ref: "/schemas/types.yaml#/definitions/uint32"
         minimum: 0x3
         maximum: 0x3
 
 required:
     - compatible
+    - channelid_list
 
 examples:
     - |
         FsiComAppChConfApp1 {
             compatible = "nvidia,tegra-fsicom-sampleApp1";
             status = "okay";
+            channelid_list = <3>;
         };

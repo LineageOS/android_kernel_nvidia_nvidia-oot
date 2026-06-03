@@ -7,16 +7,24 @@
 
 #include <linux/ioctl.h>
 
-/* ivc mempool IOCTL magic number */
+/**
+ * @defgroup mempool_ioctl Mempool IOCTL Driver
+ * @{
+ */
+
+/** @brief ivc mempool IOCTL call magic number */
 #define TEGRA_MPLUSERSPACE_IOCTL_MAGIC 0xA6
 
 
 /* IOCTL definitions */
 
-/* query ivc mempool configuration data */
+/** @brief IOCTL call to query ivc mempool configuration data */
 #define TEGRA_MPLUSERSPACE_IOCTL_GET_INFO \
 	_IOR(TEGRA_MPLUSERSPACE_IOCTL_MAGIC, 1, struct ivc_mempool)
 
+/** @brief Maximum IOCTL call number possible */
 #define TEGRA_MPLUSERSPACE_IOCTL_NUMBER_MAX 1
+
+/** @} */
 
 #endif /* NVHVIVC_MEMPOOL_IOCTL_H */

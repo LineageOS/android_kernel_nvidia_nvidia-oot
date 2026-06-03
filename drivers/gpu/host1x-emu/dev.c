@@ -1,7 +1,6 @@
-/*
- * SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- * SPDX-License-Identifier: GPL-2.0-only
- */
+// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+
 #include <nvidia/conftest.h>
 #include <linux/clk.h>
 #include <linux/delay.h>
@@ -66,12 +65,15 @@ struct host1x_interface_ops  host1x_emu_api = {
     .host1x_syncpt_id               = HOST1X_EMU_EXPORT_SYMBOL_NAME(host1x_syncpt_id),
     .host1x_syncpt_wait_ts          = HOST1X_EMU_EXPORT_SYMBOL_NAME(host1x_syncpt_wait_ts),
     .host1x_syncpt_wait             = HOST1X_EMU_EXPORT_SYMBOL_NAME(host1x_syncpt_wait),
-	.host1x_syncpt_get_shim_info    = HOST1X_EMU_EXPORT_SYMBOL_NAME(host1x_syncpt_get_shim_info),
+    .host1x_syncpt_get_shim_info    = HOST1X_EMU_EXPORT_SYMBOL_NAME(host1x_syncpt_get_shim_info),
 
 //nvhost.h Interface
     .host1x_writel                      = HOST1X_EMU_EXPORT_SYMBOL_NAME(host1x_writel),
     .nvhost_get_default_device          = HOST1X_EMU_EXPORT_SYMBOL_NAME(nvhost_get_default_device),
     .nvhost_get_host1x                  = HOST1X_EMU_EXPORT_SYMBOL_NAME(nvhost_get_host1x),
+    .nvhost_syncpt_unit_interface_get_byte_offset   = HOST1X_EMU_EXPORT_SYMBOL_NAME(nvhost_syncpt_unit_interface_get_byte_offset),
+    .nvhost_syncpt_unit_interface_get_aperture      = HOST1X_EMU_EXPORT_SYMBOL_NAME(nvhost_syncpt_unit_interface_get_aperture),
+#ifndef CONFIG_TEGRA_DRM_DISABLE_LEGACY_INTERFACE
     .nvhost_client_device_get_resources = HOST1X_EMU_EXPORT_SYMBOL_NAME(nvhost_client_device_get_resources),
     .nvhost_client_device_init          = HOST1X_EMU_EXPORT_SYMBOL_NAME(nvhost_client_device_init),
     .nvhost_client_device_release       = HOST1X_EMU_EXPORT_SYMBOL_NAME(nvhost_client_device_release),
@@ -86,8 +88,6 @@ struct host1x_interface_ops  host1x_emu_api = {
     .nvhost_syncpt_read_maxval          = HOST1X_EMU_EXPORT_SYMBOL_NAME(nvhost_syncpt_read_maxval),
     .nvhost_syncpt_incr_max_ext         = HOST1X_EMU_EXPORT_SYMBOL_NAME(nvhost_syncpt_incr_max_ext),
     .nvhost_syncpt_unit_interface_get_byte_offset_ext = HOST1X_EMU_EXPORT_SYMBOL_NAME(nvhost_syncpt_unit_interface_get_byte_offset_ext),
-    .nvhost_syncpt_unit_interface_get_byte_offset   = HOST1X_EMU_EXPORT_SYMBOL_NAME(nvhost_syncpt_unit_interface_get_byte_offset),
-    .nvhost_syncpt_unit_interface_get_aperture      = HOST1X_EMU_EXPORT_SYMBOL_NAME(nvhost_syncpt_unit_interface_get_aperture),
     .nvhost_syncpt_unit_interface_init      = HOST1X_EMU_EXPORT_SYMBOL_NAME(nvhost_syncpt_unit_interface_init),
     .nvhost_syncpt_unit_interface_deinit    = HOST1X_EMU_EXPORT_SYMBOL_NAME(nvhost_syncpt_unit_interface_deinit),
     .nvhost_syncpt_address              = HOST1X_EMU_EXPORT_SYMBOL_NAME(nvhost_syncpt_address),
@@ -98,6 +98,7 @@ struct host1x_interface_ops  host1x_emu_api = {
     .nvhost_module_busy                 = HOST1X_EMU_EXPORT_SYMBOL_NAME(nvhost_module_busy),
     .nvhost_module_idle                 = HOST1X_EMU_EXPORT_SYMBOL_NAME(nvhost_module_idle),
     .nvhost_module_idle_mult            = HOST1X_EMU_EXPORT_SYMBOL_NAME(nvhost_module_idle_mult),
+#endif
 };
 
 static const struct of_device_id host1x_of_match[] = {
@@ -175,15 +176,17 @@ static int host1x_get_assigned_resources(struct host1x *host)
 	err = of_property_read_u32_array(np, "nvidia,hr-polling-interval", vals, 1);
 	if (err == 0) {
 		host->hr_polling_intrval = vals[0];
-		if (host->hr_polling_intrval < 50)
+		if (host->hr_polling_intrval < 50000)
 			host->hr_polling_intrval = HRTIMER_TIMEOUT_NSEC;
 	} else {
 		host->hr_polling_intrval = HRTIMER_TIMEOUT_NSEC;
 	}
+#ifdef HOST1X_EMU_SYNCPT_DEBUG
 	pr_info("Host1x-EMU: OS Scheduling resolution :%u\n", HZ);
 	pr_info("Host1x-EMU: HRTimer Resolution :%unsec\n", MONOTONIC_RES_NSEC);
 	pr_info("Host1x-EMU: HRTimer Polling Interval :%unsec\n", host->hr_polling_intrval);
-#endif
+#endif /*HOST1X_EMU_SYNCPT_DEBUG*/
+#endif /*HOST1X_EMU_HRTIMER_FENCE_SCAN*/
 
     err = of_property_read_u32_array(np, "nvidia,syncpoints-mem", vals, 4);
     if (err == 0) {
@@ -221,7 +224,16 @@ static int host1x_get_assigned_resources(struct host1x *host)
         memset((void*)page_addr, 0, PAGE_SIZE << syncpt_pwr_2);
     }
 
-#ifdef HOST1X_EMU_SYNCPT_DEGUB
+	/* Allocate syncpoint-fence bitmap*/
+	host->sync_bmap_cnt = (host->syncpt_count + (sizeof(unsigned long) - 1)) / sizeof(unsigned long);
+	host->sync_bmap     = kzalloc((sizeof(unsigned long) * host->sync_bmap_cnt), GFP_KERNEL);
+	if (host->sync_bmap == NULL) {
+		dev_err(host->dev,
+			"Host1x-EMU: Syncpoint-Fence bitmap allocation failed: %d\n", (-ENOMEM));
+		return -ENOMEM;
+	}
+
+#ifdef HOST1X_EMU_SYNCPT_DEBUG
     pr_info("Host1x-EMU: Syncpoint Physical Addr:%llx\n", host->syncpt_phy_apt);
     pr_info("Host1x-EMU: Syncpoint Page Size :%u\n", host->syncpt_page_size);
     pr_info("Host1x-EMU: Syncpoint Pooling Interval :%u\n", host->polling_intrval);
@@ -239,11 +251,6 @@ static int host1x_get_syncpt_pools(struct host1x *host)
     int i;
 
     if (ACPI_HANDLE(host->dev)) {
-        /*
-         * Set number of R/W pool as 1 for ACPI clients
-         * TODO: Make this based on host->info which is set
-         * based on platform.
-         */
         ret = 1;
     } else {
         ret = of_property_count_strings(np, "nvidia,syncpoint-pool-names");
@@ -278,47 +285,95 @@ static int host1x_get_syncpt_pools(struct host1x *host)
     host->pools[host->ro_pool_id].sp_base = 0;
     host->pools[host->ro_pool_id].sp_end  = host->syncpt_count;
 
-    /* Return if only read only pools*/
-    if (host->num_pools == 0) {
-        return 0;
-    }
+#ifdef HOST1X_EMU_KTHREAD_FENCE_SCAN
+	/* Allocate syncpoint-fence mask for ro-pools */
+	host->pools[host->ro_pool_id].sync_bmap = kzalloc(
+		(sizeof(unsigned long) * host->sync_bmap_cnt), GFP_KERNEL);
+	if (host->pools[host->ro_pool_id].sync_bmap == NULL) {
+		ret = -ENOMEM;
+		dev_err(host->dev,
+			"Host1x-EMU: RO-Pool Syncpoint mask allocation failed: %d\n", (-ENOMEM));
+		goto fail_ro_pool;
+	}
+	/* initially set all bits indicating all syncpoint are part of R/O pool */
+	memset(host->pools[host->ro_pool_id].sync_bmap, 0xFFU,
+		(sizeof(unsigned long) * host->sync_bmap_cnt));
+#endif
 
-    for (i = 0; i < host->num_pools; i++) {
-        struct host1x_syncpt_pool *pool = &host->pools[i];
+	/* Return if only read only pools*/
+	if (host->num_pools == 0)
+		return 0;
 
-        if (ACPI_HANDLE(host->dev)) {
-            /*
-             * TODO: Make this based on host->info which is set
-             * based on platform.
-             */
-            pool->sp_base = 0;
-            pool->sp_end  = host->syncpt_count;
-        } else {
-            ret = of_property_read_string_index(np, "nvidia,syncpoint-pool-names", i, &pool->name);
-            if (ret) {
-                dev_err(host->dev, "Host1x-EMU: Invalid nvidia,syncpoint-pool-names property: %d\n", ret);
-                return ret;
-            }
+	for (i = 0; i < host->num_pools; i++) {
+		struct host1x_syncpt_pool *pool = &host->pools[i];
 
-            ret = of_property_read_u32_index(np, "nvidia,syncpoint-pools", HOST1X_SYNCPT_POOL_BASE(i), &pool->sp_base);
-            if (!ret) {
-                ret = of_property_read_u32_index(np, "nvidia,syncpoint-pools", HOST1X_SYNCPT_POOL_SIZE(i), &pool->sp_end);
-                if (ret) {
-                    dev_err(host->dev, "Host1x-EMU: Invalid nvidia,syncpoint-pools property: %d\n", ret);
-                    return ret;
-                }
-            } else {
-                dev_err(host->dev, "Host1x-EMU: Error in read, invalid nvidia,syncpoint-pools property: %d\n", ret);
-                return ret;
-            }
-        }
+#ifdef HOST1X_EMU_KTHREAD_FENCE_SCAN
+		/* Allocate syncpoint-fence mask for pools
+		 * This mask is used to quick check if syncpoint belongs to pool.
+		 * This mask along with global syncpoint-fence bitmap is used to
+		 * check if the KThread should scan the syncpoint fence.
+		 */
+		pool->sync_bmap = kzalloc((sizeof(unsigned long) * host->sync_bmap_cnt), GFP_KERNEL);
+		if (pool->sync_bmap == NULL) {
+			ret = -ENOMEM;
+			dev_err(host->dev,
+				"Host1x-EMU: RW-Pool Syncpoint mask allocation failed: %d\n", (-ENOMEM));
+			goto fail_rw_pool;
+		}
+#endif
 
-        pool->sp_end = pool->sp_base + pool->sp_end;
-        if (pool->sp_end > host->syncpt_count) {
-            pool->sp_end = host->syncpt_count;
-        }
-    }
-    return 0;
+		if (ACPI_HANDLE(host->dev)) {
+			pool->sp_base = 0;
+			pool->sp_end  = host->syncpt_count;
+		} else {
+			ret = of_property_read_string_index(np,
+							"nvidia,syncpoint-pool-names", i, &pool->name);
+			if (ret) {
+				dev_err(host->dev,
+					"Host1x-EMU: Invalid nvidia,syncpoint-pool-names property: %d\n", ret);
+				goto fail_rw_pool;
+			}
+
+			ret = of_property_read_u32_index(np, "nvidia,syncpoint-pools",
+											HOST1X_SYNCPT_POOL_BASE(i), &pool->sp_base);
+			if (!ret) {
+				ret = of_property_read_u32_index(np, "nvidia,syncpoint-pools",
+											HOST1X_SYNCPT_POOL_SIZE(i), &pool->sp_end);
+				if (ret) {
+					dev_err(host->dev,
+						"Host1x-EMU: Invalid nvidia,syncpoint-pools property: %d\n", ret);
+					goto fail_rw_pool;
+				}
+			} else {
+				dev_err(host->dev,
+					"Host1x-EMU: Missing nvidia,syncpoint-pools property: %d\n", ret);
+				goto fail_rw_pool;
+			}
+		}
+
+		pool->sp_end = pool->sp_base + pool->sp_end;
+		if (pool->sp_end > host->syncpt_count) {
+			ret = -EINVAL;
+			dev_err(host->dev,
+				"Invalid nvidia,syncpoint-pools property values: %d\n", ret);
+			goto fail_rw_pool;
+		}
+	}
+	return 0;
+
+fail_rw_pool:
+#ifdef HOST1X_EMU_KTHREAD_FENCE_SCAN
+	for (i = 0; i < host->num_pools; i++) {
+		struct host1x_syncpt_pool *pool = &host->pools[i];
+
+		if (pool->sync_bmap != NULL)
+			kfree(pool->sync_bmap);
+	}
+	kfree(host->pools[host->ro_pool_id].sync_bmap);
+fail_ro_pool:
+#endif
+	kfree(host->pools);
+	return ret;
 }
 
 static int host1x_probe(struct platform_device *pdev)
@@ -391,14 +446,14 @@ static int host1x_probe(struct platform_device *pdev)
 
     host1x_user_init(host);
 
-#ifdef HOST1X_EMU_SYNCPT_DEGUB
+#ifdef HOST1X_EMU_SYNCPT_DEBUG
     host1x_debug_init(host);
 #endif
 
     if (host->dev->of_node) {
         err = devm_of_platform_populate(&pdev->dev);
         if (err < 0) {
-            pr_info("Host1x-EMU: Failed to populate device from DT\n");
+			dev_err(&pdev->dev, "Host1x-EMU: Failed to populate device from DT\n");
             goto deinit_debugfs;
         }
     }
@@ -413,7 +468,7 @@ static int host1x_probe(struct platform_device *pdev)
     return 0;
 
 deinit_debugfs:
-#ifdef HOST1X_EMU_SYNCPT_DEGUB
+#ifdef HOST1X_EMU_SYNCPT_DEBUG
     host1x_debug_deinit(host);
 #endif
     pm_runtime_put_sync_suspend(&pdev->dev);
@@ -428,7 +483,7 @@ static int host1x_remove(struct platform_device *pdev)
 {
     struct host1x *host = platform_get_drvdata(pdev);
 
-#ifdef HOST1X_EMU_SYNCPT_DEGUB
+#ifdef HOST1X_EMU_SYNCPT_DEBUG
     host1x_debug_deinit(host);
 #endif
     pm_runtime_force_suspend(&pdev->dev);
@@ -441,7 +496,9 @@ static int __maybe_unused host1x_runtime_suspend(struct device *dev)
     struct host1x *host = dev_get_drvdata(dev);
 
     host1x_poll_stop(host);
+#ifdef HOST1X_EMU_PM_SYNCPT_SAVE_RESTORE
     host1x_syncpt_save(host);
+#endif
     return 0;
 }
 
@@ -449,7 +506,9 @@ static int __maybe_unused host1x_runtime_resume(struct device *dev)
 {
     struct host1x *host = dev_get_drvdata(dev);
 
+#ifdef HOST1X_EMU_PM_SYNCPT_SAVE_RESTORE
     host1x_syncpt_restore(host);
+#endif
     host1x_poll_start(host);
     return 0;
 }
@@ -501,7 +560,6 @@ static void __exit tegra_host1x_exit(void)
 }
 module_exit(tegra_host1x_exit);
 
-MODULE_AUTHOR("Amitabh Dutta <amitabhd@nvidia.com>");
 MODULE_AUTHOR("Amitabh Dutta <amitabhd@nvidia.com>");
 MODULE_DESCRIPTION("Emulated Host1x Syncpoint Driver");
 MODULE_LICENSE("GPL");

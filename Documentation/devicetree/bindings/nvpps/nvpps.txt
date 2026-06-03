@@ -17,6 +17,8 @@ Required properties:
 
                 For Example for Thor:
                         mgbe3: ethernet@a808e10000
+- nvpps-event-mode-init: Property that specifies the initial operating mode of the NvPPS driver.
+                         Valid values are 1 (GPIO mode) and 2 (TIMER mode).
 
 Optional properties:
 
@@ -48,11 +50,6 @@ Optional properties:
                       Valid range is from 100ms to 1000ms. This property determines how often
                       the driver collects timestamp data. If this property is not specified,
                       the driver will collect timestamps every 1000ms(1s) by default.
-- nvpps-event-mode-init: Optional property that specifies the initial operating mode of the NvPPS driver.
-                         Valid values are 1 (GPIO mode) and 2 (TIMER mode). If this property is not
-                         specified, the default mode is determined based on the presence of the
-                         nvpps-gpios property - GPIO mode becomes the default when nvpps-gpios is
-                         specified, otherwise TIMER mode is used as the default.
 
 Example: Timer mode on Orin.
 

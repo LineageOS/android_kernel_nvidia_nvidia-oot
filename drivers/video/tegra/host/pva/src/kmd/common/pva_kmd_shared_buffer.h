@@ -1,9 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
+/* SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
 #ifndef PVA_KMD_SHARED_BUFFER_H
 #define PVA_KMD_SHARED_BUFFER_H
-
-#include "pva_kmd_device.h"
 
 /**
  * @brief Function pointer type for processing shared buffer elements
@@ -127,7 +125,7 @@ struct pva_kmd_shared_buffer {
  *                              Valid range: [0 .. PVA_MAX_NUM_CCQ-1]
  * @param[in] element_size      Size of each element in bytes
  *                              Valid range: [1 .. UINT32_MAX]
- * @param[in] buffer_size       Total buffer size in bytes
+ * @param[in] num_entries       Total buffer size in bytes
  *                              Valid range: [element_size .. UINT32_MAX]
  * @param[in] lock_cb           Callback function for acquiring buffer lock
  *                              Valid value: non-null
@@ -142,7 +140,7 @@ struct pva_kmd_shared_buffer {
 enum pva_error pva_kmd_shared_buffer_init(struct pva_kmd_device *pva,
 					  uint8_t interface,
 					  uint32_t element_size,
-					  uint32_t buffer_size,
+					  uint32_t num_entries,
 					  shared_buffer_lock_cb lock_cb,
 					  shared_buffer_lock_cb unlock_cb);
 

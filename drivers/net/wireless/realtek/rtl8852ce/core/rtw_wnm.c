@@ -420,7 +420,6 @@ void rtw_wnm_reset_btm_cache(_adapter *padapter)
 
 	rtw_wnm_reset_btm_candidate(pnb);
 	_rtw_memset(pcache, 0, sizeof(struct btm_rpt_cache));
-	_rtw_memset(pmlmepriv->roam_from_addr, 0, ETH_ALEN);
 	pcache->validity_time = wnm_defualt_validity_time;
 	pcache->disassoc_time= wnm_default_disassoc_time;
 }
@@ -1089,8 +1088,8 @@ static void rtw_wnm_nb_info_update(
 		RTW_WNM_INFO("WNM: bssid(" MAC_FMT
 			") , bss_info(0x%04X), reg_class(0x%02X),"
 			" ch_num(%d), phy_type(0x%02X)\n",
-			MAC_ARG(pnb->nb_rpt.nb_list[i].ent.bssid), pnb->nb_rpt[i].bss_info,
-			pnb->nb_rpt.nb_list[i].ent.reg_class, pnb->nb_rpt[i].ch_num,
+			MAC_ARG(pnb->nb_rpt.nb_list[i].ent.bssid), pnb->nb_rpt.nb_list[i].ent.bss_info,
+			pnb->nb_rpt.nb_list[i].ent.reg_class, pnb->nb_rpt.nb_list[i].ent.ch_num,
 			pnb->nb_rpt.nb_list[i].ent.phy_type);
 
 		if (pnb->nb_rpt.nb_list[i].ent.ch_num == 0)

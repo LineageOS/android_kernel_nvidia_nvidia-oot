@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Copyright (c) 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2022-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  */
 
 #ifndef _M_TTCAN_LINUX_H
@@ -20,7 +20,6 @@
 #include <linux/if_ether.h>
 #include <linux/io.h>
 #include <linux/gpio.h>
-#include <linux/of_gpio.h>
 #include <linux/platform_device.h>
 #include <linux/clk.h>
 #include <linux/reset.h>

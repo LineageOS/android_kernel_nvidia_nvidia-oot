@@ -9,6 +9,10 @@ else
 ifdef CONFIG_TEGRA_HDMI_IN
 obj-m += hdmi-in/
 endif
+ifdef CONFIG_TEGRA_EP
+obj-m += explore/audio/
+obj-m += explore/cec/
+endif
 endif
 obj-m += nvsciipc/
 ifdef CONFIG_PCI

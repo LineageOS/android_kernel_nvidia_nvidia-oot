@@ -141,7 +141,7 @@ int vblk_prep_ufs_combo_ioc(struct vblk_dev *vblkdev,
 	struct ufs_ioc_query_req __user *usr_ptr;
 	uint32_t combo_cmd_size;
 	uint32_t ioctl_bytes = VBLK_UFS_MAX_IOC_SIZE;
-	uint8_t *tmpaddr;
+	void *tmpaddr;
 	void *ioctl_buf;
 	size_t data_len = 0;
 	bool w_flag = false;
@@ -185,9 +185,9 @@ int vblk_prep_ufs_combo_ioc(struct vblk_dev *vblkdev,
 		goto free_ioc_buf;
 	}
 	memset(&ic, 0, sizeof(ic));
-	tmpaddr = (uint8_t *)&ic;
+	tmpaddr = (void *)&ic;
 	for (i = 0; i < combo_info->count; i++) {
-		if (copy_from_user((void *)tmpaddr, usr_ptr, sizeof(ic))) {
+		if (copy_from_user(tmpaddr, usr_ptr, sizeof(ic))) {
 			err = -EFAULT;
 			goto free_ioc_buf;
 		}

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2019-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2019-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include "ether_linux.h"
 
@@ -84,49 +84,23 @@ empty:
 	raw_spin_unlock_irqrestore(&pdata->txts_lock, flags);
 }
 
-/**
- * @brief Adds delay in micro seconds.
- *
- * Algorithm: Invokes OSD delay function for adding delay
- *
- * @param[in] usec: Delay number in micro seconds.
- */
-static void osd_udelay(unsigned long long usec)
+void osd_udelay(unsigned long long usec)
 {
 	udelay(usec);
 }
 
-/**
- * @brief Adds sleep in micro seconds
- *
- * Algorithm: Invokes OSD function to add sleep.
- *
- * @param[in] umin: Minimum sleep required in micro seconds.
- */
-static void osd_usleep(unsigned long long usec)
+void osd_usleep(unsigned long long usec)
 {
 	fsleep(usec);
 }
 
-/**
- * @brief osd_log - OSD logging function
- *
- * @param[in] priv: OSD private data
- * @param[in] func: function name
- * @param[in] line: line number
- * @param[in] level: log level
- * @param[in] type: error type
- * @param[in] err:  error string
- * @param[in] loga: error additional information
- *
- */
-static void osd_log(void *priv,
-		    const char *func,
-		    unsigned int line,
-		    unsigned int level,
-		    unsigned int type,
-		    const char *err,
-		    unsigned long long loga)
+void osd_log(void *priv,
+	     const char *func,
+	     unsigned int line,
+	     unsigned int level,
+	     unsigned int type,
+	     const char *err,
+	     unsigned long long loga)
 {
 	if (priv) {
 		switch (level) {
@@ -650,12 +624,12 @@ void osd_receive_packet(void *priv, struct osi_rx_ring *rx_ring,
 			skb->ip_summed = CHECKSUM_NONE;
 		}
 
-#ifndef OSI_STRIPPED_LIB
 		if ((rx_pkt_cx->flags & OSI_PKT_CX_RSS) == OSI_PKT_CX_RSS) {
 			skb_set_hash(skb, rx_pkt_cx->rx_hash,
 				     rx_pkt_cx->rx_hash_type);
 		}
 
+#ifndef OSI_STRIPPED_LIB
 		if ((rx_pkt_cx->flags & OSI_PKT_CX_VLAN) == OSI_PKT_CX_VLAN) {
 			val = pdata->osi_dma->dstats.rx_vlan_pkt_n;
 			pdata->osi_dma->dstats.rx_vlan_pkt_n = update_stats_counter(val, 1UL);
@@ -893,7 +867,7 @@ void ether_restart_lane_bringup_task(struct tasklet_struct *t)
 		netif_carrier_off(pdata->ndev);
 		netif_tx_stop_all_queues(pdata->ndev);
 		netif_tx_unlock(pdata->ndev);
-		schedule_delayed_work(&pdata->set_speed_work, msecs_to_jiffies(500));
+		schedule_delayed_work(&pdata->set_speed_work, msecs_to_jiffies(10));
 		if (netif_msg_drv(pdata)) {
 			netdev_info(pdata->ndev, "Disable network Tx Queue\n");
 		}
@@ -910,6 +884,12 @@ void ether_restart_lane_bringup_task(struct tasklet_struct *t)
 void osd_restart_lane_bringup(void *priv, unsigned int en_disable)
 {
 	struct ether_priv_data *pdata = (struct ether_priv_data *)priv;
+
+#ifdef ETHER_PRBS_SUPPORT
+	/* Do nothing if PRBS mode is enabled */
+	if (pdata->prbs_mode == OSI_ENABLE)
+		return;
+#endif /* ETHER_PRBS_SUPPORT */
 
 	pdata->tx_start_stop = en_disable;
 	tasklet_hi_schedule(&pdata->lane_restart_task);

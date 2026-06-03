@@ -83,9 +83,11 @@ struct fsm_event_ent int_event_tbl[] = {
 	EV_DBG(FSM_GBL_EV_MASK),
 	EV_DBG(FSM_EV_CONNECTED),
 	EV_DBG(FSM_EV_CONNECT_FAIL),
-	EV_DBG(FSM_EV_DISCONNECTED),
+	EV_DBG(FSM_EV_DISCONNECT_START),
+	EV_DBG(FSM_EV_DISCONNECT_END),
 	EV_DBG(FSM_EV_SCAN_START),
 	EV_DBG(FSM_EV_SCAN_DONE),
+	EV_DBG(FSM_EV_FREE_STA),
 
 	EV_DBG(FSM_EV_GBL_MAX)
 };
@@ -1217,6 +1219,8 @@ static void fsm_free_msg(struct fsm_msg *msg)
 
 static void fsm_user_evt_handler(struct fsm_main *fsm)
 {
+	_adapter *a = fsm_to_adapter(fsm);
+	struct sta_info *psta = NULL;
 	struct fsm_msg *msg;
 	struct fsm_obj *obj;
 
@@ -1249,10 +1253,21 @@ static void fsm_user_evt_handler(struct fsm_main *fsm)
 
 		/* pre handle events */
 		switch(msg->event) {
+		case FSM_EV_DISCONNECT_END:
+			/* psta will change to self sta after disconnection */
+			psta = rtw_get_stainfo(&a->stapriv, a->phl_role->mac_addr);
+			fallthrough;
 		case FSM_EV_CONNECTED:
-		case FSM_EV_DISCONNECTED:
-			if (msg->param && !msg->param_sz)
-				obj->psta = (struct sta_info *)msg->param;
+			if (!psta)
+				psta = rtw_get_stainfo(&a->stapriv, get_bssid(&a->mlmepriv));
+
+			if (psta) {
+				obj->psta = psta;
+				RTW_INFO("%s(%d) psta:"MAC_FMT"\n",__func__,__LINE__,MAC_ARG(psta->phl_sta->mac_addr));
+			} else {
+				obj->psta = NULL; /* should NOT happen */
+				RTW_ERR("%s(%d) psta: is null\n",__func__,__LINE__);
+			}
 			break;
 		default:
 			break;
@@ -1583,6 +1598,7 @@ msg_fail:
 	return _FAIL;
 }
 
+#if 0
 static void fsm_ucast_msg(struct fsm_priv *fsmpriv,
 	struct sta_info *psta, char *pbuf, u32 sz, u16 event)
 {
@@ -1619,19 +1635,16 @@ done:
 	for (i = 0; i < obj_num; i++)
 		fsm_gen_msg(obj_ary[i], pbuf, sz,  event);
 }
+#endif
 
-#if 0
-static void fsm_bcast_msg(struct fsm_priv *fsmpriv,
-	struct sta_info *psta, char *pbuf, u32 sz, u16 event)
+#if 1
+static void fsm_bcast_msg(struct fsm_priv *fsmpriv, u16 event)
 {
 	struct fsm_root *root = fsmpriv->root;
 	struct fsm_main *fsm;
 	struct fsm_obj *obj;
 	struct fsm_obj *obj_ary[MAX_OBJ_NUM];
 	int i, obj_num = 0;
-
-	if (!psta)
-		return;
 
 	memset(obj_ary, 0, sizeof(obj_ary));
 
@@ -1641,54 +1654,53 @@ static void fsm_bcast_msg(struct fsm_priv *fsmpriv,
 
 		_rtw_spinlock_bh(&fsm->obj_queue.lock);
 		list_for_each_entry(obj, &fsm->obj_queue.q, list) {
-			if (!psta || (psta && obj->psta == psta))
-				obj_ary[obj_num++] = obj;
-				if (obj_num > MAX_OBJ_NUM) {
-					FSM_WARN_(obj->fsm, "obj num exceed, event %04x(%s)\n",
-						event, fsm_evt_name(obj->fsm, event));
-					_rtw_spinunlock_bh(&fsm->obj_queue.lock);
-					goto done;
-				}
+			obj_ary[obj_num++] = obj;
+			if (obj_num > MAX_OBJ_NUM) {
+				FSM_WARN_(obj->fsm, "obj num exceed, event %04x(%s)\n",
+					event, fsm_evt_name(obj->fsm, event));
+				_rtw_spinunlock_bh(&fsm->obj_queue.lock);
+				goto done;
 			}
 		}
 		_rtw_spinunlock_bh(&fsm->obj_queue.lock);
 	}
 done:
 	for (i = 0; i < obj_num; i++)
-		fsm_gen_msg(obj_ary[i], pbuf, sz,  event);
+		fsm_gen_msg(obj_ary[i], NULL, 0,  event);
 }
 #endif
 
-void rtw_fsm_notify_connect(struct fsm_priv *fsmpriv, struct sta_info *psta, int res)
+void rtw_fsm_notify_connect(struct fsm_priv *fsmpriv, int res)
 {
-	_adapter *a = fsmpriv->root->a;
-	struct sta_info *pself;
-
-	pself = rtw_get_stainfo(&a->stapriv, a->phl_role->mac_addr);
 	if (res >= 0) /* success */
-		fsm_ucast_msg(fsmpriv, pself, (char *)psta, 0, FSM_EV_CONNECTED);
+		fsm_bcast_msg(fsmpriv, FSM_EV_CONNECTED);
 	else
-		fsm_ucast_msg(fsmpriv, pself, (char *)psta, 0, FSM_EV_CONNECT_FAIL);
+		fsm_bcast_msg(fsmpriv, FSM_EV_CONNECT_FAIL);
 }
 
-void rtw_fsm_notify_disconnect(struct fsm_priv *fsmpriv, struct sta_info *psta)
+void rtw_fsm_notify_disconnect_start(struct fsm_priv *fsmpriv)
 {
-	_adapter *a = fsmpriv->root->a;
-	struct sta_info *pself;
-
-	pself = rtw_get_stainfo(&a->stapriv, a->phl_role->mac_addr);
-	if (pself)
-		fsm_ucast_msg(fsmpriv, psta, (char *)pself, 0, FSM_EV_DISCONNECTED);
+	fsm_bcast_msg(fsmpriv, FSM_EV_DISCONNECT_START);
 }
 
-void rtw_fsm_notify_scan_start(struct fsm_priv *fsmpriv, struct sta_info *psta)
+void rtw_fsm_notify_disconnect_end(struct fsm_priv *fsmpriv)
 {
-	fsm_ucast_msg(fsmpriv, psta, NULL, 0, FSM_EV_SCAN_START);
+	fsm_bcast_msg(fsmpriv, FSM_EV_DISCONNECT_END);
 }
 
-void rtw_fsm_notify_scan_done(struct fsm_priv *fsmpriv, struct sta_info *psta)
+void rtw_fsm_notify_scan_start(struct fsm_priv *fsmpriv)
 {
-	fsm_ucast_msg(fsmpriv, psta, NULL, 0, FSM_EV_SCAN_DONE);
+	fsm_bcast_msg(fsmpriv, FSM_EV_SCAN_START);
+}
+
+void rtw_fsm_notify_scan_done(struct fsm_priv *fsmpriv)
+{
+	fsm_bcast_msg(fsmpriv, FSM_EV_SCAN_DONE);
+}
+
+void rtw_fsm_notify_free_sta(struct fsm_priv *fsmpriv)
+{
+	fsm_bcast_msg(fsmpriv, FSM_EV_FREE_STA);
 }
 
 /** Debug funcitons

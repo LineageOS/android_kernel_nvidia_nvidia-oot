@@ -253,6 +253,7 @@ static int tegra_se_client_deinit(struct host1x_client *client)
 	struct tegra_se *se = container_of(client, struct tegra_se, client);
 
 	se->hw->deinit_alg(se);
+	tegra_se_cmdbuf_put(&se->keybuf->bo);
 	tegra_se_cmdbuf_put(&se->cmdbuf->bo);
 	host1x_syncpt_put(se->syncpt);
 	host1x_channel_put(se->channel);

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2017-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2017-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 /*
  * VI5 driver
  */
@@ -239,22 +239,10 @@ static void vi5_fast_forward_syncpt(struct platform_device *pdev, uint32_t id, u
 	host1x_syncpt_read(sp);
 }
 
-static void vi5_get_gos_table(struct platform_device *pdev, int *count,
-			const dma_addr_t **table)
-{
-	if (count)
-		*count = 0;
-	*table = NULL;
-}
-
-static int vi5_get_syncpt_gos_backing(struct platform_device *pdev,
+static int vi5_get_syncpt_addr(struct platform_device *pdev,
 			uint32_t id,
-			dma_addr_t *syncpt_addr,
-			uint32_t *gos_index,
-			uint32_t *gos_offset)
+			dma_addr_t *syncpt_addr)
 {
-	uint32_t index = GOS_INDEX_INVALID;
-	uint32_t offset = 0;
 	dma_addr_t addr;
 	struct nvhost_device_data *pdata;
 	struct host_vi5 *vi5;
@@ -264,8 +252,8 @@ static int vi5_get_syncpt_gos_backing(struct platform_device *pdev,
 		return -EINVAL;
 	}
 
-	if (syncpt_addr == NULL || gos_index == NULL || gos_offset == NULL) {
-		dev_err(&pdev->dev, "%s: null arguments\n", __func__);
+	if (syncpt_addr == NULL) {
+		dev_err(&pdev->dev, "%s: null argument\n", __func__);
 		return -EINVAL;
 	}
 
@@ -275,11 +263,8 @@ static int vi5_get_syncpt_gos_backing(struct platform_device *pdev,
 	addr = vi5->syncpt_base + vi5->syncpt_stride * id;
 
 	*syncpt_addr = addr;
-	*gos_index = index;
-	*gos_offset = offset;
 
-	dev_info(&pdev->dev, "%s: id=%u addr=0x%llx gos_idx=%u gos_offset=%u\n",
-		__func__, id, addr, index, offset);
+	dev_dbg(&pdev->dev, "%s: id=%u addr=0x%llx\n", __func__, id, addr);
 
 	return 0;
 }
@@ -288,8 +273,7 @@ static struct vi_channel_drv_ops vi5_channel_drv_ops = {
 	.alloc_syncpt = vi5_alloc_syncpt,
 	.release_syncpt = vi5_release_syncpt,
 	.fast_forward_syncpt = vi5_fast_forward_syncpt,
-	.get_gos_table = vi5_get_gos_table,
-	.get_syncpt_gos_backing = vi5_get_syncpt_gos_backing,
+	.get_syncpt_addr = vi5_get_syncpt_addr,
 };
 
 int vi5_priv_early_probe(struct platform_device *pdev)

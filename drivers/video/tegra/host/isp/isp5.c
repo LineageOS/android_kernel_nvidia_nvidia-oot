@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2017-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2017-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include <nvidia/conftest.h>
 
@@ -123,14 +123,10 @@ static void isp5_fast_forward_syncpt(struct platform_device *pdev, uint32_t id, 
 	host1x_syncpt_read(sp);
 }
 
-static int isp5_get_syncpt_gos_backing(struct platform_device *pdev,
+static int isp5_get_syncpt_addr(struct platform_device *pdev,
 			uint32_t id,
-			dma_addr_t *syncpt_addr,
-			uint32_t *gos_index,
-			uint32_t *gos_offset)
+			dma_addr_t *syncpt_addr)
 {
-	uint32_t index = GOS_INDEX_INVALID;
-	uint32_t offset = 0;
 	dma_addr_t addr;
 	struct nvhost_device_data *pdata;
 	struct host_isp5 *isp5;
@@ -140,8 +136,8 @@ static int isp5_get_syncpt_gos_backing(struct platform_device *pdev,
 		return -EINVAL;
 	}
 
-	if (syncpt_addr == NULL || gos_index == NULL || gos_offset == NULL) {
-		dev_err(&pdev->dev, "%s: null arguments\n", __func__);
+	if (syncpt_addr == NULL) {
+		dev_err(&pdev->dev, "%s: null argument\n", __func__);
 		return -EINVAL;
 	}
 
@@ -151,22 +147,10 @@ static int isp5_get_syncpt_gos_backing(struct platform_device *pdev,
 	addr = isp5->syncpt_base + isp5->syncpt_stride * id;
 
 	*syncpt_addr = addr;
-	*gos_index = index;
-	*gos_offset = offset;
 
-	dev_dbg(&pdev->dev, "%s: id=%u addr=0x%llx gos_idx=%u gos_offset=%u\n",
-		__func__, id, addr, index, offset);
+	dev_dbg(&pdev->dev, "%s: id=%u addr=0x%llx\n", __func__, id, addr);
 
 	return 0;
-}
-
-static uint32_t isp5_get_gos_table(struct platform_device *pdev,
-			const dma_addr_t **table)
-{
-	uint32_t count = 0;
-	*table = NULL;
-
-	return count;
 }
 
 static int isp5_module_init(struct platform_device *pdev)
@@ -244,8 +228,7 @@ static struct isp_channel_drv_ops isp5_channel_drv_ops = {
 	.alloc_syncpt = isp5_alloc_syncpt,
 	.release_syncpt = isp5_release_syncpt,
 	.fast_forward_syncpt = isp5_fast_forward_syncpt,
-	.get_gos_table = isp5_get_gos_table,
-	.get_syncpt_gos_backing = isp5_get_syncpt_gos_backing,
+	.get_syncpt_addr = isp5_get_syncpt_addr,
 };
 
 int isp5_priv_early_probe(struct platform_device *pdev)

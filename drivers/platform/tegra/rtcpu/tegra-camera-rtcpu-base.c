@@ -38,9 +38,9 @@
 #include <linux/tegra-ivc-bus.h>
 #include <linux/pm_domain.h>
 #include <soc/tegra/fuse.h>
+#include <soc/tegra/fuse-helper.h>
 #include <linux/tegra-rtcpu-monitor.h>
 #include <linux/tegra-rtcpu-trace.h>
-#include <linux/version.h>
 #include <linux/wait.h>
 #include <linux/string.h>
 #include <linux/sysfs.h>
@@ -712,8 +712,13 @@ static int tegra_rce_cam_deassert_resets(struct device *dev)
 	if (err)
 		return err;
 
-	/* nCPUHALT is a reset controlled by PM, not by CAR. */
-	tegra_camrtc_set_fwloaddone(dev, true);
+	/*
+	 * FWLOADDONE is asserted by MB2 after loading the RCE FW and need to be
+	 * manually only with the FPGA/VDK setups.
+	 * Access to R5_CTRL register is blocked by firewall in production.
+	 */
+	if (!tegra_platform_is_silicon())
+		tegra_camrtc_set_fwloaddone(dev, true);
 
 	return 0;
 }
@@ -1535,6 +1540,12 @@ static int tegra_cam_rtcpu_probe(struct platform_device *pdev)
 	dma_set_max_seg_size(dev, UINT_MAX);
 
 	rtcpu->tracer = tegra_rtcpu_trace_create(dev, rtcpu->camera_devices);
+	if (IS_ERR(rtcpu->tracer)) {
+		ret = PTR_ERR(rtcpu->tracer);
+		dev_err(dev, "failed to create RTCPU tracer, err=%d\n", ret);
+		rtcpu->tracer = NULL;
+		goto fail;
+	}
 
 	ret = tegra_camrtc_hsp_init(dev);
 	if (ret)

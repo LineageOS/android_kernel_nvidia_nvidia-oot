@@ -116,7 +116,7 @@ int tegra_hv_ivc_read_user(struct tegra_hv_ivc_cookie *ivck, void __user *buf, i
  * ivc_hv_ivc_can_read - Test whether data are available
  * @ivck	IVC cookie of the queue
  *
- * Test wheter data to read are available
+ * Test whether data to read are available
  *
  * Returns 1 if data are available in the rx queue, 0 if not
  */
@@ -126,13 +126,23 @@ int tegra_hv_ivc_can_read(struct tegra_hv_ivc_cookie *ivck);
  * ivc_hv_ivc_can_write - Test whether data can be written
  * @ivck	IVC cookie of the queue
  *
- * Test wheter data can be written
+ * Test whether data can be written
  *
  * Returns 1 if data are can be written to the tx queue, 0 if not
  */
 int tegra_hv_ivc_can_write(struct tegra_hv_ivc_cookie *ivck);
 
-#ifndef CONFIG_BUILD_PROD
+/**
+ * ivc_hv_ivc_tx_empty - Test whether the tx queue is empty
+ * @ivck	IVC cookie of the queue
+ *
+ * Test whether the tx queue is completely empty
+ *
+ * Returns 1 if the queue is empty, zero otherwise
+ */
+int tegra_hv_ivc_tx_empty(struct tegra_hv_ivc_cookie *ivck);
+
+#ifndef CONFIG_KERNEL_BUILD_WITH_PROD_DEFCONFIG
 /**
  * tegra_ivc_tx_frames_available - gets number of free entries in tx queue
  * @ivc/@ivck	IVC channel or cookie
@@ -141,18 +151,8 @@ int tegra_hv_ivc_can_write(struct tegra_hv_ivc_cookie *ivck);
  * does not write any additional frames, this number may increase from the
  * value returned as the receiver consumes frames.
  *
-*/
-uint32_t tegra_hv_ivc_tx_frames_available(struct tegra_hv_ivc_cookie *ivck);
-
-/**
- * ivc_hv_ivc_tx_empty - Test whether the tx queue is empty
- * @ivck	IVC cookie of the queue
- *
- * Test wheter the tx queue is completely empty
- *
- * Returns 1 if the queue is empty, zero otherwise
  */
-int tegra_hv_ivc_tx_empty(struct tegra_hv_ivc_cookie *ivck);
+uint32_t tegra_hv_ivc_tx_frames_available(struct tegra_hv_ivc_cookie *ivck);
 
 /* debugging aid */
 int tegra_hv_ivc_dump(struct tegra_hv_ivc_cookie *ivck);

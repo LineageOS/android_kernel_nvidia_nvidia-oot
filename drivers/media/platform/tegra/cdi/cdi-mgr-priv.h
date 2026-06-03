@@ -1,5 +1,16 @@
-// SPDX-License-Identifier: GPL-2.0
-// Copyright (c) 2015-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: GPL-2.0-only
+/* SPDX-FileCopyrightText: Copyright (c) 2015-2026 NVIDIA CORPORATION & AFFILIATES.
+ * All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms and conditions of the GNU General Public License,
+ * version 2, as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ */
 
 #ifndef __CDI_MGR_PRIV_H__
 #define __CDI_MGR_PRIV_H__
@@ -18,6 +29,7 @@
 
 enum cam_gpio_direction {
 	CAM_DEVBLK_GPIO_UNUSED = 0,
+	CAM_DEVBLK_GPIO_INPUT,
 	CAM_DEVBLK_GPIO_INPUT_INTR,
 	CAM_DEVBLK_GPIO_OUTPUT
 };

@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: GPL-2.0-only
  */
 #include <nvidia/conftest.h>
@@ -37,7 +37,7 @@ do {                                                        \
                     __func__, ##arg);                       \
     }                                                       \
 } while (0)
-#else /* NVHOST_DEBUG */
+#else /* HOST1X_EMU_SYNCPT_DEBUG */
 #define host1x_emu_dbg(dbg_mask, format, arg...)            \
 do {                                                        \
     if (0)                                                  \
@@ -213,6 +213,30 @@ static int host1x_ioctl_ctrl_syncpt_incr(
     return err;
 }
 
+static int host1x_ioctl_ctrl_syncpt_legacy_incr(
+					struct host1x_emu_ctrl_userctx *ctx,
+					struct host1x_emu_ctrl_syncpt_incr_args *args)
+{
+	int err;
+	uint32_t idx;
+	struct host1x *host = ctx->host;
+	struct host1x_syncpt *sp;
+
+	sp = HOST1X_EMU_EXPORT_CALL(host1x_syncpt_get_by_id_noref(host, args->id));
+	if (!sp) {
+		pr_info("Host1x-EMU: Invalid Syncpoint Legacy Increment for Sync-ID: %u\n", args->id);
+		return -EINVAL;
+	}
+
+	for (idx = 0; idx < args->val; idx++) {
+		err = HOST1X_EMU_EXPORT_CALL(host1x_syncpt_incr(sp));
+		if (err < 0)
+			return err;
+	}
+
+	return err;
+}
+
 static int host1x_ioctl_syncpoint_wait(
                     struct host1x_emu_ctrl_userctx *ctx,
                     struct host1x_emu_ctrl_syncpt_wait_args *args)
@@ -243,58 +267,61 @@ static int host1x_ioctl_syncpoint_wait(
 
 static long host1x_ctrlctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
-    struct host1x_emu_ctrl_userctx *priv = filp->private_data;
-    u8 buf[HOST1X_EMU_SYNCPT_IOCTL_CTRL_MAX_ARG_SIZE] __aligned(sizeof(u64));
-    int err = 0;
+	struct host1x_emu_ctrl_userctx *priv = filp->private_data;
+	u8 buf[HOST1X_EMU_SYNCPT_IOCTL_CTRL_MAX_ARG_SIZE] __aligned(sizeof(u64));
+	int err = 0;
 
-    if ((_IOC_TYPE(cmd) != HOST1X_EMU_SYNCPT_IOCTL_MAGIC) ||
-        (_IOC_NR(cmd) == 0) ||
-        (_IOC_NR(cmd) > HOST1X_EMU_SYNCPT_IOCTL_CTRL_LAST) ||
-        (_IOC_SIZE(cmd) > HOST1X_EMU_SYNCPT_IOCTL_CTRL_MAX_ARG_SIZE)) {
-        host1x_emu_err_ratelimited(NULL, "invalid cmd 0x%x", cmd);
-        return -ENOIOCTLCMD;
-    }
+	if ((_IOC_TYPE(cmd) != HOST1X_EMU_SYNCPT_IOCTL_MAGIC) ||
+		(_IOC_NR(cmd) == 0) ||
+		(_IOC_NR(cmd) > HOST1X_EMU_SYNCPT_IOCTL_CTRL_LAST) ||
+		(_IOC_SIZE(cmd) > HOST1X_EMU_SYNCPT_IOCTL_CTRL_MAX_ARG_SIZE)) {
+		host1x_emu_err_ratelimited(NULL, "invalid cmd 0x%x", cmd);
+		return -ENOIOCTLCMD;
+	}
 
-    if (_IOC_DIR(cmd) & _IOC_WRITE) {
-        if (copy_from_user(buf, (void __user *)arg, _IOC_SIZE(cmd))) {
-            host1x_emu_err(NULL, "failed to copy from user arg=%px",
-                   (void __user *)arg);
-            return -EFAULT;
-        }
-    }
+	if (_IOC_DIR(cmd) & _IOC_WRITE) {
+		if (copy_from_user(buf, (void __user *)arg, _IOC_SIZE(cmd))) {
+			host1x_emu_err(NULL, "failed to copy from user arg=%px",
+					(void __user *)arg);
+			return -EFAULT;
+		}
+	}
 
-    switch (cmd) {
-    case HOST1X_EMU_SYNCPT_IOCTL_CTRL_ALLOC_SYNCPT:
-        err = host1x_ioctl_syncpoint_allocate(priv, (void *)buf);
-        break;
-    case HOST1X_EMU_SYNCPT_IOCTL_CTRL_FREE_SYNCPT:
-        err = host1x_ioctl_syncpoint_free(priv, (void *)buf);
-        break;
-    case HOST1X_EMU_SYNCPT_IOCTL_CTRL_SYNCPT_READ:
-        err = host1x_ioctl_ctrl_syncpt_read(priv, (void *)buf);
-        break;
-    case HOST1X_EMU_SYNCPT_IOCTL_CTRL_SYNCPT_INCR:
-        err = host1x_ioctl_ctrl_syncpt_incr(priv, (void *)buf);
-        break;
-    case HOST1X_EMU_SYNCPT_IOCTL_CTRL_SYNCPT_WAIT:
-        err = host1x_ioctl_syncpoint_wait(priv, (void *)buf);
-        break;
-    default:
-        host1x_emu_err(priv->host->dev, "invalid cmd 0x%x", cmd);
-        err = -ENOIOCTLCMD;
-        break;
-    }
+	switch (cmd) {
+	case HOST1X_EMU_SYNCPT_IOCTL_CTRL_ALLOC_SYNCPT:
+		err = host1x_ioctl_syncpoint_allocate(priv, (void *)buf);
+		break;
+	case HOST1X_EMU_SYNCPT_IOCTL_CTRL_FREE_SYNCPT:
+		err = host1x_ioctl_syncpoint_free(priv, (void *)buf);
+		break;
+	case HOST1X_EMU_SYNCPT_IOCTL_CTRL_SYNCPT_READ:
+		err = host1x_ioctl_ctrl_syncpt_read(priv, (void *)buf);
+		break;
+	case HOST1X_EMU_SYNCPT_IOCTL_CTRL_SYNCPT_INCR:
+		err = host1x_ioctl_ctrl_syncpt_incr(priv, (void *)buf);
+		break;
+	case HOST1X_EMU_SYNCPT_IOCTL_CTRL_SYNCPT_LEGACY_INCR:
+		err = host1x_ioctl_ctrl_syncpt_legacy_incr(priv, (void *)buf);
+		break;
+	case HOST1X_EMU_SYNCPT_IOCTL_CTRL_SYNCPT_WAIT:
+		err = host1x_ioctl_syncpoint_wait(priv, (void *)buf);
+		break;
+	default:
+		host1x_emu_err(priv->host->dev, "invalid cmd 0x%x", cmd);
+		err = -ENOIOCTLCMD;
+		break;
+	}
 
-    if ((err == 0) && (_IOC_DIR(cmd) & _IOC_READ)) {
-        err = copy_to_user((void __user *)arg, buf, _IOC_SIZE(cmd));
-        if (err) {
-            host1x_emu_err(priv->host->dev,
-                   "failed to copy to user");
-            err = -EFAULT;
-        }
-    }
+	if ((err == 0) && (_IOC_DIR(cmd) & _IOC_READ)) {
+		err = copy_to_user((void __user *)arg, buf, _IOC_SIZE(cmd));
+		if (err) {
+			host1x_emu_err(priv->host->dev,
+					"failed to copy to user");
+			err = -EFAULT;
+		}
+	}
 
-    return err;
+	return err;
 }
 
 static const struct file_operations host1x_ctrlops = {

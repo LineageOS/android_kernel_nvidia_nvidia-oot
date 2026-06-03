@@ -1,11 +1,12 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
+/* SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
 
 #ifndef PVA_MATH_UTILS_H
 #define PVA_MATH_UTILS_H
 #if !defined(__KERNEL__)
 #include <stdbool.h>
 #endif
+#include "pva_api_types.h"
 #include "pva_plat_faults.h"
 typedef enum {
 	MATH_OP_SUCCESS,
@@ -22,36 +23,36 @@ typedef enum {
 #define UINT64_MAX_SHIFT_BITS 0x3FU
 
 #define safe_pow2_roundup_u64(val, align)                                      \
-	pva_safe_roundup_u64((val), (align), __FILE__, __LINE__)
+	pva_safe_roundup_u64((val), (align), __func__, __LINE__)
 
 #define safe_pow2_roundup_u32(val, align)                                      \
-	pva_safe_roundup_u32((val), (align), __FILE__, __LINE__)
+	pva_safe_roundup_u32((val), (align), __func__, __LINE__)
 
 #define safe_pow2_roundup_u16(val, align)                                      \
-	pva_safe_roundup_u16((val), (align), __FILE__, __LINE__)
+	pva_safe_roundup_u16((val), (align), __func__, __LINE__)
 
 #define safe_pow2_roundup_u8(val, align)                                       \
-	pva_safe_roundup_u8((val), (align), __FILE__, __LINE__)
+	pva_safe_roundup_u8((val), (align), __func__, __LINE__)
 
 /**
 * @brief Rounds up a uint64_t value to the nearest multiple of a power-of-two align.
 *
 * @param val   The value to round up.
 * @param align The alignment factor (must be a power of two).
-* @param file  The source file (for assertion messages).
+* @param func  Calling function name (typically __func__) for assertion messages.
 * @param line  The line number (for assertion messages).
 * @return uint64_t The rounded-up value.
 */
 static inline uint64_t pva_safe_roundup_u64(uint64_t val, uint64_t align,
-					    const char *file, uint32_t line)
+					    const char *func, uint32_t line)
 {
 	uint64_t rounded;
 	// Ensure align is a power of two and at least 1
-	ASSERT_WITH_LOC((align != 0U) && ((align & (align - 1U)) == 0U), file,
+	ASSERT_WITH_LOC((align != 0U) && ((align & (align - 1U)) == 0U), func,
 			line);
 
 	// Check for addition overflow
-	ASSERT_WITH_LOC(val <= UINT64_MAX - (align - 1U), file, line);
+	ASSERT_WITH_LOC(val <= PVA_UINT64_MAX - (align - 1U), func, line);
 
 	rounded = (val + (align - 1U)) & ~(align - 1U);
 
@@ -63,21 +64,21 @@ static inline uint64_t pva_safe_roundup_u64(uint64_t val, uint64_t align,
 *
 * @param val   The value to round up.
 * @param align The alignment factor (must be a power of two).
-* @param file  The source file (for assertion messages).
+* @param func  Calling function name (typically __func__) for assertion messages.
 * @param line  The line number (for assertion messages).
 * @return uint32_t The rounded-up value.
 */
 static inline uint32_t pva_safe_roundup_u32(uint32_t val, uint32_t align,
-					    const char *file, uint32_t line)
+					    const char *func, uint32_t line)
 {
 	uint64_t temp;
 	uint32_t rounded;
 	// Ensure align is a power of two and at least 1
-	ASSERT_WITH_LOC((align != 0U) && ((align & (align - 1U)) == 0U), file,
+	ASSERT_WITH_LOC((align != 0U) && ((align & (align - 1U)) == 0U), func,
 			line);
 
 	temp = (uint64_t)val + ((uint64_t)align - (uint64_t)1U);
-	ASSERT_WITH_LOC(temp <= MAX_UINT32, file, line);
+	ASSERT_WITH_LOC(temp <= MAX_UINT32, func, line);
 	rounded = (uint32_t)temp;
 	rounded = (uint32_t)(rounded & ~(align - 1U));
 
@@ -89,22 +90,22 @@ static inline uint32_t pva_safe_roundup_u32(uint32_t val, uint32_t align,
 *
 * @param val   The value to round up.
 * @param align The alignment factor (must be a power of two).
-* @param file  The source file (for assertion messages).
+* @param func  Calling function name (typically __func__) for assertion messages.
 * @param line  The line number (for assertion messages).
 * @return uint16_t The rounded-up value.
 */
 static inline uint16_t pva_safe_roundup_u16(uint16_t val, uint16_t align,
-					    const char *file, uint32_t line)
+					    const char *func, uint32_t line)
 {
 	uint32_t temp;
 	uint16_t rounded;
 	// Ensure align is a power of two and at least 1
-	ASSERT_WITH_LOC((align != 0U) && ((align & (align - 1U)) == 0U), file,
+	ASSERT_WITH_LOC((align != 0U) && ((align & (align - 1U)) == 0U), func,
 			line);
 
 	temp = (uint32_t)val + ((uint32_t)align - (uint32_t)1U);
 	//Overflow check
-	ASSERT_WITH_LOC(temp <= MAX_UINT16, file, line);
+	ASSERT_WITH_LOC(temp <= MAX_UINT16, func, line);
 	rounded = (uint16_t)temp;
 	rounded = (uint16_t)(rounded & ~(align - 1U));
 
@@ -116,88 +117,88 @@ static inline uint16_t pva_safe_roundup_u16(uint16_t val, uint16_t align,
 *
 * @param val   The value to round up.
 * @param align The alignment factor (must be a power of two).
-* @param file  The source file (for assertion messages).
+* @param func  Calling function name (typically __func__) for assertion messages.
 * @param line  The line number (for assertion messages).
 * @return uint8_t The rounded-up value.
 */
 static inline uint8_t pva_safe_roundup_u8(uint8_t val, uint8_t align,
-					  const char *file, uint32_t line)
+					  const char *func, uint32_t line)
 {
 	uint32_t temp;
 	uint8_t rounded;
 	// Ensure align is a power of two and at least 1
-	ASSERT_WITH_LOC((align != 0U) && ((align & (align - 1U)) == 0U), file,
+	ASSERT_WITH_LOC((align != 0U) && ((align & (align - 1U)) == 0U), func,
 			line);
 
 	temp = (uint32_t)val + ((uint32_t)align - (uint32_t)1U);
-	ASSERT_WITH_LOC(temp <= MAX_UINT8, file, line);
+	ASSERT_WITH_LOC(temp <= MAX_UINT8, func, line);
 	rounded = (uint8_t)temp;
 	rounded = (uint8_t)(rounded & ~(align - 1U));
 
 	return rounded;
 }
 
-static inline uint32_t safe_abs_int32(int32_t value, const char *file,
+static inline uint32_t safe_abs_int32(int32_t value, const char *func,
 				      uint32_t line)
 {
-	ASSERT_WITH_LOC((value != MIN_INT32), file, line);
+	ASSERT_WITH_LOC((value != MIN_INT32), func, line);
 	return (uint32_t)((value < 0) ? -value : value);
 }
 
-static inline uint64_t safe_abs_int64(int64_t value, const char *file,
+static inline uint64_t safe_abs_int64(int64_t value, const char *func,
 				      uint32_t line)
 {
-	ASSERT_WITH_LOC((value != MIN_INT64), file, line);
+	ASSERT_WITH_LOC((value != MIN_INT64), func, line);
 	return (uint64_t)((value < 0) ? -value : value);
 }
 
-#define safe_absint32(value) safe_abs_int32((value), __FILE__, __LINE__)
+#define safe_absint32(value) safe_abs_int32((value), __func__, __LINE__)
 
-#define safe_absint64(value) safe_abs_int64((value), __FILE__, __LINE__)
+#define safe_absint64(value) safe_abs_int64((value), __func__, __LINE__)
 
 static inline uint64_t safe_add_u64(uint64_t addend1, uint64_t addend2,
-				    const char *file, uint32_t line)
+				    const char *func, uint32_t line)
 {
 	uint64_t sum;
 
 	sum = addend1 + addend2;
-	ASSERT_WITH_LOC(sum >= addend1, file, line);
+	ASSERT_WITH_LOC(sum >= addend1, func, line);
 	return sum;
 }
 
 static inline uint32_t safe_add_u32(uint32_t addend1, uint32_t addend2,
-				    const char *file, uint32_t line)
+				    const char *func, uint32_t line)
 {
 	uint32_t sum;
 
 	sum = addend1 + addend2;
-	ASSERT_WITH_LOC(sum >= addend1, file, line);
+	ASSERT_WITH_LOC(sum >= addend1, func, line);
 	return sum;
 }
 
 static inline uint16_t safe_add_u16(uint16_t addend1, uint16_t addend2,
-				    const char *file, uint32_t line)
+				    const char *func, uint32_t line)
 {
 	uint32_t sum;
 
 	sum = (uint32_t)addend1 + (uint32_t)addend2;
-	ASSERT_WITH_LOC(sum <= (uint32_t)MAX_UINT16, file, line);
+	ASSERT_WITH_LOC(sum <= (uint32_t)MAX_UINT16, func, line);
 	return (uint16_t)sum;
 }
 
 static inline uint8_t safe_add_u8(uint8_t addend1, uint8_t addend2,
-				  const char *file, uint32_t line)
+				  const char *func, uint32_t line)
 {
 	uint32_t sum;
 
 	sum = (uint32_t)addend1 + (uint32_t)addend2;
-	ASSERT_WITH_LOC(sum <= (uint32_t)MAX_UINT8, file, line);
+	ASSERT_WITH_LOC(sum <= (uint32_t)MAX_UINT8, func, line);
 	return (uint8_t)sum;
 }
 
 static inline uint32_t align8_u32(uint32_t val, pva_math_error *err)
 {
-	if (val > (UINT32_MAX - 7u)) {
+	if (val > (PVA_UINT32_MAX - 7u)) {
 		*err = MATH_OP_ERROR;
 		return 0u;
 	}
@@ -205,77 +206,77 @@ static inline uint32_t align8_u32(uint32_t val, pva_math_error *err)
 }
 
 #define safe_addu64(addend1, addend2)                                          \
-	safe_add_u64((addend1), (addend2), __FILE__, __LINE__)
+	safe_add_u64((addend1), (addend2), __func__, __LINE__)
 
 #define safe_addu32(addend1, addend2)                                          \
-	safe_add_u32((addend1), (addend2), __FILE__, __LINE__)
+	safe_add_u32((addend1), (addend2), __func__, __LINE__)
 
 #define safe_addu16(addend1, addend2)                                          \
-	safe_add_u16((addend1), (addend2), __FILE__, __LINE__)
+	safe_add_u16((addend1), (addend2), __func__, __LINE__)
 
 #define safe_addu8(addend1, addend2)                                           \
-	safe_add_u8((addend1), (addend2), __FILE__, __LINE__)
+	safe_add_u8((addend1), (addend2), __func__, __LINE__)
 
 static inline uint64_t safe_sub_u64(uint64_t minuend, uint64_t subtrahend,
-				    const char *file, uint32_t line)
+				    const char *func, uint32_t line)
 {
 	uint64_t difference;
 
-	ASSERT_WITH_LOC((minuend) >= (subtrahend), file, line);
+	ASSERT_WITH_LOC((minuend) >= (subtrahend), func, line);
 	difference = ((minuend) - (subtrahend));
 	return difference;
 }
 
 static inline uint32_t safe_sub_u32(uint32_t minuend, uint32_t subtrahend,
-				    const char *file, uint32_t line)
+				    const char *func, uint32_t line)
 {
 	uint32_t difference;
 
-	ASSERT_WITH_LOC((minuend) >= (subtrahend), file, line);
+	ASSERT_WITH_LOC((minuend) >= (subtrahend), func, line);
 	difference = ((minuend) - (subtrahend));
 	return difference;
 }
 
 static inline uint16_t safe_sub_u16(uint16_t minuend, uint16_t subtrahend,
-				    const char *file, uint32_t line)
+				    const char *func, uint32_t line)
 {
 	uint16_t difference;
 
-	ASSERT_WITH_LOC((minuend) >= (subtrahend), file, line);
+	ASSERT_WITH_LOC((minuend) >= (subtrahend), func, line);
 	difference = ((minuend) - (subtrahend));
 	return difference;
 }
 
 static inline uint8_t safe_sub_u8(uint8_t minuend, uint8_t subtrahend,
-				  const char *file, uint32_t line)
+				  const char *func, uint32_t line)
 {
 	uint8_t difference;
 
-	ASSERT_WITH_LOC((minuend) >= (subtrahend), file, line);
+	ASSERT_WITH_LOC((minuend) >= (subtrahend), func, line);
 	difference = ((minuend) - (subtrahend));
 	return difference;
 }
 
 #define safe_subu64(minuend, subtrahend)                                       \
-	safe_sub_u64((minuend), (subtrahend), __FILE__, __LINE__)
+	safe_sub_u64((minuend), (subtrahend), __func__, __LINE__)
 
 #define safe_subu32(minuend, subtrahend)                                       \
-	safe_sub_u32((minuend), (subtrahend), __FILE__, __LINE__)
+	safe_sub_u32((minuend), (subtrahend), __func__, __LINE__)
 
 #define safe_subu16(minuend, subtrahend)                                       \
-	safe_sub_u16((minuend), (subtrahend), __FILE__, __LINE__)
+	safe_sub_u16((minuend), (subtrahend), __func__, __LINE__)
 
 #define safe_subu8(minuend, subtrahend)                                        \
-	safe_sub_u8((minuend), (subtrahend), __FILE__, __LINE__)
+	safe_sub_u8((minuend), (subtrahend), __func__, __LINE__)
 
 static inline uint64_t safe_mul_u64(uint64_t operand1, uint64_t operand2,
-				    const char *file, uint32_t line)
+				    const char *func, uint32_t line)
 {
 	uint64_t product;
 	if ((operand1 == 0u) || (operand2 == 0u)) {
 		product = 0u;
 	} else {
-		ASSERT_WITH_LOC((operand1) <= (UINT64_MAX / operand2), file,
+		ASSERT_WITH_LOC((operand1) <= (PVA_UINT64_MAX / operand2), func,
 				line);
 		product = (operand1 * operand2);
 	}
@@ -284,98 +285,98 @@ static inline uint64_t safe_mul_u64(uint64_t operand1, uint64_t operand2,
 }
 
 static inline uint32_t safe_mul_u32(uint32_t operand1, uint32_t operand2,
-				    const char *file, uint32_t line)
+				    const char *func, uint32_t line)
 {
 	uint64_t product;
 
 	product = ((uint64_t)operand1 * (uint64_t)operand2);
-	ASSERT_WITH_LOC(product <= UINT32_MAX, file, line);
+	ASSERT_WITH_LOC(product <= PVA_UINT32_MAX, func, line);
 	return (uint32_t)(product);
 }
 
 static inline uint16_t safe_mul_u16(uint16_t operand1, uint16_t operand2,
-				    const char *file, uint32_t line)
+				    const char *func, uint32_t line)
 {
 	uint32_t product;
 
 	product = ((uint32_t)operand1 * (uint32_t)operand2);
-	ASSERT_WITH_LOC(product <= MAX_UINT16, file, line);
+	ASSERT_WITH_LOC(product <= MAX_UINT16, func, line);
 	return (uint16_t)(product);
 }
 
 static inline uint8_t safe_mul_u8(uint8_t operand1, uint8_t operand2,
-				  const char *file, uint32_t line)
+				  const char *func, uint32_t line)
 {
 	uint32_t product;
 
 	product = ((uint32_t)operand1 * (uint32_t)operand2);
-	ASSERT_WITH_LOC(product <= MAX_UINT8, file, line);
+	ASSERT_WITH_LOC(product <= MAX_UINT8, func, line);
 	return (uint8_t)(product);
 }
 
 #define safe_mulu64(operand1, operand2)                                        \
-	safe_mul_u64((operand1), (operand2), __FILE__, __LINE__)
+	safe_mul_u64((operand1), (operand2), __func__, __LINE__)
 
 #define safe_mulu32(operand1, operand2)                                        \
-	safe_mul_u32((operand1), (operand2), __FILE__, __LINE__)
+	safe_mul_u32((operand1), (operand2), __func__, __LINE__)
 
 #define safe_mulu16(operand1, operand2)                                        \
-	safe_mul_u16((operand1), (operand2), __FILE__, __LINE__)
+	safe_mul_u16((operand1), (operand2), __func__, __LINE__)
 
 #define safe_mulu8(operand1, operand2)                                         \
-	safe_mul_u8((operand1), (operand2), __FILE__, __LINE__)
+	safe_mul_u8((operand1), (operand2), __func__, __LINE__)
 
-static inline int64_t safe_get_signed_s64(uint64_t value, const char *file,
+static inline int64_t safe_get_signed_s64(uint64_t value, const char *func,
 					  uint32_t line)
 {
-	ASSERT_WITH_LOC((value <= (uint64_t)MAX_INT64), file, line);
+	ASSERT_WITH_LOC((value <= (uint64_t)MAX_INT64), func, line);
 	return (int64_t)value;
 }
 
-static inline int32_t safe_get_signed_s32(uint32_t value, const char *file,
+static inline int32_t safe_get_signed_s32(uint32_t value, const char *func,
 					  uint32_t line)
 {
-	ASSERT_WITH_LOC((value <= (uint32_t)MAX_INT32), file, line);
+	ASSERT_WITH_LOC((value <= (uint32_t)MAX_INT32), func, line);
 	return (int32_t)value;
 }
 #define convert_to_signed_s64(value)                                           \
-	safe_get_signed_s64((value), __FILE__, __LINE__)
+	safe_get_signed_s64((value), __func__, __LINE__)
 
 #define convert_to_signed_s32(value)                                           \
-	safe_get_signed_s32((value), __FILE__, __LINE__)
+	safe_get_signed_s32((value), __func__, __LINE__)
 
-static inline uint8_t safe_cast_u32_to_u8(uint32_t value, const char *file,
+static inline uint8_t safe_cast_u32_to_u8(uint32_t value, const char *func,
 					  uint32_t line)
 {
-	ASSERT_WITH_LOC(value <= MAX_UINT8, file, line);
+	ASSERT_WITH_LOC(value <= MAX_UINT8, func, line);
 	return (uint8_t)value;
 }
 
-static inline uint16_t safe_cast_u32_to_u16(uint32_t value, const char *file,
+static inline uint16_t safe_cast_u32_to_u16(uint32_t value, const char *func,
 					    uint32_t line)
 {
-	ASSERT_WITH_LOC(value <= MAX_UINT16, file, line);
+	ASSERT_WITH_LOC(value <= MAX_UINT16, func, line);
 	return (uint16_t)value;
 }
 
-static inline uint8_t safe_cast_u16_to_u8(uint16_t value, const char *file,
+static inline uint8_t safe_cast_u16_to_u8(uint16_t value, const char *func,
 					  uint32_t line)
 {
-	ASSERT_WITH_LOC(value <= MAX_UINT8, file, line);
+	ASSERT_WITH_LOC(value <= MAX_UINT8, func, line);
 	return (uint8_t)value;
 }
 
-static inline uint32_t safe_cast_u64_to_u32(uint64_t value, const char *file,
+static inline uint32_t safe_cast_u64_to_u32(uint64_t value, const char *func,
 					    uint32_t line)
 {
-	ASSERT_WITH_LOC(value <= MAX_UINT32, file, line);
+	ASSERT_WITH_LOC(value <= MAX_UINT32, func, line);
 	return (uint32_t)value;
 }
 
-#define safe_u32_to_u8(value) safe_cast_u32_to_u8((value), __FILE__, __LINE__)
-#define safe_u32_to_u16(value) safe_cast_u32_to_u16((value), __FILE__, __LINE__)
-#define safe_u16_to_u8(value) safe_cast_u16_to_u8((value), __FILE__, __LINE__)
-#define safe_u64_to_u32(value) safe_cast_u64_to_u32((value), __FILE__, __LINE__)
+#define safe_u32_to_u8(value) safe_cast_u32_to_u8((value), __func__, __LINE__)
+#define safe_u32_to_u16(value) safe_cast_u32_to_u16((value), __func__, __LINE__)
+#define safe_u16_to_u8(value) safe_cast_u16_to_u8((value), __func__, __LINE__)
+#define safe_u64_to_u32(value) safe_cast_u64_to_u32((value), __func__, __LINE__)
 
 static inline uint64_t addu64(uint64_t addend1, uint64_t addend2,
 			      pva_math_error *math_flag)
@@ -553,7 +554,7 @@ static inline uint64_t mulu64(uint64_t operand1, uint64_t operand2,
 	if ((operand1 == 0u) || (operand2 == 0u)) {
 		product = 0u;
 	} else {
-		if ((operand1) > (UINT64_MAX / operand2)) {
+		if ((operand1) > (PVA_UINT64_MAX / operand2)) {
 			*math_flag = MATH_OP_ERROR;
 			product = 0u;
 		} else {
@@ -570,7 +571,7 @@ static inline uint32_t mulu32(uint32_t operand1, uint32_t operand2,
 	uint64_t product;
 
 	product = ((uint64_t)operand1 * (uint64_t)operand2);
-	if (product > UINT32_MAX) {
+	if (product > PVA_UINT32_MAX) {
 		*math_flag = MATH_OP_ERROR;
 		product = 0u;
 	}
@@ -727,7 +728,7 @@ static inline uint64_t wraparound_sub_u64(uint64_t minuend, uint64_t subtrahend)
 		return minuend - subtrahend;
 	} else {
 		// Calculate the wrap-around value for underflow
-		return (UINT64_MAX - subtrahend + minuend + 1U);
+		return (PVA_UINT64_MAX - subtrahend + minuend + 1U);
 	}
 }
 
@@ -994,14 +995,14 @@ static inline uint64_t pva_pl_to_bl_offset(uint64_t pl_offset,
 	uint32_t gobBase;
 
 	/* Validate that pl_offset division result fits in uint32_t */
-	if (y_64 > UINT32_MAX) {
+	if (y_64 > PVA_UINT32_MAX) {
 		if (math_error != NULL) {
 			*math_error = MATH_OP_ERROR;
 		}
 		return 0;
 	}
 
-	if (x_64 > UINT32_MAX) {
+	if (x_64 > PVA_UINT32_MAX) {
 		if (math_error != NULL) {
 			*math_error = MATH_OP_ERROR;
 		}
@@ -1075,6 +1076,25 @@ static inline bool syncobj_reached_threshold(uint32_t value, uint32_t threshold)
 	distance_ab = b - a;
 	distance_ac = c - a;
 	return (distance_ab < distance_ac);
+}
+
+/**
+ * @brief Cast signed int32 to unsigned uint32 preserving bit pattern.
+ *
+ * Uses union type punning.
+ *
+ * @param sVal Signed 32-bit integer
+ * @return uint32_t Unsigned representation with same bit pattern.
+ */
+static inline uint32_t s32_to_u32(int32_t const sVal)
+{
+	union {
+		int32_t s;
+		uint32_t u;
+	} cast;
+
+	cast.s = sVal;
+	return cast.u;
 }
 
 #endif

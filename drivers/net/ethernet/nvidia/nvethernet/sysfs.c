@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2019-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2019-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include "ether_linux.h"
 #ifdef MACSEC_SUPPORT
@@ -426,6 +426,214 @@ static ssize_t ether_mac_loopback_store(struct device *dev,
 	return size;
 }
 
+#ifdef ETHER_PRBS_SUPPORT
+/**
+ * @brief Shows PRBS pattern configuration help
+ *
+ * Algorithm: Display PRBS configuration commands
+ *
+ * @param[in] dev: Device data
+ * @param[in] attr: Device attribute
+ * @param[in] buf: Buffer to store the help text
+ *
+ * @return Number of bytes written
+ */
+static ssize_t prbs_pattern_show(struct device *dev,
+				 struct device_attribute *attr,
+				 char *buf)
+{
+	return scnprintf(buf, PAGE_SIZE,
+"PRBS Pattern Configuration\n"
+"===========================\n\n"
+"Usage: echo <command> > prbs_pattern\n\n"
+"Commands:\n"
+"---------\n"
+"  0 = Disable all patterns\n"
+"  1 = Generate Square Wave (8180 pattern) - default period\n"
+"  2 = Generate Square Wave - minimum period (4 bit times)\n"
+"  3 = Generate Square Wave - maximum period (11 bit times)\n"
+"  4 = Generate PRBS9\n"
+"  5 = Generate PRBS31\n"
+"  6 = Read PRBS9 (check error count)\n"
+"  7 = Read PRBS31 (check error count)\n"
+"  8 = Generate and Read PRBS9\n"
+"  9 = Generate and Read PRBS31\n\n"
+"Examples:\n"
+"---------\n"
+"  echo 0 > prbs_pattern   # Disable all\n"
+"  echo 1 > prbs_pattern   # Square wave\n"
+"  echo 4 > prbs_pattern   # Generate PRBS9\n"
+"  echo 8 > prbs_pattern   # Gen+Read PRBS9\n\n"
+"Note: Check dmesg for error counts and status\n");
+}
+
+/**
+ * @brief Configure PRBS test pattern
+ *
+ * Algorithm: Parse simple command and configure PRBS pattern via OSI IOCTL
+ *
+ * @param[in] dev: Device data
+ * @param[in] attr: Device attribute
+ * @param[in] buf: Buffer containing command (0-9)
+ * @param[in] size: Size of buffer
+ *
+ * @note Interface must be up and PRBS mode must be enabled in DT
+ *
+ * @return Size of buffer
+ */
+static ssize_t prbs_pattern_store(struct device *dev,
+				  struct device_attribute *attr,
+				  const char *buf, size_t size)
+{
+	struct net_device *ndev = (struct net_device *)dev_get_drvdata(dev);
+	struct ether_priv_data *pdata = netdev_priv(ndev);
+	struct osi_ioctl ioctl_data = {};
+	unsigned int command = 0;
+	unsigned int pattern_type = 0, direction = 0, period = 0;
+	int ret = -1;
+	const char *cmd_desc = NULL;
+
+	/* Check if PRBS mode is enabled */
+	if (pdata->prbs_mode != OSI_ENABLE) {
+		dev_err(pdata->dev,
+			"PRBS mode not enabled. Set nvidia,prbs-mode=<1> in DT\n");
+		return size;
+	}
+
+	/* PRBS mode only supported on MGBE, not EQOS */
+	if (pdata->osi_core->mac == OSI_MAC_HW_EQOS) {
+		dev_err(pdata->dev,
+			"PRBS mode not supported on EQOS hardware\n");
+		return size;
+	}
+
+	/* Interface must be up */
+	if (!netif_running(ndev)) {
+		dev_err(pdata->dev,
+			"Not Allowed. Ether interface is not up\n");
+		return size;
+	}
+
+	/* Parse command (0-9) */
+	if (kstrtou32(buf, 0, &command) < 0) {
+		dev_err(pdata->dev,
+			"Invalid format. Usage: echo <0-9> > prbs_pattern\n");
+		return size;
+	}
+
+	/* Map command to pattern configuration */
+	switch (command) {
+	case 0: /* Disable all patterns */
+		pattern_type = OSI_PRBS_PATTERN_NONE;
+		direction = OSI_PRBS_DIR_TX;
+		period = 0;
+		cmd_desc = "Disable all patterns (Clear TP_CTRL_0 and KR_CTRL)";
+		break;
+
+	case 1: /* Generate Square Wave (default period) */
+		pattern_type = OSI_PRBS_PATTERN_SQUARE_WAVE;
+		direction = OSI_PRBS_DIR_TX;
+		period = OSI_SQUARE_WAVE_PERIOD_8BITS;
+		cmd_desc = "Generate Square Wave (8180) - 8bits period (Reg 0xC00A8=0x000A)";
+		break;
+
+	case 2: /* Generate Square Wave (min period) */
+		pattern_type = OSI_PRBS_PATTERN_SQUARE_WAVE;
+		direction = OSI_PRBS_DIR_TX;
+		period = OSI_SQUARE_WAVE_PERIOD_MIN;
+		cmd_desc = "Generate Square Wave (8180) - min period (Reg 0xE001C bits[6:4]=0b000)";
+		break;
+
+	case 3: /* Generate Square Wave (max period) */
+		pattern_type = OSI_PRBS_PATTERN_SQUARE_WAVE;
+		direction = OSI_PRBS_DIR_TX;
+		period = OSI_SQUARE_WAVE_PERIOD_MAX;
+		cmd_desc = "Generate Square Wave (8180) - max period (Reg 0xE001C bits[6:4]=0b111)";
+		break;
+
+	case 4: /* Generate PRBS9 */
+		pattern_type = OSI_PRBS_PATTERN_PRBS9;
+		direction = OSI_PRBS_DIR_TX;
+		period = 0;
+		cmd_desc = "Generate PRBS9 (Reg 0xC00A8=0x0040, bit[6])";
+		break;
+
+	case 5: /* Generate PRBS31 */
+		pattern_type = OSI_PRBS_PATTERN_PRBS31;
+		direction = OSI_PRBS_DIR_TX;
+		period = 0;
+		cmd_desc = "Generate PRBS31 (Reg 0xC00A8=0x0010, bit[4])";
+		break;
+
+	case 6: /* Read PRBS9 */
+		pattern_type = OSI_PRBS_PATTERN_PRBS9;
+		direction = OSI_PRBS_DIR_RX;
+		period = 0;
+		cmd_desc = "Read PRBS9 (Reg 0xE001C=0x0080, bit[7]; Read 0xC00AC for errors)";
+		break;
+
+	case 7: /* Read PRBS31 */
+		pattern_type = OSI_PRBS_PATTERN_PRBS31;
+		direction = OSI_PRBS_DIR_RX;
+		period = 0;
+		cmd_desc = "Read PRBS31 (Reg 0xC00A8=0x0020, bit[5]; Read 0xC00AC for errors)";
+		break;
+
+	case 8: /* Generate and Read PRBS9 */
+		pattern_type = OSI_PRBS_PATTERN_PRBS9;
+		direction = OSI_PRBS_DIR_TX_RX;
+		period = 0;
+		cmd_desc = "Generate+Read PRBS9 (Reg 0xE001C=0x0080, 0xC00A8=0x0040; Read 0xC00AC)";
+		break;
+
+	case 9: /* Generate and Read PRBS31 */
+		pattern_type = OSI_PRBS_PATTERN_PRBS31;
+		direction = OSI_PRBS_DIR_TX_RX;
+		period = 0;
+		cmd_desc = "Generate+Read PRBS31 (Reg 0xC00A8=0x0030, bits[5:4]; Read 0xC00AC)";
+		break;
+
+	default:
+		dev_err(pdata->dev,
+			"Invalid command %u. Valid: 0-9\n", command);
+		dev_err(pdata->dev,
+			"Read prbs_pattern for command list\n");
+		return size;
+	}
+
+	/* Configure PRBS pattern */
+	ioctl_data.cmd = OSI_CMD_CONFIG_PRBS;
+	ioctl_data.arg1_u32 = pattern_type;
+	ioctl_data.arg2_u32 = direction;
+	ioctl_data.arg3_u32 = period;
+	ioctl_data.arg5_u64 = 0; /* Initialize error count */
+
+	ret = osi_handle_ioctl(pdata->osi_core, &ioctl_data);
+	if (ret < 0) {
+		dev_err(pdata->dev,
+			"PRBS configuration failed (cmd=%u, ret=%d)\n",
+			command, ret);
+		return size;
+	}
+
+	/* Log success */
+	dev_info(pdata->dev, "PRBS: %s\n", cmd_desc);
+
+	/* Display error count for RX operations (commands 6, 7, 8, 9) */
+	if (command >= 6 && command <= 9) {
+		dev_info(pdata->dev, "PRBS: Error count = %llu (0x%llx)\n",
+			 ioctl_data.arg5_u64, ioctl_data.arg5_u64);
+	}
+
+	return size;
+}
+
+/**
+ * @brief Sysfs attribute for PRBS pattern configuration
+ */
+static DEVICE_ATTR_RW(prbs_pattern);
+#endif /* ETHER_PRBS_SUPPORT */
+
 #ifdef MACSEC_SUPPORT
 
 /**
@@ -535,7 +743,7 @@ static DEVICE_ATTR(macsec_enable, (S_IRUGO | S_IWUSR),
 
 #define MACSEC_COE_LC_INPUT_LEN 3
 extern int macsec_coe_config(struct macsec_priv_data *macsec_pdata,
-		uint32_t coe_enable, uint32_t coe_hdr_offset);
+			     u32 coe_enable, u32 coe_hdr_offset);
 /**
  * @brief Shows the current COE setting of MACsec controllers enabled
  *
@@ -546,7 +754,7 @@ extern int macsec_coe_config(struct macsec_priv_data *macsec_pdata,
  * @param[in] buf: Buffer to store the current COE setting
  */
 static ssize_t macsec_coe_enable_show(struct device *dev,
-				  struct device_attribute *attr, char *buf)
+				      struct device_attribute *attr, char *buf)
 {
 	struct net_device *ndev = (struct net_device *)dev_get_drvdata(dev);
 	struct ether_priv_data *pdata = netdev_priv(ndev);
@@ -558,7 +766,7 @@ static ssize_t macsec_coe_enable_show(struct device *dev,
 		dev_err(pdata->dev, "Not Allowed. Ether interface is not up\n");
 		return 0;
 	}
-	if ((macsec_pdata == NULL)) {
+	if (!macsec_pdata) {
 		dev_err(pdata->dev, "Not Allowed. MACSec is not supported on this platform\n");
 		return 0;
 	}
@@ -570,7 +778,7 @@ static ssize_t macsec_coe_enable_show(struct device *dev,
 	coe_enable = macsec_pdata->coe.enable;
 	coe_hdr_offset = macsec_pdata->coe.hdr_offset;
 
-	if (OSI_ENABLE == coe_enable) {
+	if (coe_enable == OSI_ENABLE) {
 		return scnprintf(buf, PAGE_SIZE, "COE enabled, COE hdr offset: %u\n",
 			 coe_hdr_offset);
 	} else {
@@ -591,20 +799,20 @@ static ssize_t macsec_coe_enable_show(struct device *dev,
  * @return size of buffer.
  */
 static ssize_t macsec_coe_enable_store(struct device *dev,
-				   struct device_attribute *attr,
-				   const char *buf, size_t size)
+				       struct device_attribute *attr,
+				       const char *buf, size_t size)
 {
 	struct net_device *ndev = (struct net_device *)dev_get_drvdata(dev);
 	struct ether_priv_data *pdata = netdev_priv(ndev);
 	struct macsec_priv_data *macsec_pdata = pdata->macsec_pdata;
-	uint32_t coe_enable, coe_hdr_offset;
+	u32 coe_enable, coe_hdr_offset;
 	int ret = 0, i;
 
 	if (!netif_running(ndev)) {
 		dev_err(pdata->dev, "Not Allowed. Ether interface is not up\n");
 		return size;
 	}
-	if ((macsec_pdata == NULL)) {
+	if (!macsec_pdata) {
 		dev_err(pdata->dev, "Not Allowed. MACSec is not supported on this platform\n");
 		return size;
 	}
@@ -615,29 +823,29 @@ static ssize_t macsec_coe_enable_store(struct device *dev,
 
 	/* Read user inputs and validate it */
 	i = sscanf(buf, "%u %u", &coe_enable, &coe_hdr_offset);
-	if ((coe_enable != OSI_ENABLE) && (coe_enable != OSI_DISABLE)) {
+	if (coe_enable != OSI_ENABLE && coe_enable != OSI_DISABLE) {
 		dev_err(pdata->dev, "Invalid value %u for coe_enable\n", coe_enable);
 		return size;
 	}
-	if ((coe_hdr_offset < 16) || (coe_hdr_offset > 56)) {
+	if (coe_hdr_offset < 16 || coe_hdr_offset > 56) {
 		dev_err(pdata->dev, "Invalid value %u for coe_hdr_offset\n", coe_hdr_offset);
 		return size;
 	}
 
 	/* Configure COE */
 	if (coe_enable == OSI_ENABLE) {
-	        if (macsec_pdata->coe.enable == OSI_ENABLE) {
+		if (macsec_pdata->coe.enable == OSI_ENABLE) {
 			dev_err(pdata->dev, "COE already enabled\n");
 			return size;
 		}
 	} else {
-	        if (macsec_pdata->coe.enable == OSI_DISABLE) {
+		if (macsec_pdata->coe.enable == OSI_DISABLE) {
 			dev_err(pdata->dev, "COE already disabled\n");
 			return size;
 		}
 	}
 	ret = macsec_coe_config(macsec_pdata, coe_enable, coe_hdr_offset);
-	if (0 == ret) {
+	if (ret == 0) {
 		macsec_pdata->coe.enable = coe_enable;
 		macsec_pdata->coe.hdr_offset = coe_hdr_offset;
 	}
@@ -652,7 +860,6 @@ static DEVICE_ATTR(macsec_coe_enable, (S_IRUGO | S_IWUSR),
 		   macsec_coe_enable_show,
 		   macsec_coe_enable_store);
 
-
 /**
  * @brief Shows the current COE setting of MAC controllers enabled
  *
@@ -663,7 +870,7 @@ static DEVICE_ATTR(macsec_coe_enable, (S_IRUGO | S_IWUSR),
  * @param[in] buf: Buffer to store the current COE setting for the MAC
  */
 static ssize_t mac_coe_enable_show(struct device *dev,
-				  struct device_attribute *attr, char *buf)
+				   struct device_attribute *attr, char *buf)
 {
 	struct net_device *ndev = (struct net_device *)dev_get_drvdata(dev);
 	struct ether_priv_data *pdata = netdev_priv(ndev);
@@ -675,7 +882,7 @@ static ssize_t mac_coe_enable_show(struct device *dev,
 		return 0;
 	}
 
-	if (OSI_ENABLE == pdata->coe_enable) {
+	if (pdata->coe_enable == OSI_ENABLE) {
 		p += scnprintf(p, PAGE_SIZE, "MGBE COE mode enabled\n");
 		p += scnprintf(p, PAGE_SIZE, "\t vdma: %d\n", pdata->mgbe_coe.vdma);
 		p += scnprintf(p, PAGE_SIZE, "\t pdma: %d\n", pdata->mgbe_coe.pdma);
@@ -683,13 +890,15 @@ static ssize_t mac_coe_enable_show(struct device *dev,
 		for (j = 0; j < OSI_MGBE_COE_NUM_RX_FRAMES; j++) {
 			p += scnprintf(p, PAGE_SIZE, "\t FB[%d]:\n", j);
 			for (i = 0; i < 200; i++) {
-				p += scnprintf(p, PAGE_SIZE - i, "%02x", *(((unsigned char *)(pdata->mgbe_coe.rx_fb_addr[j])) + i));
+				p += scnprintf(p, PAGE_SIZE - i, "%02x",
+				*(((unsigned char *)(pdata->mgbe_coe.rx_fb_addr[j])) + i));
 			}
 			p += scnprintf(p, PAGE_SIZE - i, "\n");
 		}
 		p += scnprintf(p, PAGE_SIZE, "\t PIB:\n");
 		for (i = 0; i < 200; i++) {
-			p += scnprintf(p, PAGE_SIZE - i, "%02x", *(((unsigned char *)pdata->mgbe_coe.rx_pib_addr) + i));
+			p += scnprintf(p, PAGE_SIZE - i, "%02x",
+					*(((unsigned char *)pdata->mgbe_coe.rx_pib_addr) + i));
 		}
 		return p - buf;
 	} else {
@@ -710,8 +919,8 @@ static ssize_t mac_coe_enable_show(struct device *dev,
  * @return size of buffer.
  */
 static ssize_t mac_coe_enable_store(struct device *dev,
-				   struct device_attribute *attr,
-				   const char *buf, size_t size)
+				    struct device_attribute *attr,
+				    const char *buf, size_t size)
 {
 	struct net_device *ndev = (struct net_device *)dev_get_drvdata(dev);
 	struct ether_priv_data *pdata = netdev_priv(ndev);
@@ -724,14 +933,14 @@ static ssize_t mac_coe_enable_store(struct device *dev,
 
 	/* Read user inputs and validate it */
 	sscanf(buf, "%d %d %d %d", &coe_enable, &vdma, &pdma, &rx_pib_sz);
-	if ((coe_enable != OSI_ENABLE) && (coe_enable != OSI_DISABLE)) {
+	if (coe_enable != OSI_ENABLE && coe_enable != OSI_DISABLE) {
 		dev_err(pdata->dev, "Invalid value %u for coe_enable\n", coe_enable);
 		return size;
 	}
-	if ((rx_pib_sz != 256) &&
-	    (rx_pib_sz != 512) &&
-	    (rx_pib_sz != 2048) &&
-	    (rx_pib_sz != 4096)) {
+	if (rx_pib_sz != 256 &&
+	    rx_pib_sz != 512 &&
+	    rx_pib_sz != 2048 &&
+	    rx_pib_sz != 4096) {
 		dev_err(pdata->dev, "Invalid value %d for rx_pib_sz\n", rx_pib_sz);
 		return size;
 	}
@@ -754,7 +963,7 @@ static DEVICE_ATTR(mac_coe_enable, (S_IRUGO | S_IWUSR),
 		   mac_coe_enable_store);
 
 extern int macsec_coe_lc(struct macsec_priv_data *macsec_pdata,
-		uint32_t ch, uint32_t lc1, uint32_t lc2);
+			 uint32_t ch, uint32_t lc1, uint32_t lc2);
 /**
  * @brief Shows the current COE Line counter thresholds.
  *
@@ -777,7 +986,7 @@ static ssize_t macsec_coe_lc_show(struct device *dev,
 		dev_err(pdata->dev, "Not Allowed. Ether interface is not up\n");
 		return 0;
 	}
-	if ((macsec_pdata == NULL)) {
+	if (!macsec_pdata) {
 		dev_err(pdata->dev, "Not Allowed. MACSec is not supported on this platform\n");
 		return 0;
 	}
@@ -820,7 +1029,7 @@ static ssize_t macsec_coe_lc_store(struct device *dev,
 		dev_err(pdata->dev, "Not Allowed. Ether interface is not up\n");
 		return size;
 	}
-	if ((macsec_pdata == NULL)) {
+	if (!macsec_pdata) {
 		dev_err(pdata->dev, "Not Allowed. MACSec is not supported on this platform\n");
 		return size;
 	}
@@ -2173,9 +2382,8 @@ static ssize_t macsec_coe_lut_store(struct device *dev,
 	}
 
 	for (i = OSI_COE_LUT_BYTE_PATTERN_MAX - 1; i >= 0; i--) {
-		if (temp[i] > 0xFF) {
+		if (temp[i] > 0xFF)
 			dev_err(pdata->dev, "Invalid byte pattern %d\n", temp[i]);
-		}
 		lut_config.coe_lut_inout.byte_pattern[i] = (unsigned char)temp[i];
 	}
 	lut_config.lut_sel = OSI_LUT_SEL_COE;
@@ -2281,7 +2489,7 @@ static ssize_t macsec_tx_kt_show(struct device *dev,
 	}
 
 	buf += scnprintf(buf, PAGE_SIZE, "Tx:\n");
-	dump_kt(&buf, OSI_CTLR_SEL_TX, osi_core, 0U, 
+	dump_kt(&buf, OSI_CTLR_SEL_TX, osi_core, 0U,
 		(lut_max_index[osi_core->macsec] <= MAX_SA_ENTRIES_PER_SYSFS_NODE?
 		 lut_max_index[osi_core->macsec]:
 		 MAX_SA_ENTRIES_PER_SYSFS_NODE - 1U));
@@ -2382,7 +2590,7 @@ static ssize_t macsec_rx_kt_show(struct device *dev,
 	}
 
 	buf += scnprintf(buf, PAGE_SIZE, "Rx:\n");
-	dump_kt(&buf, OSI_CTLR_SEL_RX, osi_core, 0U, 
+	dump_kt(&buf, OSI_CTLR_SEL_RX, osi_core, 0U,
 		(lut_max_index[osi_core->macsec] <= MAX_SA_ENTRIES_PER_SYSFS_NODE?
 		 lut_max_index[osi_core->macsec]:
 		 MAX_SA_ENTRIES_PER_SYSFS_NODE - 1U));
@@ -2418,8 +2626,8 @@ static ssize_t macsec_rx_kt_show_2(struct device *dev,
 	}
 
 	buf += scnprintf(buf, PAGE_SIZE, "Rx:\n");
-	dump_kt(&buf, OSI_CTLR_SEL_RX, osi_core, MAX_SA_ENTRIES_PER_SYSFS_NODE, 
-			(2U * MAX_SA_ENTRIES_PER_SYSFS_NODE) - 1U);
+	dump_kt(&buf, OSI_CTLR_SEL_RX, osi_core, MAX_SA_ENTRIES_PER_SYSFS_NODE,
+		(2U * MAX_SA_ENTRIES_PER_SYSFS_NODE) - 1U);
 
 	return (buf - start);
 }
@@ -2452,8 +2660,8 @@ static ssize_t macsec_rx_kt_show_3(struct device *dev,
 	}
 
 	buf += scnprintf(buf, PAGE_SIZE, "Rx:\n");
-	dump_kt(&buf, OSI_CTLR_SEL_RX, osi_core, (2U * MAX_SA_ENTRIES_PER_SYSFS_NODE), 
-			lut_max_index[osi_core->macsec]);
+	dump_kt(&buf, OSI_CTLR_SEL_RX, osi_core, (2U * MAX_SA_ENTRIES_PER_SYSFS_NODE),
+		lut_max_index[osi_core->macsec]);
 
 	return (buf - start);
 }
@@ -3971,6 +4179,127 @@ static DEVICE_ATTR(hsi_enable, 0644,
 		   hsi_enable_show,
 		   hsi_enable_store);
 #endif
+
+/* Function to get the pm operations from a struct device */
+static const struct dev_pm_ops *get_pm_ops_from_device(struct device *dev)
+{
+	struct platform_device *pdev;
+	struct platform_driver *pdrv;
+
+	if (!dev)
+		return NULL;
+
+	/* Ensure the device is a platform device */
+	if (dev->bus != &platform_bus_type)
+		return NULL;
+
+	/* Retrieve the platform device from the struct device */
+	pdev = to_platform_device(dev);
+
+	/* Retrieve the platform driver from the platform device */
+	pdrv = to_platform_driver(pdev->dev.driver);
+
+	/* Return the pm operations from the platform driver */
+	return pdrv->driver.pm;
+}
+
+/**
+ * @brief Shows the current setting of sentry mode
+ *
+ * @param[in] dev: Device data.
+ * @param[in] attr: Device attribute
+ * @param[in] buf: Buffer to store the current MAC loopback setting
+ */
+static ssize_t ether_sentry_mode_show(struct device *dev,
+				      struct device_attribute *attr,
+				      char *buf)
+{
+	struct net_device *ndev = (struct net_device *)dev_get_drvdata(dev);
+	struct ether_priv_data *pdata = netdev_priv(ndev);
+
+	return scnprintf(buf, PAGE_SIZE, "%s\n",
+			 (pdata->sentrymode_state == ETHER_SENTRY_MODE_ENTERED) ?
+			 "entered" : "exited");
+}
+
+/**
+ * @brief Set the user setting for sentry mode entry and exit
+ *
+ * Algorithm: This is used to update osi_dma->enable_desc_dump
+ *
+ * @param[in] dev: Device data.
+ * @param[in] attr: Device attribute
+ * @param[in] buf: Buffer which contains the user settings of sentry mode
+ * @param[in] size: size of buffer
+ *
+ * @return size of buffer.
+ */
+static ssize_t ether_sentry_mode_store(struct device *dev,
+				       struct device_attribute *attr,
+				       const char *buf, size_t size)
+{
+	struct net_device *ndev = (struct net_device *)dev_get_drvdata(dev);
+	struct ether_priv_data *pdata = netdev_priv(ndev);
+	const struct dev_pm_ops *pm_ops = NULL;
+	int ret = 0;
+	/* take the lock to block ndo_* operations while entering/exiting from sentry mode */
+	rtnl_lock();
+	if (!netif_running(ndev)) {
+		dev_err(pdata->dev, "Not Allowed. Ether interface is not up\n");
+		goto exit;
+	}
+	pm_ops = get_pm_ops_from_device(dev);
+	if (!pm_ops) {
+		dev_err(pdata->dev, "failed to get driver PM ops\n");
+		goto exit;
+	}
+	if (strncmp(buf, "entry", 5) == 0U) {
+		if (pdata->sentrymode_state == ETHER_SENTRY_MODE_ENTERED) {
+			dev_err(pdata->dev, "driver already entered sentrymode\n");
+			goto exit;
+		}
+		/* Setting the value - 1 to indicate its performing sentry mode operations
+		 * This value will be passed OSI_CMD_SUSPEND IOCTL
+		 * to indicate the Ethernet Server that device is going into sentry mode
+		 */
+		pdata->sentrymode_state = ETHER_SENTRY_MODE;
+		ret = pm_ops->suspend(dev);
+		if (ret < 0) {
+			dev_err(pdata->dev, "failed to suspend the device\n");
+			goto exit;
+		}
+		pdata->sentrymode_state =  ETHER_SENTRY_MODE_ENTERED;
+	} else if (strncmp(buf, "exit", 4) == 0U) {
+		if (pdata->sentrymode_state == ETHER_SENTRY_MODE_EXITED ||
+		    pdata->sentrymode_state != ETHER_SENTRY_MODE_ENTERED) {
+			dev_err(pdata->dev, "Incorrect sentry mode state\n");
+			goto exit;
+		}
+		/* Setting the value - 1 to indicate its performing sentry mode operations
+		 * This value will be passed OSI_CMD_RESUME IOCTL
+		 * to indicate the Ethernet Server that device is going into sentry mode
+		 */
+		pdata->sentrymode_state = ETHER_SENTRY_MODE;
+		ret = pm_ops->resume(dev);
+		if (ret < 0) {
+			dev_err(pdata->dev, "failed to resume the device\n");
+			goto exit;
+		}
+		pdata->sentrymode_state = ETHER_SENTRY_MODE_EXITED;
+	} else {
+		dev_err(pdata->dev,
+			"Invalid entry. Valid Entries are entry or exit\n");
+	}
+exit:
+	rtnl_unlock();
+	return size;
+}
+
+/**
+ * @brief Sysfs attribute for enable descriptor dump
+ *
+ */
+static DEVICE_ATTR_RW(ether_sentry_mode);
 #endif /* OSI_STRIPPED_LIB */
 
 
@@ -3986,6 +4315,9 @@ static struct attribute *ether_sysfs_attrs[] = {
 	&dev_attr_test_tx_bandwidth_dump_enable.attr,
 #endif
 	&dev_attr_mac_loopback.attr,
+#ifdef ETHER_PRBS_SUPPORT
+	&dev_attr_prbs_pattern.attr,
+#endif /* ETHER_PRBS_SUPPORT */
 	&dev_attr_pcs_baser_fec.attr,
 	&dev_attr_ptp_mode.attr,
 	&dev_attr_ptp_sync.attr,
@@ -4040,6 +4372,7 @@ static struct attribute *ether_sysfs_attrs[] = {
 #if defined HSI_SUPPORT && defined(NV_VLTEST_BUILD) && (IS_ENABLED(CONFIG_TEGRA_HSIERRRPTINJ))
 	&dev_attr_hsi_enable.attr,
 #endif
+	&dev_attr_ether_sentry_mode.attr,
 #endif /* OSI_STRIPPED_LIB */
 	NULL
 };
@@ -4056,6 +4389,9 @@ static struct attribute *ether_sysfs_attrs_without_macsec[] = {
 	&dev_attr_test_tx_bandwidth_dump_enable.attr,
 #endif
 	&dev_attr_mac_loopback.attr,
+#ifdef ETHER_PRBS_SUPPORT
+	&dev_attr_prbs_pattern.attr,
+#endif /* ETHER_PRBS_SUPPORT */
 	&dev_attr_ptp_mode.attr,
 	&dev_attr_ptp_sync.attr,
 	&dev_attr_frp.attr,
@@ -4071,6 +4407,7 @@ static struct attribute *ether_sysfs_attrs_without_macsec[] = {
 	&dev_attr_hsi_enable.attr,
 #endif
 	&dev_attr_mac_tx_q.attr,
+	&dev_attr_ether_sentry_mode.attr,
 #endif /* OSI_STRIPPED_LIB */
 	NULL
 };

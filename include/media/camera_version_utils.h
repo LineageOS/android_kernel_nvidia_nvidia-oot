@@ -1,9 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
+ * SPDX-FileCopyrightText: Copyright (c) 2017-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ *
  * camera_version_utils.h - utilities for different kernel versions
  * camera driver supports
- *
- * Copyright (c) 2017-2022, NVIDIA CORPORATION.  All rights reserved.
  */
 #ifndef __camera_version_utils__
 #define __camera_version_utils__
@@ -11,7 +11,6 @@
 #include <linux/videodev2.h>
 
 #include <linux/kernel.h>
-#include <linux/version.h>
 #include <linux/debugfs.h>
 
 #include <media/v4l2-device.h>

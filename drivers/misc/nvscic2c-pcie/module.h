@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2022-2024, NVIDIA CORPORATION & AFFILIATES.
+ * SPDX-FileCopyrightText: Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES.
  * All rights reserved.
  */
 
@@ -90,6 +90,7 @@ struct epf_context_t {
 	atomic_t core_initialized;
 	atomic_t epf_initialized;
 	atomic_t shutdown_msg_received;
+	atomic_t lock_status;
 	wait_queue_head_t core_initialized_waitq;
 	bool isr_registered;
 	int irq;

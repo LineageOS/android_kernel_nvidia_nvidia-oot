@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2011-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2011-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * Handle allocation and freeing routines for nvmap
  */
@@ -8,8 +8,8 @@
 #define pr_fmt(fmt)	"%s: " fmt, __func__
 
 #include <linux/moduleparam.h>
+#include <linux/highmem.h>
 #include <linux/random.h>
-#include <linux/version.h>
 #include <linux/io.h>
 #include <soc/tegra/fuse.h>
 #include <trace/events/nvmap.h>
@@ -18,6 +18,7 @@
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
 #include <linux/mm.h>
+#include <linux/sched/mm.h>
 #include "nvmap_stats.h"
 #include "nvmap_dev.h"
 #include "nvmap_alloc.h"
@@ -130,6 +131,18 @@ static int handle_page_alloc(struct nvmap_client *client,
 	if (!mmget_not_zero(mm))
 		goto page_free;
 
+	/*
+	 * Increment the RSS counter of the allocating process by number of pages requested.
+	 * This is done at the beginning as we have bulk allocation calls like __alloc_pages_bulk
+	 * during which the RSS counter is not incremented, so it may result in a huge allocation
+	 * without any RSS counter increment. This can lead to OOM killer killing other processes
+	 * while huge amount of memory is allocated by current process.
+	 * Con: The current process may be chosen by OOM killer if the input number of pages is
+	 * large and allocation is not even completed.
+	 */
+	h->anon_count = nr_page;
+	nvmap_add_mm_counter(mm, MM_ANONPAGES, nr_page);
+
 	if (contiguous) {
 		struct page *page;
 		page = nvmap_alloc_pages_exact(gfp, size, h->numa_id);
@@ -198,8 +211,18 @@ static int handle_page_alloc(struct nvmap_client *client,
 			pages[i] = nvmap_alloc_pages_exact(gfp, PAGE_SIZE,
 							   h->numa_id);
 
-			if (pages[i] == NULL)
-				goto fail;
+			if (!pages[i])
+				break;
+		}
+		if (i < nr_page) {
+			gfp = gfp & ~__GFP_NORETRY;
+
+			while (i < nr_page) {
+				pages[i] = nvmap_alloc_pages_exact(gfp, PAGE_SIZE, h->numa_id);
+				if (!pages[i])
+					goto fail;
+				i++;
+			}
 		}
 	}
 
@@ -207,12 +230,6 @@ static int handle_page_alloc(struct nvmap_client *client,
 		goto fail;
 
 	nvmap_total_page_allocs = result;
-
-	/*
-	 * Increment the RSS counter of the allocating process by number of pages allocated.
-	 */
-	h->anon_count = nr_page;
-	nvmap_add_mm_counter(mm, MM_ANONPAGES, nr_page);
 
 	/*
 	 * Make sure any data in the caches is cleaned out before
@@ -242,10 +259,12 @@ static int handle_page_alloc(struct nvmap_client *client,
 	return 0;
 
 fail:
-	while (i--)
-		__free_page(pages[i]);
+	while (i > 0)
+		__free_page(pages[--i]);
 
-	/* Incase of failure, release the reference on mm_struct. */
+	/* Incase of failure, decrement the RSS counter and release the reference on mm_struct. */
+	h->anon_count = 0;
+	nvmap_add_mm_counter(mm, MM_ANONPAGES, -(long)nr_page);
 	mmput(mm);
 
 page_free:
@@ -333,16 +352,15 @@ static int alloc_handle_from_va(struct nvmap_client *client,
 	size_t nr_page = h->size >> PAGE_SHIFT;
 	struct page **pages;
 	int ret = 0;
-	struct mm_struct *mm = current->mm;
 
 	pages = nvmap_altalloc(nr_page * sizeof(*pages));
-	if (IS_ERR_OR_NULL(pages))
-		return PTR_ERR(pages);
+	if (pages == NULL)
+		return -ENOMEM;
 
-	nvmap_acquire_mmap_read_lock(mm);
+	/* coverity[cert_exp34_c_violation]; FP-BUG_4598544 */
+	/* coverity[NULL_RETURNS]; FP-BUG_4598544 */
 	ret = nvmap_get_user_pages(vaddr & PAGE_MASK, nr_page, pages, true,
 				(flags & NVMAP_HANDLE_RO) ? 0 : FOLL_WRITE);
-	nvmap_release_mmap_read_lock(mm);
 	if (ret) {
 		nvmap_altfree(pages, nr_page * sizeof(*pages));
 		return ret;
@@ -351,6 +369,8 @@ static int alloc_handle_from_va(struct nvmap_client *client,
 	if (flags & NVMAP_HANDLE_RO)
 		h->is_ro = true;
 
+	/* coverity[cert_exp34_c_violation]; FP-BUG_4598544 */
+	/* coverity[NULL_RETURNS]; FP-BUG_4598544 */
 	nvmap_clean_cache(&pages[0], nr_page);
 	h->pgalloc.pages = pages;
 	atomic_set(&h->pgalloc.ndirty, 0);
@@ -511,14 +531,17 @@ int nvmap_get_user_pages(ulong vaddr,
 		/*
 		 * OpenRM case: When buffer is mapped using remap_pfn_range
 		 */
-		if (vma->vm_flags & VM_PFNMAP) {
+		if (vma && (vma->vm_flags & VM_PFNMAP)) {
 			user_pages = 0;
 			while (user_pages < nr_page) {
 				ret = nvmap_page_from_vma(vma, vaddr, &pages[user_pages]);
 				if (ret)
 					break;
 
-				vaddr += PAGE_SIZE;
+				if (check_add_overflow(vaddr, PAGE_SIZE, &vaddr)) {
+					ret = -EOVERFLOW;
+					break;
+				}
 				user_pages++;
 			}
 
@@ -704,7 +727,7 @@ int nvmap_alloc_handle_from_va(struct nvmap_client *client,
 }
 
 void nvmap_alloc_free(struct page **pages, unsigned int nr_page, bool from_va,
-		      bool is_subhandle)
+		      bool is_subhandle, bool from_hugetlbfs)
 {
 	unsigned int i, page_index = 0U;
 
@@ -725,6 +748,18 @@ void nvmap_alloc_free(struct page **pages, unsigned int nr_page, bool from_va,
 		}
 	}
 #endif
+
+	/*
+	 * If the pages are from IOVMM (not foreign buffer or subhandle) or hugetlbfs,
+	 * zero them (and flush the cache) before returning to the kernel as kernel may
+	 * allocate these pages for other purposes and may leak the previous contents.
+	 */
+	if (from_hugetlbfs || (!from_va && !is_subhandle)) {
+		for (i = page_index; i < nr_page; i++)
+			clear_highpage(pages[i]);
+
+		nvmap_clean_cache(&pages[page_index], (nr_page - page_index));
+	}
 
 	for (i = page_index; i < nr_page; i++) {
 		if (from_va)

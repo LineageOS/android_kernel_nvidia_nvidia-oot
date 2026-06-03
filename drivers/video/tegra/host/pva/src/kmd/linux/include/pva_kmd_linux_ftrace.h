@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
+/* SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
 
 /* This is here just to prevent header guard warnings */
 /* Since define_trace.h file included at the bottom of this file needs to
@@ -14,8 +14,8 @@
 
 // clang-format off
 
-#if !defined(_TRACE_PVA_FTRACE_H) || defined(TRACE_HEADER_MULTI_READ)
-#define _TRACE_PVA_FTRACE_H
+#if !defined(PVA_TRACE_FTRACE_H) || defined(TRACE_HEADER_MULTI_READ)
+#define PVA_TRACE_FTRACE_H
 
 #include <linux/tracepoint.h>
 #include <linux/device.h>
@@ -143,7 +143,7 @@ TRACE_EVENT(pva_fence,
 	)
 );
 
-#endif /* End of _TRACE_PVA_FTRACE_H */
+#endif /* End of PVA_TRACE_FTRACE_H */
 
 /* This part must be outside header guards */
 

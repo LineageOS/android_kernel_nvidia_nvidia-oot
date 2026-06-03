@@ -84,6 +84,7 @@ static const struct ether_stats ether_cstrings_stats[] = {
  * @brief pkt_err statistics array length
  */
 #define ETHER_PKT_ERR_STAT_LEN OSI_ARRAY_SIZE(ether_cstrings_stats)
+#endif /* OSI_STRIPPED_LIB */
 
 /**
  * @brief Name of extra DMA stat, with length of name not more than ETH_GSTRING_LEN
@@ -254,7 +255,6 @@ static const struct ether_stats ether_dstrings_stats[] = {
  * @brief Ethernet extra DMA statistics array length
  */
 #define ETHER_EXTRA_DMA_STAT_LEN OSI_ARRAY_SIZE(ether_dstrings_stats)
-#endif /* OSI_STRIPPED_LIB */
 
 /**
  * @brief Name of extra Ethernet stats, with length of name not more than
@@ -1053,9 +1053,7 @@ void ether_get_ethtool_stats(struct net_device *dev,
 {
 	struct ether_priv_data *pdata = netdev_priv(dev);
 	struct osi_core_priv_data *osi_core = pdata->osi_core;
-#ifndef OSI_STRIPPED_LIB
 	struct osi_dma_priv_data *osi_dma = pdata->osi_dma;
-#endif /* OSI_STRIPPED_LIB */
 	struct osi_ioctl ioctl_data = {};
 	int i, j = 0;
 	int ret;
@@ -1110,7 +1108,6 @@ void ether_get_ethtool_stats(struct net_device *dev,
 			}
 		}
 
-#ifndef OSI_STRIPPED_LIB
 		for (i = 0; i < ETHER_EXTRA_DMA_STAT_LEN; i++) {
 			char *p = (char *)osi_dma +
 				  ether_dstrings_stats[i].stat_offset;
@@ -1120,6 +1117,7 @@ void ether_get_ethtool_stats(struct net_device *dev,
 			}
 		}
 
+#ifndef OSI_STRIPPED_LIB
 		for (i = 0; i < ETHER_PKT_ERR_STAT_LEN; i++) {
 			char *p = (char *)osi_dma +
 				  ether_cstrings_stats[i].stat_offset;
@@ -1169,12 +1167,12 @@ int ether_get_sset_count(struct net_device *dev, int sset)
 		} else {
 			len += ETHER_EXTRA_STAT_LEN;
 		}
-#ifndef OSI_STRIPPED_LIB
 		if (OSD_INT_MAX - ETHER_EXTRA_DMA_STAT_LEN < len) {
 			/* do nothing */
 		} else {
 			len += ETHER_EXTRA_DMA_STAT_LEN;
 		}
+#ifndef OSI_STRIPPED_LIB
 		if (OSD_INT_MAX - ETHER_PKT_ERR_STAT_LEN < len) {
 			/* do nothing */
 		} else {
@@ -1228,7 +1226,6 @@ void ether_get_strings(struct net_device *dev, u32 stringset, u8 *data)
 				}
 				p += ETH_GSTRING_LEN;
 			}
-#ifndef OSI_STRIPPED_LIB
 			for (i = 0; i < ETHER_EXTRA_DMA_STAT_LEN; i++) {
 				str = (u8 *)ether_dstrings_stats[i].stat_string;
 				if (memcpy(p, str, ETH_GSTRING_LEN) ==
@@ -1237,6 +1234,7 @@ void ether_get_strings(struct net_device *dev, u32 stringset, u8 *data)
 				}
 				p += ETH_GSTRING_LEN;
 			}
+#ifndef OSI_STRIPPED_LIB
 			for (i = 0; i < ETHER_PKT_ERR_STAT_LEN; i++) {
 				str = (u8 *)ether_cstrings_stats[i].stat_string;
 				if (memcpy(p, str, ETH_GSTRING_LEN) ==
@@ -1367,19 +1365,7 @@ int ether_set_pauseparam(struct net_device *ndev,
 }
 #endif /* OSI_STRIPPED_LIB */
 
-/**
- * @brief Get HW supported time stamping.
- *
- * Algorithm: Function used to query the PTP capabilities for given netdev.
- *
- * @param[in] ndev: Net device data.
- * @param[in] info: Holds device supported timestamping types
- *
- * @note HW need to support PTP functionality.
- *
- * @return zero on success
- */
-static int ether_get_ts_info(struct net_device *ndev,
+int ether_get_ts_info(struct net_device *ndev,
 #if defined(NV_ETHTOOL_KERNEL_ETHTOOL_TS_INFO_STRUCT_PRESENT) /* Linux v6.11 */
 		struct kernel_ethtool_ts_info *info)
 #else
@@ -1397,6 +1383,8 @@ static int ether_get_ts_info(struct net_device *ndev,
 
 	if (pdata->ptp_clock) {
 		info->phc_index = ptp_clock_index(pdata->ptp_clock);
+	} else {
+		info->phc_index = -EINVAL;
 	}
 
 	info->tx_types = ((1 << HWTSTAMP_TX_OFF) |
@@ -1853,54 +1841,78 @@ static int ether_set_eee(struct net_device *ndev,
 	return 0;
 }
 
-int ether_set_wol(struct net_device *ndev, struct ethtool_wolinfo *wol)
+/**
+ * @brief Configure WOL settings in PHY subsystem
+ *
+ * Algorithm: Call phy subsystem to enable or disable
+ * Wake On Lan settings based on wol param
+ *
+ * @param[in] ndev – pointer to net device structure.
+ * @param[in] wol – pointer to ethtool_wolinfo structure.
+ *
+ * @note MAC and PHY need to be initialized.
+ *
+ * @retval zero on success and -ve number on failure.
+ */
+
+int ether_set_wol_impl(struct net_device *ndev, struct ethtool_wolinfo *wol)
 {
 	struct ether_priv_data *pdata = netdev_priv(ndev);
-	int ret;
+	struct phy_device *phydev = pdata->phydev;
 
+	if (!phydev) {
+		netdev_err(pdata->ndev,
+			   "%s: phydev is null check iface up status\n",
+			   __func__);
+		return -ENOTSUPP;
+	}
+
+	if (!phy_interrupt_is_valid(phydev))
+		return -ENOTSUPP;
+
+	return phy_ethtool_set_wol(pdata->phydev, wol);
+}
+
+/**
+ * @brief This function is invoked by kernel when user request to set
+ * pmt parameters for remote wakeup or magic wakeup
+ *
+ * Algorithm: Enable or Disable Wake On Lan status based on wol param
+ *
+ * @param[in] ndev – pointer to net device structure.
+ * @param[in] wol – pointer to ethtool_wolinfo structure.
+ *
+ * @note MAC and PHY need to be initialized.
+ *
+ * @retval zero on success and -ve number on failure.
+ */
+static int ether_set_wol(struct net_device *ndev, struct ethtool_wolinfo *wol)
+{
+	int ret = 0;
+	struct ether_priv_data *pdata = netdev_priv(ndev);
 	if (!wol)
 		return -EINVAL;
 
-	if (!pdata->phydev) {
-		netdev_err(pdata->ndev,
-			   "%s: phydev is null check iface up status\n",
-			   __func__);
-		return -ENOTSUPP;
-	}
-
-	if (!phy_interrupt_is_valid(pdata->phydev))
-		return -ENOTSUPP;
-
-	ret = phy_ethtool_set_wol(pdata->phydev, wol);
-	if (ret < 0)
-		return ret;
-
+	/* Disable WOL on demand.
+	 * Enabling WOL will to deferred to before system suspend.
+	 */
 	if (wol->wolopts) {
-		ret = enable_irq_wake(pdata->phydev->irq);
-		if (ret) {
-			dev_err(pdata->dev, "PHY enable irq wake failed, %d\n",
-				ret);
-			return ret;
-		}
-		/* enable device wake on WoL set */
-		device_init_wakeup(&ndev->dev, true);
-	} else {
-		ret = disable_irq_wake(pdata->phydev->irq);
-		if (ret) {
-			dev_info(pdata->dev,
-				 "PHY disable irq wake failed, %d\n",
-				 ret);
-		}
-		/* disable device wake on WoL reset */
-		device_init_wakeup(&ndev->dev, false);
-	}
+		/* The WOL request to the PHY layer is defered, and will apply on
+		 * it only when the system is going to suspend. */
+		memcpy(&pdata->wol, wol, sizeof(struct ethtool_wolinfo));
 
+	} else {
+		/* Set wolopts to 0 to implicitly say that WOL is disabled */
+		pdata->wol.wolopts = 0;
+		ret = ether_set_wol_impl(ndev, wol);
+	}
 	return ret;
 }
 
-void ether_get_wol(struct net_device *ndev, struct ethtool_wolinfo *wol)
+static void ether_get_wol(struct net_device *ndev, struct ethtool_wolinfo *wol)
 {
 	struct ether_priv_data *pdata = netdev_priv(ndev);
+	u32 wolopts;
 
 	if (!wol)
 		return;
@@ -1912,14 +1924,22 @@ void ether_get_wol(struct net_device *ndev, struct ethtool_wolinfo *wol)
 		return;
 	}
 
-	wol->supported = 0;
-	wol->wolopts = 0;
-
 	if (!phy_interrupt_is_valid(pdata->phydev))
 		return;
 
-	phy_ethtool_get_wol(pdata->phydev, wol);
+	wolopts = pdata->wol.wolopts;
+
+	pdata->wol.supported = 0;
+	pdata->wol.wolopts = 0;
+
+	phy_ethtool_get_wol(pdata->phydev, &pdata->wol);
+
+	if (wolopts & WAKE_MAGIC) {
+		pdata->wol.wolopts |= WAKE_MAGIC;
+	}
+	memcpy(wol, &pdata->wol, sizeof(struct ethtool_wolinfo));
 }
+#endif /* OSI_STRIPPED_LIB */
 
 int ether_get_rxnfc(struct net_device *ndev,
 		    struct ethtool_rxnfc *rxnfc,
@@ -1953,23 +1973,12 @@ u32 ether_get_rxfh_indir_size(struct net_device *ndev)
 	return ARRAY_SIZE(ioctl_data.data.rss.table);
 }
 
-/**
- * @brief Get the contents of the RX flow hash indirection table, hash key
- * and/or hash function
- *
- * param[in] ndev: Pointer to net device structure.
- * param[out] indir: Pointer to indirection table
- * param[out] key: Pointer to Hash key
- * param[out] hfunc: Pointer to Hash function
- *
- * @retval 0 on success
- */
 #if defined(NV_ETHTOOL_OPS_GET_SET_RXFH_HAS_RXFH_PARAM_ARGS)
-static int ether_get_rxfh(struct net_device *ndev,
-			  struct ethtool_rxfh_param *rxfh)
+int ether_get_rxfh(struct net_device *ndev,
+		   struct ethtool_rxfh_param *rxfh)
 #else
-static int ether_get_rxfh(struct net_device *ndev, u32 *indir, u8 *key,
-			  u8 *hfunc)
+int ether_get_rxfh(struct net_device *ndev, u32 *indir, u8 *key,
+		   u8 *hfunc)
 #endif
 {
 	struct ether_priv_data *pdata = netdev_priv(ndev);
@@ -2006,25 +2015,13 @@ static int ether_get_rxfh(struct net_device *ndev, u32 *indir, u8 *key,
 	return ret;
 }
 
-/**
- * @b	rief Set the contents of the RX flow hash indirection table, hash key
- * and/or hash function
- *
- * param[in] ndev: Pointer to net device structure.
- * param[in] indir: Pointer to indirection table
- * param[in] key: Pointer to Hash key
- * param[hfunc] hfunc: Hash function
- *
- * @retval 0 on success
- * @retval -1 on failure.
- */
 #if defined(NV_ETHTOOL_OPS_GET_SET_RXFH_HAS_RXFH_PARAM_ARGS)
-static int ether_set_rxfh(struct net_device *ndev,
-			  struct ethtool_rxfh_param *rxfh,
-			  struct netlink_ext_ack *extack)
+int ether_set_rxfh(struct net_device *ndev,
+		   struct ethtool_rxfh_param *rxfh,
+		   struct netlink_ext_ack *extack)
 #else
-static int ether_set_rxfh(struct net_device *ndev, const u32 *indir,
-			  const u8 *key, const u8 hfunc)
+int ether_set_rxfh(struct net_device *ndev, const u32 *indir,
+		   const u8 *key, const u8 hfunc)
 #endif
 {
 	struct ether_priv_data *pdata = netdev_priv(ndev);
@@ -2035,7 +2032,7 @@ static int ether_set_rxfh(struct net_device *ndev, const u32 *indir,
 	u8 hfunc = rxfh->hfunc;
 	u8 *key = rxfh->key;
 #endif
-	int i;
+	int i, j;
 	int ret = 0;
 
 	if (!netif_running(ndev)) {
@@ -2055,8 +2052,18 @@ static int ether_set_rxfh(struct net_device *ndev, const u32 *indir,
 	}
 
 	if (indir) {
-		for (i = 0; i < ARRAY_SIZE(rss->table); i++)
+		for (i = 0; i < ARRAY_SIZE(rss->table); i++) {
+			for (j = 0; j < pdata->osi_dma->num_dma_chans; j++) {
+				if (indir[i] == pdata->osi_dma->dma_chans[j]) {
+					break;
+				}
+			}
+			if (j == pdata->osi_dma->num_dma_chans) {
+				dev_err(pdata->dev, "Invalid channel received %d\n", indir[i]);
+				return -EINVAL;
+			}
 			rss->table[i] = indir[i];
+		}
 	}
 
 	if (key) {
@@ -2069,6 +2076,7 @@ static int ether_set_rxfh(struct net_device *ndev, const u32 *indir,
 	return osi_handle_ioctl(pdata->osi_core, &ioctl_data);
 }
 
+#ifndef OSI_STRIPPED_LIB
 #if defined(NV_ETHTOOL_OPS_GET_SET_RINGPARAM_HAS_RINGPARAM_AND_EXTACT_ARGS) /* Linux v5.17 */
 static void ether_get_ringparam(struct net_device *ndev,
 				struct ethtool_ringparam *ring,
@@ -2165,14 +2173,14 @@ static int ether_set_ringparam(struct net_device *ndev,
 	return ret;
 }
 
-unsigned int ether_get_msglevel(struct net_device *ndev)
+static unsigned int ether_get_msglevel(struct net_device *ndev)
 {
 	struct ether_priv_data *pdata = netdev_priv(ndev);
 
 	return pdata->msg_enable;
 }
 
-void ether_set_msglevel(struct net_device *ndev, u32 level)
+static void ether_set_msglevel(struct net_device *ndev, u32 level)
 {
 	struct ether_priv_data *pdata = netdev_priv(ndev);
 
@@ -2195,19 +2203,19 @@ static const struct ethtool_ops ether_ethtool_ops = {
 	.supported_coalesce_params = (ETHTOOL_COALESCE_USECS |
 		ETHTOOL_COALESCE_MAX_FRAMES),
 	.set_coalesce = ether_set_coalesce,
-#ifndef OSI_STRIPPED_LIB
-	.get_wol = ether_get_wol,
-	.set_wol = ether_set_wol,
-	.self_test = ether_selftest_run,
 	.get_rxnfc = ether_get_rxnfc,
-	.get_pauseparam = ether_get_pauseparam,
-	.set_pauseparam = ether_set_pauseparam,
-	.get_eee = ether_get_eee,
-	.set_eee = ether_set_eee,
 	.get_rxfh_key_size = ether_get_rxfh_key_size,
 	.get_rxfh_indir_size = ether_get_rxfh_indir_size,
 	.get_rxfh = ether_get_rxfh,
 	.set_rxfh = ether_set_rxfh,
+#ifndef OSI_STRIPPED_LIB
+	.get_wol = ether_get_wol,
+	.set_wol = ether_set_wol,
+	.self_test = ether_selftest_run,
+	.get_pauseparam = ether_get_pauseparam,
+	.set_pauseparam = ether_set_pauseparam,
+	.get_eee = ether_get_eee,
+	.set_eee = ether_set_eee,
 	.get_ringparam = ether_get_ringparam,
 	.set_ringparam = ether_set_ringparam,
 	.get_msglevel = ether_get_msglevel,

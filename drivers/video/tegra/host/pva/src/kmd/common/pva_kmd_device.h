@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
+/* SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
 
 #ifndef PVA_KMD_DEVICE_H
 #define PVA_KMD_DEVICE_H
@@ -16,7 +16,6 @@
 #include "pva_kmd_thread_sema.h"
 #include "pva_kmd_shim_init.h"
 #include "pva_kmd_shim_ccq.h"
-#include "pva_kmd_fw_profiler.h"
 #include "pva_kmd_fw_debug_printf.h"
 #include "pva_kmd_constants.h"
 #include "pva_kmd_debugfs.h"
@@ -612,28 +611,6 @@ enum pva_error pva_kmd_init_fw(struct pva_kmd_device *pva);
  * @retval PVA_TIMEDOUT               Firmware shutdown timeout occurred
  */
 enum pva_error pva_kmd_deinit_fw(struct pva_kmd_device *pva);
-
-/**
- * @brief Check if the PVA device might be powered on
- *
- * @details This function performs the following operations:
- * - Checks device power state indicators to determine if device is active
- * - Reads hardware registers to verify device accessibility
- * - Uses platform-specific power management information if available
- * - Returns a best-effort assessment of device power state
- * - Does not guarantee definitive power state due to timing considerations
- *
- * This function provides a quick check for device availability without
- * performing operations that might cause side effects. The result should
- * be treated as a hint rather than a definitive power state.
- *
- * @param[in] pva  Pointer to @ref pva_kmd_device structure
- *                 Valid value: non-null
- *
- * @retval true   Device appears to be powered on and accessible
- * @retval false  Device appears to be powered off or inaccessible
- */
-bool pva_kmd_device_maybe_on(struct pva_kmd_device *pva);
 
 /**
  * @brief Query the firmware version string from the device

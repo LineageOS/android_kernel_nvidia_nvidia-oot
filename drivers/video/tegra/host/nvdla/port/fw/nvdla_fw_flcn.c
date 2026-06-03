@@ -42,7 +42,9 @@ int32_t nvdla_fw_poweron(struct platform_device *pdev)
 		goto fail;
 	}
 
-	fw_ver_read_bin = nvdla_device_register_read(pdev, NV_DLA_OS_VERSION);
+	fw_ver_read_bin = nvdla_device_register_read(pdev,
+						NVDLA_APERTURE_TYPE_DLA,
+						NV_DLA_OS_VERSION);
 
 	firmware_version = pdata->version;
 
@@ -143,10 +145,12 @@ int32_t nvdla_fw_send_cmd(struct platform_device *pdev,
 	nvdla_dev->waiting = 1;
 
 	nvdla_dbg_reg(pdev, "method_id=[0x%x]", method_id);
-	nvdla_device_register_write(pdev, NV_DLA_THI_METHOD_ID, method_id);
+	nvdla_device_register_write(pdev, NVDLA_APERTURE_TYPE_DLA,
+		NV_DLA_THI_METHOD_ID, method_id);
 
 	nvdla_dbg_reg(pdev, "method_data=[0x%x]", method_data);
-	nvdla_device_register_write(pdev, NV_DLA_THI_METHOD_DATA, method_data);
+	nvdla_device_register_write(pdev, NVDLA_APERTURE_TYPE_DLA,
+		NV_DLA_THI_METHOD_DATA, method_data);
 
 	if (!wait) {
 		nvdla_dev->waiting = 0;
@@ -186,7 +190,8 @@ int32_t nvdla_fw_send_ack(struct platform_device *pdev,
 		goto fail;
 	}
 
-	nvdla_device_register_write(pdev, flcn_mailbox0_r(), ack);
+	nvdla_device_register_write(pdev, NVDLA_APERTURE_TYPE_DLA,
+		flcn_mailbox0_r(), ack);
 
 	return 0;
 
@@ -211,11 +216,20 @@ int32_t nvdla_fw_interrupt_stat_read(struct platform_device *pdev,
 	}
 
 	/* TODO: Check for spurious interrupts. */
-	*stat = nvdla_device_register_read(pdev, flcn_mailbox0_r());
+	*stat = nvdla_device_register_read(pdev, NVDLA_APERTURE_TYPE_DLA,
+				flcn_mailbox0_r());
 	return 0;
 
 fail:
 	return err;
+}
+
+int32_t nvdla_fw_interrupt_stat_read_mnoc(struct platform_device *pdev,
+	int32_t *stat)
+{
+	(void) pdev;
+
+	return -EOPNOTSUPP;
 }
 
 int32_t nvdla_fw_interrupt_stat_clear(struct platform_device *pdev)
@@ -227,17 +241,25 @@ int32_t nvdla_fw_interrupt_stat_clear(struct platform_device *pdev)
 		goto fail;
 	}
 
-	nvdla_device_register_write(pdev, flcn_irqmclr_r(),
-		flcn_irqmclr_swgen1_set_f());
-	nvdla_device_register_write(pdev, flcn_thi_int_stat_r(),
-		flcn_thi_int_stat_clr_f());
-	nvdla_device_register_read(pdev, flcn_thi_int_stat_r());
-	nvdla_device_register_write(pdev, flcn_irqsclr_r(),
-		flcn_irqsclr_swgen1_set_f());
+	nvdla_device_register_write(pdev, NVDLA_APERTURE_TYPE_DLA,
+		flcn_irqmclr_r(), flcn_irqmclr_swgen1_set_f());
+	nvdla_device_register_write(pdev, NVDLA_APERTURE_TYPE_DLA,
+		flcn_thi_int_stat_r(), flcn_thi_int_stat_clr_f());
+	nvdla_device_register_read(pdev, NVDLA_APERTURE_TYPE_DLA,
+		flcn_thi_int_stat_r());
+	nvdla_device_register_write(pdev, NVDLA_APERTURE_TYPE_DLA,
+		flcn_irqsclr_r(), flcn_irqsclr_swgen1_set_f());
 
 	return 0;
 fail:
 	return err;
+}
+
+int32_t nvdla_fw_interrupt_stat_clear_mnoc(struct platform_device *pdev)
+{
+	(void) pdev;
+
+	return -EOPNOTSUPP;
 }
 
 int32_t nvdla_fw_inject_corrected_error(struct platform_device *pdev)
@@ -249,8 +271,8 @@ int32_t nvdla_fw_inject_corrected_error(struct platform_device *pdev)
 		goto fail;
 	}
 
-	nvdla_device_register_write(pdev, flcn_safety_erb_r(),
-		flcn_safety_erb_data_corrected_err_v());
+	nvdla_device_register_write(pdev, NVDLA_APERTURE_TYPE_DLA,
+		flcn_safety_erb_r(), flcn_safety_erb_data_corrected_err_v());
 	return 0;
 
 fail:
@@ -266,10 +288,26 @@ int32_t nvdla_fw_inject_uncorrected_error(struct platform_device *pdev)
 		goto fail;
 	}
 
-	nvdla_device_register_write(pdev, flcn_safety_erb_r(),
-		flcn_safety_erb_data_uncorrected_err_v());
+	nvdla_device_register_write(pdev, NVDLA_APERTURE_TYPE_DLA,
+		flcn_safety_erb_r(), flcn_safety_erb_data_uncorrected_err_v());
 	return 0;
 
 fail:
 	return err;
+}
+
+int32_t nvdla_fw_update_response_stats(struct platform_device *pdev,
+	uint32_t error_status)
+{
+	(void) pdev;
+
+	return -EOPNOTSUPP;
+}
+
+int32_t nvdla_fw_update_response_stats_mnoc(struct platform_device *pdev,
+	uint32_t error_status)
+{
+	(void) pdev;
+
+	return -EOPNOTSUPP;
 }

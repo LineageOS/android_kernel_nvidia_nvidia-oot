@@ -19,7 +19,6 @@
 #include <linux/stat.h>
 #include <linux/sizes.h>
 #include <linux/io.h>
-#include <linux/version.h>
 #include <linux/limits.h>
 #include <linux/sched/clock.h>
 #include <linux/nvmap.h>
@@ -115,6 +114,7 @@ static unsigned long system_heap_total_mem(void)
 #define MEMINFO_SIZE 1536
 static int compute_memory_stat(u64 *total, u64 *free, int numa_id)
 {
+#ifdef CONFIG_NUMA
 	struct file *file;
 	char meminfo_path[64] = {'\0'};
 	u8 *buf;
@@ -160,6 +160,7 @@ static int compute_memory_stat(u64 *total, u64 *free, int numa_id)
 		*free = (mem_free + reclaimable / 2) * 1024;
 		return 0;
 	}
+#endif
 	return -EINVAL;
 }
 
@@ -169,6 +170,15 @@ static int compute_memory_stat(u64 *total, u64 *free, int numa_id)
  */
 static int compute_hugetlbfs_stat(u64 *total, u64 *free, int numa_id)
 {
+
+#ifndef CONFIG_HUGETLBFS
+	/*
+	 * If CONFIG_HUGETLBFS is not enabled then it means hugetlbfs is not
+	 * supported and we should return -ENODEV to indicate that the GpuMem
+	 * heap is not present.
+	 */
+	return -ENODEV;
+#else
 	struct file *file;
 	char meminfo_path[64] = {'\0'};
 	u8 *buf;
@@ -229,6 +239,7 @@ static int compute_hugetlbfs_stat(u64 *total, u64 *free, int numa_id)
 		return 0;
 	}
 	return -EINVAL;
+#endif /* !CONFIG_HUGETLBFS */
 }
 
 int nvmap_query_heap(struct nvmap_query_heap_params *op, bool is_numa_aware)
@@ -832,11 +843,11 @@ struct nvmap_heap_block *nvmap_heap_alloc(struct nvmap_heap *h,
 		handle->carveout = b;
 		/* Generate IVM for partition that can alloc */
 		if (h->is_ivm && h->can_alloc) {
-			unsigned int offs = (b->base - h->base);
+			u64 offs = (b->base - h->base);
 
 			BUG_ON(offs & (NVMAP_IVM_ALIGNMENT - 1));
 			BUG_ON((offs >> ffs(NVMAP_IVM_ALIGNMENT)) &
-				~((1 << NVMAP_IVM_OFFSET_WIDTH) - 1));
+				~((1ULL << NVMAP_IVM_OFFSET_WIDTH) - 1));
 			BUG_ON(h->vm_id & ~(NVMAP_IVM_IVMID_MASK));
 			/* So, page alignment is sufficient check.
 			 */
@@ -1015,11 +1026,11 @@ struct nvmap_heap *nvmap_heap_create(struct device *parent,
 		err = nvmap_dma_declare_coherent_memory(h->dma_dev, 0, base, len,
 				DMA_MEMORY_NOMAP);
 		if (!err) {
-			pr_info("%s :dma coherent mem declare %pa,%zu\n",
-				co->name, &base, len);
+			pr_info("%s :dma coherent mem declared,%zu\n",
+				co->name, len);
 		} else {
-			pr_err("%s: dma coherent declare fail %pa,%zu\n",
-				co->name, &base, len);
+			pr_err("%s: dma coherent declare fail,%zu\n",
+				co->name, len);
 			goto fail;
 		}
 	}

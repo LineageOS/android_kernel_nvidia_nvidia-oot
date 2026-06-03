@@ -239,7 +239,7 @@ int dce_ipc_channel_init_unlocked(struct tegra_dce *d, u32 ch_type)
 	}
 
 	ret = dce_os_mutex_init(&ch->lock);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(d, "dce lock initialization failed for mailbox");
 		goto out;
 	}
@@ -253,17 +253,24 @@ int dce_ipc_channel_init_unlocked(struct tegra_dce *d, u32 ch_type)
 	ch->d = d;
 
 	ret = dce_ipc_init_signaling(d, ch);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(d, "Signaling init failed");
 		goto out_lock_destroy;
 	}
 
 	q_info = &ch->q_info;
 	msg_sz = dce_os_ivc_align(q_info->frame_sz);
+
+	if ((msg_sz == 0) || (q_info->nframes > (UINT_MAX / msg_sz))) {
+		dce_os_err(d, "Queue size calculation would overflow");
+		ret = -EOVERFLOW;
+		goto out_lock_destroy;
+	}
+
 	q_sz = dce_os_ivc_total_queue_size(msg_sz * q_info->nframes);
 
 	r = &d->d_ipc.region;
-	if (!r->base) {
+	if (r->base == NULL) {
 		ret = -ENOMEM;
 		goto out_lock_destroy;
 	}
@@ -272,7 +279,7 @@ int dce_ipc_channel_init_unlocked(struct tegra_dce *d, u32 ch_type)
 			(char *)r->base + r->s_offset, (char *)r->base + r->s_offset + q_sz,
 			r->iova + r->s_offset, r->iova + r->s_offset + q_sz,
 			q_info->nframes, msg_sz);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(d, "IVC creation failed");
 		goto out_lock_destroy;
 	}
@@ -285,10 +292,18 @@ int dce_ipc_channel_init_unlocked(struct tegra_dce *d, u32 ch_type)
 	dce_os_trace_ivc_channel_init_complete(d, ch);
 
 	d->d_ipc.ch[ch_type] = ch;
+
+	// Check for potential overflow before addition
+	if (q_sz > (UINT_MAX / 2) || r->s_offset > (UINT_MAX - (2 * q_sz))) {
+		dce_os_err(d, "Offset calculation would overflow");
+		ret = -EOVERFLOW;
+		goto out_lock_destroy;
+	}
+
 	r->s_offset += (2 * q_sz);
 
 out_lock_destroy:
-	if (ret)
+	if (ret != 0)
 		dce_os_mutex_destroy(&ch->lock);
 out:
 	return ret;
@@ -465,13 +480,13 @@ int dce_ipc_send_message(struct tegra_dce *d, u32 ch_type,
 	dce_os_trace_ivc_send_req_received(d, ch);
 
 	ret = dce_os_ivc_get_next_write_frame(&ch->d_ivc, &ch->obuff);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(ch->d, "Error getting next free buf to write");
 		goto out;
 	}
 
 	ret = dce_os_ivc_write_channel(ch, data, size);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(ch->d, "Error writing to channel");
 		goto out;
 	}
@@ -507,13 +522,13 @@ int dce_ipc_read_message(struct tegra_dce *d, u32 ch_type,
 	dce_os_trace_ivc_receive_req_received(d, ch);
 
 	ret = dce_os_ivc_get_next_read_frame(&ch->d_ivc, &ch->ibuff);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_debug(ch->d, "No Msg to read");
 		goto out;
 	}
 
 	ret = dce_os_ivc_read_channel(ch, data, size);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(ch->d, "Error reading from channel");
 		goto out;
 	}
@@ -542,7 +557,7 @@ int dce_ipc_send_message_sync(struct tegra_dce *d, u32 ch_type,
 	struct dce_ipc_channel *ch = d->d_ipc.ch[ch_type];
 
 	ret = dce_ipc_send_message(d, ch_type, msg->tx.data, msg->tx.size);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(ch->d, "Error in sending message to DCE");
 		goto done;
 	}
@@ -550,7 +565,7 @@ int dce_ipc_send_message_sync(struct tegra_dce *d, u32 ch_type,
 	dce_os_mutex_lock(&ch->lock);
 	ret = _dce_ipc_wait(ch->d, DCE_IPC_WAIT_TYPE_RPC, ch_type);
 	dce_os_mutex_unlock(&ch->lock);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(ch->d, "Error in waiting for ack");
 		goto done;
 	}
@@ -558,7 +573,7 @@ int dce_ipc_send_message_sync(struct tegra_dce *d, u32 ch_type,
 	dce_os_trace_ivc_wait_complete(d, ch);
 
 	ret = dce_ipc_read_message(d, ch_type, msg->rx.data, msg->rx.size);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(ch->d, "Error in reading DCE msg for ch_type [%d]",
 			ch_type);
 		goto done;
@@ -606,7 +621,7 @@ int dce_ipc_get_region_iova_info(struct tegra_dce *d, u64 *iova, u32 *size)
 {
 	struct dce_ipc_region *r = &d->d_ipc.region;
 
-	if (!r->base)
+	if (r->base == NULL)
 		return -ENOMEM;
 
 	*iova = r->iova;

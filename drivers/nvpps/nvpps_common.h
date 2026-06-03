@@ -12,23 +12,27 @@ struct soc_dev_data;
 
 /*
  * chip specific ops
+ *
+ * NOTE: Functions marked [ISR-SAFE] are called in interrupt context (hard IRQ or timer callback).
+ *       These MUST be implemented as ISR-safe: no mutexes, no sleeping/blocking
+ *
  * @ptp_tsc_sync_cfg_fn: function pointer for PTP-TSC sync related TSC HW configuration
- * @ptp_tsc_synchronize_fn: function pointer for triggering PTP-TSC synchronization
- * @ptp_tsc_get_is_locked_fn: function pointer to get PTP-TSC sync status, return boolean true if PTP & TSC are synced else return boolean false
+ * @ptp_tsc_synchronize_fn: [ISR-SAFE] function pointer for triggering PTP-TSC synchronization
+ * @ptp_tsc_get_is_locked_fn: [ISR-SAFE] function pointer to get PTP-TSC sync status, return boolean true if PTP & TSC are synced else return boolean false
  * @ptp_tsc_suspend_sync_fn: function pointer for suspending PTP-TSC synchronization
  * @ptp_tsc_resume_sync_fn: function pointer for resuming PTP-TSC synchronization
- * @get_monotonic_tsc_ts_fn: function pointer to get TSC monotonic timestamp in TSC Cycles, This API can be called in isr context
+ * @get_monotonic_tsc_ts_fn: [ISR-SAFE] function pointer to get TSC monotonic timestamp in TSC Cycles. Additionally, this API should be thread safe and reentrant
  * @get_tsc_res_ns_fn: function pointer to get TSC resolution in nanoseconds
- * @get_ptp_tsc_concurrent_ts_ns_fn: function pointer to get PTP-TSC concurrent timestamps in nanosecs, This API can be called in isr context
- * @get_ptp_ts_ns_fn: function pointer to get PTP timestamp in nanoseconds, This API can be called in isr context
+ * @get_ptp_tsc_concurrent_ts_ns_fn: function pointer to get PTP-TSC concurrent timestamps in nanosecs
+ * @get_ptp_ts_ns_fn: function pointer to get PTP timestamp in nanoseconds
  */
 struct chip_ops {
 	int32_t (*ptp_tsc_sync_cfg_fn)(struct soc_dev_data *soc_data);
-	void (*ptp_tsc_synchronize_fn)(struct soc_dev_data *soc_data);
-	bool (*ptp_tsc_get_is_locked_fn)(struct soc_dev_data *soc_data);
+	void (*ptp_tsc_synchronize_fn)(struct soc_dev_data *soc_data);		/* [ISR-SAFE] */
+	bool (*ptp_tsc_get_is_locked_fn)(struct soc_dev_data *soc_data);	/* [ISR-SAFE] */
 	int32_t (*ptp_tsc_suspend_sync_fn)(struct soc_dev_data *soc_data);
 	int32_t (*ptp_tsc_resume_sync_fn)(struct soc_dev_data *soc_data);
-	int32_t (*get_monotonic_tsc_ts_fn)(struct soc_dev_data *soc_data, uint64_t *tsc_ts);
+	int32_t (*get_monotonic_tsc_ts_fn)(struct soc_dev_data *soc_data, uint64_t *tsc_ts);	/* [ISR-SAFE] */
 	int32_t (*get_tsc_res_ns_fn)(struct soc_dev_data *soc_data, uint64_t *tsc_res_ns);
 	int32_t (*get_ptp_ts_ns_fn)(struct device_node *mac_node, uint64_t *ptp_ts);
 	int32_t (*get_ptp_tsc_concurrent_ts_ns_fn)(struct device_node *mac_node, struct ptp_tsc_data *data);

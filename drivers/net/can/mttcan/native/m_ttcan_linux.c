@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2022-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2022-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include <nvidia/conftest.h>
 
@@ -635,9 +635,6 @@ static void mttcan_tx_complete(struct net_device *dev)
 
 	while (completed_tx) {
 		msg_no = ffs(completed_tx) - 1;
-#if defined(CONFIG_CAN_LEDS)
-		can_led_event(dev, CAN_LED_EVENT_TX);
-#endif
 		clear_bit(msg_no, &ttcan->tx_object);
 		stats->tx_packets++;
 		stats->tx_bytes += can_get_echo_skb(dev, msg_no, NULL);
@@ -1328,10 +1325,6 @@ static int mttcan_open(struct net_device *dev)
 	}
 
 	napi_enable(&priv->napi);
-#if defined(CONFIG_CAN_LEDS)
-	can_led_event(dev, CAN_LED_EVENT_OPEN);
-#endif
-
 	mttcan_start(dev);
 	netif_start_queue(dev);
 
@@ -1364,9 +1357,6 @@ static int mttcan_close(struct net_device *dev)
 	mttcan_power_down(dev);
 	mttcan_pm_runtime_put_sync(priv);
 
-#if defined(CONFIG_CAN_LEDS)
-	can_led_event(dev, CAN_LED_EVENT_STOP);
-#endif
 	return 0;
 }
 
@@ -1565,10 +1555,6 @@ static int register_mttcan_dev(struct net_device *dev)
 
 	dev->netdev_ops = &mttcan_netdev_ops;
 	err = register_candev(dev);
-#if defined(CONFIG_CAN_LEDS)
-	if (!err)
-		devm_can_led_init(dev);
-#endif
 
 	return err;
 }

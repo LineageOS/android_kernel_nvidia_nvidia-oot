@@ -11,6 +11,9 @@
 #include <linux/pci-epf.h>
 #include <linux/tegra-pcie-dma.h>
 
+#define PCI_DEVICE_ID_TEGRA234_TEST	0x229B
+#define PCI_DEVICE_ID_TEGRA264_TEST	0x22D7
+
 #define DMA_WRITE_DOORBELL_OFF		0x10
 #define DMA_WRITE_DOORBELL_OFF_WR_STOP	BIT(31)
 

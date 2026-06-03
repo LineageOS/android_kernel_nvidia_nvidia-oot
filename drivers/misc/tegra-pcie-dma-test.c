@@ -201,7 +201,7 @@ static int ep_test_dma_probe(struct pci_dev *pdev, const struct pci_device_id *i
 		goto fail_region_request;
 	}
 
-	if (ep->chip_id == TEGRA234)
+	if (pdev->device == PCI_DEVICE_ID_TEGRA234_TEST)
 		bar = 0;
 	else
 		bar = 2;
@@ -213,7 +213,7 @@ static int ep_test_dma_probe(struct pci_dev *pdev, const struct pci_device_id *i
 		goto fail_region_remap;
 	}
 
-	if (ep->chip_id == TEGRA234)
+	if (pdev->device == PCI_DEVICE_ID_TEGRA234_TEST)
 		msi_bar = 2;
 	else
 		msi_bar = 4;
@@ -230,12 +230,12 @@ static int ep_test_dma_probe(struct pci_dev *pdev, const struct pci_device_id *i
 	 * For T264, MSI address(GIC_TRANSTALATER) is at 0x1FFF040 offset. due to its
 	 * 32 MB allignment.
 	 */
-	if (ep->chip_id == TEGRA264)
+	if (pdev->device == PCI_DEVICE_ID_TEGRA264_TEST)
 		ep->msi_bar_offset = (void __iomem *)((u8 *)ep->msi_bar_virt + 0x1FFF040);
 	else
 		ep->msi_bar_offset = ep->msi_bar_virt;
 
-	if (ep->chip_id == TEGRA234)
+	if (pdev->device == PCI_DEVICE_ID_TEGRA234_TEST)
 		dma_bar = 4;
 	else
 		dma_bar = 0;
@@ -365,8 +365,8 @@ static void ep_test_dma_remove(struct pci_dev *pdev)
 }
 
 static const struct pci_device_id ep_pci_tbl[] = {
-	{ PCI_DEVICE(0x10DE, 0x22D7)},
-	{ PCI_DEVICE(0x10DE, 0x229B)},
+	{ PCI_DEVICE(0x10DE, PCI_DEVICE_ID_TEGRA264_TEST)},
+	{ PCI_DEVICE(0x10DE, PCI_DEVICE_ID_TEGRA234_TEST)},
 	{},
 };
 

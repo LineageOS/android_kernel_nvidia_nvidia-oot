@@ -1419,7 +1419,8 @@ static int nvdla_queue_submit_op(struct nvdla_queue *queue, void *in_task)
 		}
 	}
 
-	if (likely(nvdla_dev->submit_mode == NVDLA_SUBMIT_MODE_MMIO)) {
+	if (likely((nvdla_dev->submit_mode == NVDLA_SUBMIT_MODE_MMIO) ||
+			nvdla_dev->submit_mode == NVDLA_SUBMIT_MODE_MNOC)) {
 		err = nvdla_fw_send_cmd(pdev, &cmd_data);
 		if (err) {
 			nvdla_dbg_err(pdev, "task[%p] submit failed", task);

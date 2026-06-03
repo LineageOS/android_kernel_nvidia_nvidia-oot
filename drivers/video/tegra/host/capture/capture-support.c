@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Capture support for syncpoint and GoS management
+ * Capture support for syncpoint management
  *
- * SPDX-FileCopyrightText: Copyright (c) 2017-2025, NVIDIA Corporation.  All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2017-2026, NVIDIA Corporation.  All rights reserved.
  */
 
 #include <nvidia/conftest.h>

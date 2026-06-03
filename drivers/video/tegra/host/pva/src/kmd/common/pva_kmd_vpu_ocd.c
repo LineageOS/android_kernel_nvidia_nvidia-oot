@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include "pva_kmd_device.h"
 #include "pva_math_utils.h"
 #include "pva_kmd_vpu_ocd.h"
 #include "pva_kmd_silicon_utils.h"
 #include "pva_kmd_debugfs.h"
+#include "pva_kmd_shim_debugfs.h"
 
 #if (PVA_BUILD_MODE == PVA_BUILD_MODE_QNX)
 #define PVA_KMD_DEBUG_VPU_APERTURE_INDEX PVA_KMD_APERTURE_VPU_DEBUG

@@ -11,3 +11,4 @@
 #
 
 export NV_OOT_HVC_SYSFS_SKIP_BUILD=y
+export NV_OOT_NVVSE_SKIP_BUILD=y

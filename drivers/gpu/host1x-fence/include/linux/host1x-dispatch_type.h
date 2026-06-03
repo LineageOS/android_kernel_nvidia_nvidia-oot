@@ -44,6 +44,9 @@ int (*host1x_syncpt_get_shim_info)(struct host1x *host, phys_addr_t *base,
 void (*host1x_writel)(struct platform_device *pdev, u32 r, u32 v);
 struct platform_device* (*nvhost_get_default_device)(void);
 struct host1x* (*nvhost_get_host1x)(struct platform_device *pdev);
+u32 (*nvhost_syncpt_unit_interface_get_byte_offset)(u32 syncpt_id);
+int (*nvhost_syncpt_unit_interface_get_aperture)(struct platform_device *pdev, u64 *base, size_t *size);
+#ifndef CONFIG_TEGRA_DRM_DISABLE_LEGACY_INTERFACE
 int (*nvhost_client_device_get_resources)(struct platform_device *pdev);
 int (*nvhost_client_device_init)(struct platform_device *pdev);
 int (*nvhost_client_device_release)(struct platform_device *pdev);
@@ -58,8 +61,6 @@ int (*nvhost_syncpt_read_ext_check)(struct platform_device *pdev, u32 id, u32 *v
 u32 (*nvhost_syncpt_read_maxval)(struct platform_device *pdev, u32 id);
 u32 (*nvhost_syncpt_incr_max_ext)(struct platform_device *pdev, u32 id, u32 incrs);
 u32 (*nvhost_syncpt_unit_interface_get_byte_offset_ext)(struct platform_device *pdev,u32 syncpt_id);
-u32 (*nvhost_syncpt_unit_interface_get_byte_offset)(u32 syncpt_id);
-int (*nvhost_syncpt_unit_interface_get_aperture)(struct platform_device *pdev, u64 *base, size_t *size);
 int (*nvhost_syncpt_unit_interface_init)(struct platform_device *pdev);
 void (*nvhost_syncpt_unit_interface_deinit)(struct platform_device *pdev);
 dma_addr_t (*nvhost_syncpt_address)(struct platform_device *pdev, u32 id);
@@ -70,6 +71,7 @@ void (*nvhost_module_reset)(struct platform_device *pdev, bool reboot);
 int (*nvhost_module_busy)(struct platform_device *dev);
 void (*nvhost_module_idle)(struct platform_device *pdev);
 void (*nvhost_module_idle_mult)(struct platform_device *pdev, int refs);
+#endif  /* CONFIG_TEGRA_DRM_DISABLE_LEGACY_INTERFACE */
 };
 
 bool host1x_wrapper_register_interface(struct host1x_interface_ops *host1x_hw_ops);

@@ -433,6 +433,57 @@ err0:
 }
 
 /**
+ * @brief Releases a capture mapping and cleans up if it is no longer referenced.
+ *
+ * This function performs the following operations:
+ * - Decrements the reference count of the @ref capture_mapping structure using
+ *   @ref atomic_dec_and_test().
+ * - If the reference count reaches zero:
+ *   - Checks if the mapping is preserved using @ref mapping_preserved().
+ *     - If the mapping is preserved, increments the reference count using
+ *       @ref atomic_inc().
+ *   - Otherwise:
+ *     - Acquires a write lock on the buffer table using @ref write_lock().
+ *     - Removes the mapping from the hash table using @ref hash_del().
+ *     - Releases the write lock using @ref write_unlock().
+ *     - Unmaps the DMA attachment using @ref dma_buf_unmap_attachment().
+ *     - Detaches the DMA buffer using @ref dma_buf_detach().
+ *     - Releases the DMA buffer using @ref dma_buf_put().
+ *     - Frees the capture mapping structure using @ref kmem_cache_free().
+ *
+ * @param[in]  t    Pointer to the @ref capture_buffer_table structure.
+ *                  Valid value: non-null.
+ * @param[in]  pin  Pointer to the @ref capture_mapping structure.
+ *                  Valid value: non-null.
+ */
+static void put_mapping(
+	struct capture_buffer_table *t,
+	struct capture_mapping *pin)
+{
+	bool zero;
+
+	zero = atomic_dec_and_test(&pin->refcnt);
+	if (zero) {
+		if (unlikely(mapping_preserved(pin))) {
+			dev_err(t->dev, "%s:%d: unexpected put for a preserved mapping",
+				__func__, __LINE__);
+			atomic_inc(&pin->refcnt);
+			return;
+		}
+
+		write_lock(&t->hlock);
+		hash_del(&pin->hnode);
+		write_unlock(&t->hlock);
+
+		dma_buf_unmap_attachment(
+			pin->atch, pin->sgt, flag_dma_direction(pin->flag));
+		dma_buf_detach(pin->buf, pin->atch);
+		dma_buf_put(pin->buf);
+		kmem_cache_free(t->cache, pin);
+	}
+}
+
+/**
  * @brief Creates and initializes a capture buffer table for the specified device.
  *
  * This function performs the following operations:
@@ -641,80 +692,27 @@ end:
 EXPORT_SYMBOL_GPL(capture_buffer_request);
 
 /**
- * @brief Adds a buffer to the capture buffer table with read-write permissions.
+ * @brief Requests to add or remove a buffer in the capture buffer table.
  *
  * This function performs the following operations:
- * - Calls @ref capture_buffer_request() to request the addition of a buffer identified
- *   by @a fd to the capture buffer table @a t with flags BUFFER_ADD | BUFFER_RDWR.
- *   - The flags indicate that the buffer should be added and have read-write access.
+ * - Acquires the request mutex lock using @ref mutex_lock().
+ * - Calls @ref put_mapping() to release the capture mapping.
+ * - Releases the request mutex lock using @ref mutex_unlock().
  *
- * @param[in]  t   Pointer to the @ref capture_buffer_table structure.
- *                 Valid value: non-null.
- * @param[in]  fd  File descriptor representing the buffer to be added.
- *                 Valid range: [0 .. UINT32_MAX].
- *
- * @retval 0            Buffer added successfully.
- * @retval (int)        Errors returned by @ref capture_buffer_request().
+ * @param[in]		tab	Pointer to the @ref capture_buffer_table structure.
+ *				Valid value: non-null.
+ * @param[in,out]	pin	Capture mapping to release.
+ *				Valid value: non-null.
  */
-int capture_buffer_add(
-	struct capture_buffer_table *t,
-	uint32_t fd)
-{
-	return capture_buffer_request(t, fd, BUFFER_ADD | BUFFER_RDWR);
-}
-EXPORT_SYMBOL_GPL(capture_buffer_add);
-
-/**
- * @brief Releases a capture mapping and cleans up if it is no longer referenced.
- *
- * This function performs the following operations:
- * - Decrements the reference count of the @ref capture_mapping structure using
- *   @ref atomic_dec_and_test().
- * - If the reference count reaches zero:
- *   - Checks if the mapping is preserved using @ref mapping_preserved().
- *     - If the mapping is preserved, increments the reference count using
- *       @ref atomic_inc().
- *   - Otherwise:
- *     - Acquires a write lock on the buffer table using @ref write_lock().
- *     - Removes the mapping from the hash table using @ref hash_del().
- *     - Releases the write lock using @ref write_unlock().
- *     - Unmaps the DMA attachment using @ref dma_buf_unmap_attachment().
- *     - Detaches the DMA buffer using @ref dma_buf_detach().
- *     - Releases the DMA buffer using @ref dma_buf_put().
- *     - Frees the capture mapping structure using @ref kmem_cache_free().
- *
- * @param[in]  t    Pointer to the @ref capture_buffer_table structure.
- *                  Valid value: non-null.
- * @param[in]  pin  Pointer to the @ref capture_mapping structure.
- *                  Valid value: non-null.
- */
-void put_mapping(
-	struct capture_buffer_table *t,
+void capture_common_put_mapping(
+	struct capture_buffer_table *tab,
 	struct capture_mapping *pin)
 {
-	bool zero;
-
-	zero = atomic_dec_and_test(&pin->refcnt);
-	if (zero) {
-		if (unlikely(mapping_preserved(pin))) {
-			dev_err(t->dev, "%s:%d: unexpected put for a preserved mapping",
-				__func__, __LINE__);
-			atomic_inc(&pin->refcnt);
-			return;
-		}
-
-		write_lock(&t->hlock);
-		hash_del(&pin->hnode);
-		write_unlock(&t->hlock);
-
-		dma_buf_unmap_attachment(
-			pin->atch, pin->sgt, flag_dma_direction(pin->flag));
-		dma_buf_detach(pin->buf, pin->atch);
-		dma_buf_put(pin->buf);
-		kmem_cache_free(t->cache, pin);
-	}
+	mutex_lock(&req_lock);
+	put_mapping(tab, pin);
+	mutex_unlock(&req_lock);
 }
-EXPORT_SYMBOL_GPL(put_mapping);
+EXPORT_SYMBOL_GPL(capture_common_put_mapping);
 
 /**
  * @brief Pins a memory buffer and retrieves its IOVA address based on the handle and offset.
@@ -723,9 +721,11 @@ EXPORT_SYMBOL_GPL(put_mapping);
  * - Checks if the memory handle @a mem_handle is zero.
  * - Validates that the number of unpins in @a unpins does not exceed
  *   @ref MAX_PIN_BUFFER_PER_REQUEST.
+ * - Acquires the request mutex lock using @ref mutex_lock().
  * - Calls @ref get_mapping() to retrieve or create a @ref capture_mapping based on
- *   the buffer context @a buf_ctx and memory handle @a mem_handle with flags
- *   @ref BUFFER_RDWR.
+ *   the buffer context @a buf_ctx and memory handle @a mem_handle with @a flags
+ *   filtered by @ref flag_access_mode().
+ * - Releases the request mutex lock using @ref mutex_unlock().
  * - Calls @ref mapping_buf() to obtain the @ref dma_buf associated with the mapping.
  * - Retrieves the size of the DMA buffer.
  * - Validates that the memory offset @a mem_offset is within the bounds of the buffer size.
@@ -747,6 +747,8 @@ EXPORT_SYMBOL_GPL(put_mapping);
  *                                      Valid value: non-null.
  * @param[in, out] unpins               Pointer to the @ref capture_common_unpins structure.
  *                                      Valid value: non-null.
+ * @param[in]      flags                Access mode to be used for mapping.
+ *                                      Valid bit flags: {BUFFER_READ, BUFFER_WRITE}
  *
  * @retval 0         No buffer was processed (mem_handle is zero) or the operation
  *                   succeeded.
@@ -759,7 +761,8 @@ EXPORT_SYMBOL_GPL(put_mapping);
 int capture_common_pin_and_get_iova(struct capture_buffer_table *buf_ctx,
 		uint32_t mem_handle, uint64_t mem_offset,
 		uint64_t *meminfo_base_address, uint64_t *meminfo_size,
-		struct capture_common_unpins *unpins)
+		struct capture_common_unpins *unpins,
+		uint32_t const flags)
 {
 	struct capture_mapping *map;
 	struct dma_buf *buf;
@@ -776,8 +779,9 @@ int capture_common_pin_and_get_iova(struct capture_buffer_table *buf_ctx,
 			return -ENOMEM;
 	}
 
-	map = get_mapping(buf_ctx, mem_handle, BUFFER_RDWR);
-
+	mutex_lock(&req_lock);
+	map = get_mapping(buf_ctx, mem_handle, flag_access_mode(flags));
+	mutex_unlock(&req_lock);
 	if (IS_ERR(map)) {
 		pr_err("%s: cannot get mapping\n", __func__);
 		return -EINVAL;
@@ -787,12 +791,14 @@ int capture_common_pin_and_get_iova(struct capture_buffer_table *buf_ctx,
 	size = buf->size;
 	if (mem_offset >= size) {
 		pr_err("%s: offset is out of bounds\n", __func__);
+		capture_common_put_mapping(buf_ctx, map);
 		return -EINVAL;
 	}
 
 	iova = mapping_iova(map, mem_offset);
 	if (iova == 0) {
 		pr_err("%s: Invalid iova\n", __func__);
+		capture_common_put_mapping(buf_ctx, map);
 		return -EINVAL;
 	}
 

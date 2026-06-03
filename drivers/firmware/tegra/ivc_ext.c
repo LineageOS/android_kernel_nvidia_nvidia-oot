@@ -1,7 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
-/*
- * Copyright (c) 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- */
+// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-FileCopyrightText: Copyright (c) 2022-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include <nvidia/conftest.h>
 
@@ -70,18 +68,6 @@ struct tegra_ivc_header {
 		u8 pad[TEGRA_IVC_ALIGN];
 	} rx;
 };
-
-int tegra_ivc_channel_notified(struct tegra_ivc *ivc)
-{
-	return tegra_ivc_notified(ivc);
-}
-EXPORT_SYMBOL(tegra_ivc_channel_notified);
-
-void tegra_ivc_channel_reset(struct tegra_ivc *ivc)
-{
-	tegra_ivc_reset(ivc);
-}
-EXPORT_SYMBOL(tegra_ivc_channel_reset);
 
 #if defined(NV_TEGRA_IVC_STRUCT_HAS_IOSYS_MAP)
 #define tegra_ivc_header_read_field(hdr, field) \

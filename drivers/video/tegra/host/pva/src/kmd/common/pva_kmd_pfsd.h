@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
+/* SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
 
 #ifndef PVA_KMD_PFSD_H
 #define PVA_KMD_PFSD_H
@@ -92,10 +92,10 @@ struct pva_pfsd_resource_ids {
 #define PVA_PFSD_VPU_ELF_SIZE_T23X (1259220U)
 extern const uint8_t pva_pfsd_vpu_elf_t23x[];
 
-#define PVA_PFSD_VPU_ELF_SIZE_T26X (1279424U)
+#define PVA_PFSD_VPU_ELF_SIZE_T26X (1279556U)
 extern const uint8_t pva_pfsd_vpu_elf_t26x[];
 
-#define PVA_PFSD_PPE_ELF_SIZE_T26X (222468U)
+#define PVA_PFSD_PPE_ELF_SIZE_T26X (222624U)
 extern const uint8_t pva_pfsd_ppe_elf_t26x[];
 
 extern const struct pva_dma_config pfsd_dma_cfg_t23x;

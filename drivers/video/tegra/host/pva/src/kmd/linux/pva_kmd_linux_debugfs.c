@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include <linux/debugfs.h>
 #include <linux/dma-mapping.h>
@@ -17,6 +17,7 @@
 #include "pva_kmd_linux_device.h"
 #include "pva_kmd_debugfs.h"
 #include "pva_kmd_linux_device_api.h"
+#include "pva_kmd_shim_debugfs.h"
 
 static int pva_handle_fops(struct seq_file *s, void *data)
 {
@@ -135,8 +136,7 @@ enum pva_error pva_kmd_debugfs_create_file(struct pva_kmd_device *pva,
 {
 	struct nvpva_device_data *props = pva_kmd_linux_device_get_data(pva);
 	struct dentry *de = props->debugfs;
-	struct file_operations *fops =
-		(struct file_operations *)&pva_linux_debugfs_fops;
+	const struct file_operations *fops = &pva_linux_debugfs_fops;
 	struct dentry *file;
 
 	file = debugfs_create_file(name, 0644, de, pvafops, fops);

@@ -40,7 +40,6 @@
 #include "nvdla.h"
 #include "nvdla_hw_flcn.h"
 #if defined(NVDLA_HAVE_CONFIG_AXI) && (NVDLA_HAVE_CONFIG_AXI == 1)
-#include "nvdla_t25x.h"
 #include "nvdla_t264_sim.h"
 #else
 #include "nvdla_t194.h"
@@ -48,6 +47,7 @@
 #endif /* NVDLA_HAVE_CONFIG_AXI */
 #include "dla_t19x_fw_version.h"
 #include "dla_t23x_fw_version.h"
+#include "dla_t25x_fw_version.h"
 #include "dla_queue.h"
 #include "nvdla_buffer.h"
 #include "nvdla_debug.h"
@@ -193,38 +193,21 @@ static void nvdla_poweroff_handler_init(struct nvdla_device *nvdla_dev)
 	INIT_WORK(&nvdla_dev->poweroff_work, nvdla_poweroff_handler);
 }
 
-int nvdla_flcn_isr(struct platform_device *pdev)
+static void handle_message(struct platform_device *pdev, uint32_t message, uint32_t error_status)
 {
-	uint32_t message;
-	uint32_t mailbox0;
 	struct nvhost_device_data *pdata = platform_get_drvdata(pdev);
 	struct nvdla_device *nvdla_dev = pdata->private_data;
 
-	/* dump falcon data if debug enabled */
-	(void) nvdla_fw_interrupt_stat_read(pdev, &mailbox0);
-
-	message = mailbox0 & DLA_RESPONSE_MSG_MASK;
-
 	/* handles engine timeout,
-	 * schedule work for reset handler and clears interrupt
+	 * schedule work for reset handler
 	 */
 	if (message == DLA_MSG_TASK_TIMEOUT) {
 		nvdla_dbg_err(pdev, "engine timeout detected");
 		schedule_work(&nvdla_dev->reset_work);
-		goto clear_interrupt;
 	}
-	if (message == DLA_MSG_DEBUG_PRINT)
+	if (message == DLA_MSG_DEBUG_PRINT) {
 		nvdla_dbg_fw(pdev, "falcon: %s",
-				(char *)nvdla_dev->debug_dump_va);
-
-	if ((message == DLA_MSG_CMD_COMPLETE ||
-				message == DLA_MSG_CMD_ERROR) &&
-				nvdla_dev->waiting) {
-		nvdla_dev->cmd_status =
-				(mailbox0 >> DLA_RESPONSE_ERROR_SHIFT) &
-						DLA_RESPONSE_ERROR_MASK;
-		nvdla_dev->waiting = 0;
-		complete(&nvdla_dev->cmd_completion);
+			(char *)nvdla_dev->debug_dump_va);
 	}
 
 	if (message == DLA_MSG_IDLE_TIMEOUT) {
@@ -232,7 +215,68 @@ int nvdla_flcn_isr(struct platform_device *pdev)
 		schedule_work(&nvdla_dev->poweroff_work);
 	}
 
-clear_interrupt:
+	// Collect response stat info
+	(void) nvdla_fw_update_response_stats(pdev, error_status);
+}
+
+static void handle_cmd_interrupts(struct nvdla_device *nvdla_dev, uint32_t error_status)
+{
+	nvdla_dev->cmd_status = error_status;
+	nvdla_dev->waiting = 0;
+	complete(&nvdla_dev->cmd_completion);
+}
+
+int nvdla_flcn_isr(struct platform_device *pdev)
+{
+	uint32_t message;
+	uint32_t mailbox0;
+	uint32_t ctx_id;
+	uint32_t ctx_response_en;
+	uint32_t error_status;
+	struct nvhost_device_data *pdata = platform_get_drvdata(pdev);
+	struct nvdla_device *nvdla_dev = pdata->private_data;
+	struct nvdla_device *context_dev = NULL;
+
+	/* dump falcon data if debug enabled */
+	(void) nvdla_fw_interrupt_stat_read(pdev, &mailbox0);
+
+	message = mailbox0 & DLA_RESPONSE_MSG_MASK;
+	error_status = (mailbox0 >> DLA_RESPONSE_ERROR_SHIFT) &
+					DLA_RESPONSE_ERROR_MASK;
+
+	//
+	// If context is enabled, get ctx_id here from mailbox and
+	// redirect to handle messages from child ctx_id
+	//
+	ctx_response_en = (mailbox0 >> DLA_RESPONSE_CTX_ENABLE_SHIFT) &
+				DLA_RESPONSE_CTX_ENABLE_MASK;
+	if (ctx_response_en) {
+		ctx_id = (mailbox0 >> DLA_RESPONSE_CTX_ID_SHIFT) &
+				DLA_RESPONSE_CTX_ID_MASK;
+
+		// Find Child from context id
+		list_for_each_entry(context_dev, &nvdla_dev->ctx_list_head, ctx_list_node) {
+			if (context_dev->ctx_id == ctx_id)
+				break;
+		}
+
+		if (context_dev) {
+			// Handle messages from the child
+			handle_message(context_dev->pdev, message, error_status);
+		}
+	} else {
+		// Handle messages from the parent
+		handle_message(nvdla_dev->pdev, message, error_status);
+	}
+
+	if ((message == DLA_MSG_CMD_COMPLETE ||
+				message == DLA_MSG_CMD_ERROR)) {
+		if (context_dev && context_dev->waiting)
+			handle_cmd_interrupts(context_dev, error_status);
+		else if (nvdla_dev->waiting)
+			handle_cmd_interrupts(nvdla_dev, error_status);
+	}
+
 	/* Clear the interrupt */
 	(void) nvdla_fw_interrupt_stat_clear(pdev);
 
@@ -446,7 +490,25 @@ fail_alloc_gcov_dma:
 	return err;
 }
 
-static int nvdla_alloc_trace_region(struct platform_device *pdev)
+void nvdla_free_trace_region(struct platform_device *pdev)
+{
+	struct nvhost_device_data *pdata = platform_get_drvdata(pdev);
+	struct nvdla_device *nvdla_dev = pdata->private_data;
+
+	// skip allocation for vm controller device.
+	if (nvdla_is_vmctrl_device(pdev))
+		return;
+
+	if (nvdla_dev->trace_dump_pa) {
+		dma_free_attrs(&pdev->dev, DEBUG_BUFFER_SIZE,
+			nvdla_dev->trace_dump_va, nvdla_dev->trace_dump_pa,
+			0);
+		nvdla_dev->trace_dump_va = NULL;
+		nvdla_dev->trace_dump_pa = 0;
+	}
+}
+
+int nvdla_alloc_trace_region(struct platform_device *pdev)
 {
 	int err = 0;
 	struct nvdla_cmd_mem_info trace_cmd_mem_info;
@@ -458,9 +520,13 @@ static int nvdla_alloc_trace_region(struct platform_device *pdev)
 	if (!pdata->flcn_isr)
 		return 0;
 
-	/* Trace buffer allocation must be done at once only. */
+	// skip allocation for vm controller device.
+	if (nvdla_is_vmctrl_device(pdev))
+		return 0;
+
+	// Trace buffer allocation must be done at once only.
 	if (!nvdla_dev->trace_dump_va) {
-		/* allocate trace region */
+		// allocate trace region
 		nvdla_dev->trace_dump_va = dma_alloc_attrs(&pdev->dev,
 				   TRACE_BUFFER_SIZE, &nvdla_dev->trace_dump_pa,
 				   GFP_KERNEL, 0);
@@ -473,7 +539,7 @@ static int nvdla_alloc_trace_region(struct platform_device *pdev)
 		}
 	}
 
-	/* assign memory for trace command */
+	// assign memory for trace command.
 	err = nvdla_get_cmd_memory(pdev, &trace_cmd_mem_info);
 	if (err) {
 		nvdla_dbg_err(pdev,
@@ -495,7 +561,7 @@ static int nvdla_alloc_trace_region(struct platform_device *pdev)
 
 	err = nvdla_fw_send_cmd(pdev, &cmd_data);
 
-	/* release memory allocated for trace command */
+	// release memory allocated for trace command
 	nvdla_put_cmd_memory(pdev, trace_cmd_mem_info.index);
 
 	if (err != 0) {
@@ -520,7 +586,25 @@ fail_alloc_trace_dma:
 	return err;
 }
 
-static int nvdla_alloc_dump_region(struct platform_device *pdev)
+void nvdla_free_dump_region(struct platform_device *pdev)
+{
+	struct nvhost_device_data *pdata = platform_get_drvdata(pdev);
+	struct nvdla_device *nvdla_dev = pdata->private_data;
+
+	// skip allocation for vm controller device.
+	if (nvdla_is_vmctrl_device(pdev))
+		return;
+
+	if (nvdla_dev->debug_dump_pa) {
+		dma_free_attrs(&pdev->dev, DEBUG_BUFFER_SIZE,
+			nvdla_dev->debug_dump_va, nvdla_dev->debug_dump_pa,
+			0);
+		nvdla_dev->debug_dump_va = NULL;
+		nvdla_dev->debug_dump_pa = 0;
+	}
+}
+
+int nvdla_alloc_dump_region(struct platform_device *pdev)
 {
 	int err = 0;
 	struct dla_region_printf *region;
@@ -532,9 +616,13 @@ static int nvdla_alloc_dump_region(struct platform_device *pdev)
 	if (!pdata->flcn_isr)
 		return 0;
 
+	// skip allocation for vm controller device.
+	if (nvdla_is_vmctrl_device(pdev))
+		return 0;
+
 	nvdla_dbg_fn(pdev, "");
 
-	/* allocate dump region only once */
+	// allocate dump region only once
 	if (!nvdla_dev->debug_dump_va) {
 		nvdla_dev->debug_dump_va = dma_alloc_attrs(&pdev->dev,
 				   DEBUG_BUFFER_SIZE, &nvdla_dev->debug_dump_pa,
@@ -546,7 +634,7 @@ static int nvdla_alloc_dump_region(struct platform_device *pdev)
 		}
 	}
 
-	/* assign memory for command */
+	// assign memory for command
 	err = nvdla_get_cmd_memory(pdev, &debug_cmd_mem_info);
 	if (err) {
 		nvdla_dbg_err(pdev, "dma alloc for command failed");
@@ -560,15 +648,15 @@ static int nvdla_alloc_dump_region(struct platform_device *pdev)
 	if (nvdla_dev->submit_mode == NVDLA_SUBMIT_MODE_CHANNEL)
 		region->address = 0;
 
-	/* prepare command data */
+	// prepare command data
 	cmd_data.method_id = DLA_CMD_SET_REGIONS;
 	cmd_data.method_data = ALIGNED_DMA(debug_cmd_mem_info.pa);
 	cmd_data.wait = true;
 
-	/* pass dump region to falcon */
+	// pass dump region to falcon
 	err = nvdla_fw_send_cmd(pdev, &cmd_data);
 
-	/* release memory allocated for debug print command */
+	// release memory allocated for debug print command
 	nvdla_put_cmd_memory(pdev, debug_cmd_mem_info.index);
 
 	if (err != 0) {
@@ -865,9 +953,12 @@ static int nvdla_hwpm_ip_reg_op(void *ip_dev,
 
 	if (reg_op == TEGRA_SOC_HWPM_IP_REG_OP_READ)
 		*reg_data = nvdla_device_register_read(dev,
+			NVDLA_APERTURE_TYPE_DLA,
 			(unsigned int)reg_offset);
 	else if (reg_op == TEGRA_SOC_HWPM_IP_REG_OP_WRITE)
-		nvdla_device_register_write(dev, (unsigned int)reg_offset,
+		nvdla_device_register_write(dev,
+			NVDLA_APERTURE_TYPE_DLA,
+			(unsigned int)reg_offset,
 			*reg_data);
 
 	return 0;
@@ -1047,10 +1138,6 @@ static struct of_device_id tegra_nvdla_of_match[] = {
 		.compatible = "nvidia,tegra25x-nvdla",
 		.data = (struct nvhost_device_data *)&t25x_nvdla0_info },
 	{
-		.name = "nvdla1",
-		.compatible = "nvidia,tegra25x-nvdla",
-		.data = (struct nvhost_device_data *)&t25x_nvdla1_info },
-	{
 		.name = "nvdla0",
 		.compatible = "nvidia,tegra264-nvdla",
 		.data = (struct nvhost_device_data *)&t264_sim_nvdla0_info },
@@ -1125,11 +1212,159 @@ static uint32_t num_enabled_dla_instances(uint32_t soft_fuse_ret,
 	return num_active_modules;
 }
 
+int32_t nvdla_device_data_init(struct platform_device *pdev)
+{
+	int32_t err;
+	struct device *dev = &pdev->dev;
+	struct nvhost_device_data *pdata = platform_get_drvdata(pdev);
+	struct nvdla_device *nvdla_dev;
+
+	dma_set_mask(dev, DMA_BIT_MASK(39));
+
+	nvdla_dev = devm_kzalloc(dev, sizeof(*nvdla_dev), GFP_KERNEL);
+	if (!nvdla_dev) {
+		err = -ENOMEM;
+		goto fail;
+	}
+
+	if (pdev->dev.of_node) {
+		nvdla_dev->icc_write = devm_of_icc_get(dev, "write");
+		if (IS_ERR(nvdla_dev->icc_write)) {
+			err = dev_err_probe(&pdev->dev, PTR_ERR(nvdla_dev->icc_write),
+				     "failed to get icc write handle\n");
+			goto free_nvdla_dev;
+		}
+	}
+
+	nvdla_dev->dev = dev;
+	nvdla_dev->pdev = pdev;
+	mutex_init(&nvdla_dev->cmd_lock);
+	init_completion(&nvdla_dev->cmd_completion);
+	mutex_init(&nvdla_dev->ping_lock);
+	pdata->private_data = nvdla_dev;
+	if (nvdla_is_ctx_device(pdev)) {
+		struct device_node *parent_node =
+			of_get_next_parent(pdev->dev.of_node);
+		nvdla_dev->parent_pdev = of_find_device_by_node(parent_node);
+	} else {
+		nvdla_dev->parent_pdev = NULL;
+	}
+	mutex_init(&nvdla_dev->ctx_list_lock);
+	INIT_LIST_HEAD(&nvdla_dev->ctx_list_head);
+	INIT_LIST_HEAD(&nvdla_dev->ctx_list_node);
+	nvdla_dev->ctx_id = nvdla_device_get_ctx_id(pdev);
+	nvdla_dev->dbg_mask = debug_err;
+
+	// considering there can be maximum 4 SIDs, force boot through bitbang
+	if (nvdla_is_vmctrl_device(pdev))
+		nvdla_dev->bitbang = true;
+
+	err = nvdla_module_init(pdev);
+	if (err != 0) {
+		dev_err(dev, "Failed to init device\n");
+		goto destroy_mutexes;
+	}
+
+	/* create debugfs entries */
+	nvdla_debug_init(pdev);
+
+	(void) nvdla_fw_init(pdev);
+
+	nvdla_dev->pool = nvdla_queue_init(pdev, &nvdla_queue_ops,
+				MAX_NVDLA_QUEUE_COUNT);
+	if (IS_ERR(nvdla_dev->pool)) {
+		err = PTR_ERR(nvdla_dev->pool);
+		goto deinit_fw_module;
+	}
+
+	/* init reset handler workqueue */
+	nvdla_reset_handler_init(nvdla_dev);
+
+	/* init poweroff handler workqueue */
+	nvdla_poweroff_handler_init(nvdla_dev);
+
+	nvdla_dev->sync_dev = nvdla_sync_device_create_syncpoint(pdev);
+	if (nvdla_dev->sync_dev == NULL) {
+		err = -ENOMEM;
+		goto deinit_queue;
+	}
+
+	err = nvdla_alloc_cmd_memory(pdev);
+	if (err)
+		goto destroy_sync_dev;
+
+	err = nvdla_alloc_utilization_rate_memory(pdev);
+	if (err)
+		goto free_cmd_memory;
+
+	err = nvdla_alloc_window_size_memory(pdev);
+	if (err)
+		goto free_utilization_rate_memory;
+
+#if defined(NVDLA_HAVE_CONFIG_HSIERRINJ) && (NVDLA_HAVE_CONFIG_HSIERRINJ == 1)
+	err = nvdla_error_inj_handler_init(nvdla_dev);
+	if (err) {
+		dev_err(dev, "Failed to register error injection\n");
+		goto free_window_size_memory;
+	}
+#endif /* NVDLA_HAVE_CONFIG_HSIERRINJ */
+
+	return 0;
+
+#if defined(NVDLA_HAVE_CONFIG_HSIERRINJ) && (NVDLA_HAVE_CONFIG_HSIERRINJ == 1)
+free_window_size_memory:
+	nvdla_free_window_size_memory(pdev);
+#endif /* NVDLA_HAVE_CONFIG_HSIERRINJ */
+free_utilization_rate_memory:
+	nvdla_free_utilization_rate_memory(pdev);
+free_cmd_memory:
+	nvdla_free_cmd_memory(pdev);
+destroy_sync_dev:
+	nvdla_sync_device_destroy(nvdla_dev->sync_dev);
+deinit_queue:
+	nvdla_queue_deinit(nvdla_dev->pool);
+deinit_fw_module:
+	nvdla_fw_deinit(pdev);
+	nvdla_module_deinit(pdev);
+destroy_mutexes:
+	mutex_destroy(&nvdla_dev->ctx_list_lock);
+	mutex_destroy(&nvdla_dev->ping_lock);
+	mutex_destroy(&nvdla_dev->cmd_lock);
+free_nvdla_dev:
+	devm_kfree(dev, nvdla_dev);
+fail:
+	return err;
+};
+
+void nvdla_device_data_deinit(struct platform_device *pdev)
+{
+	struct device *dev = &pdev->dev;
+	struct nvhost_device_data *pdata = platform_get_drvdata(pdev);
+	struct nvdla_device *nvdla_dev = pdata->private_data;
+
+#if defined(NVDLA_HAVE_CONFIG_HSIERRINJ) && (NVDLA_HAVE_CONFIG_HSIERRINJ == 1)
+	nvdla_error_inj_handler_deinit(nvdla_dev);
+#endif /* NVDLA_HAVE_CONFIG_HSIERRINJ */
+	nvdla_free_gcov_region(pdev, false);
+	nvdla_free_window_size_memory(pdev);
+	nvdla_free_utilization_rate_memory(pdev);
+	nvdla_free_trace_region(pdev);
+	nvdla_free_dump_region(pdev);
+	nvdla_free_cmd_memory(pdev);
+	nvdla_sync_device_destroy(nvdla_dev->sync_dev);
+	nvdla_queue_deinit(nvdla_dev->pool);
+	nvdla_fw_deinit(pdev);
+	nvdla_module_deinit(pdev);
+	mutex_destroy(&nvdla_dev->ctx_list_lock);
+	mutex_destroy(&nvdla_dev->ping_lock);
+	mutex_destroy(&nvdla_dev->cmd_lock);
+	devm_kfree(dev, nvdla_dev);
+}
+
 static int nvdla_probe(struct platform_device *pdev)
 {
 	int err = 0;
 	struct nvhost_device_data *pdata = NULL;
-	struct nvdla_device *nvdla_dev = NULL;
 	struct device *dev = &pdev->dev;
 	uint32_t soft_fuse_ret = 0U;
 	int fuse_register_ret = 0U;
@@ -1144,6 +1379,10 @@ static int nvdla_probe(struct platform_device *pdev)
 	struct clk_bulk_data *clks;
 	struct clk *c;
 #endif
+	struct device_node *of_node = pdev->dev.of_node;
+
+	if (nvhost_get_host1x(pdev) == NULL)
+		return -EPROBE_DEFER;
 
 	if (pdev->dev.of_node) {
 		const struct of_device_id *match;
@@ -1151,6 +1390,11 @@ static int nvdla_probe(struct platform_device *pdev)
 		match = of_match_device(tegra_nvdla_of_match, dev);
 		if (match)
 			pdata = (struct nvhost_device_data *)match->data;
+
+		// If child node is available, then virtualization is simulated.
+		if ((nvdla_is_vmctrl_device(pdev) && pdata) &&
+				pdata->version == FIRMWARE_ENCODE_VERSION(T25X))
+			pdata->version = FIRMWARE_ENCODE_VERSION(T25X_V2);
 	} else if (ACPI_HANDLE(&pdev->dev)) {
 		const struct acpi_device_id *match;
 
@@ -1223,41 +1467,7 @@ static int nvdla_probe(struct platform_device *pdev)
 				goto err_no_ip;
 			}
 		}
-	}
 
-	dma_set_mask(dev, DMA_BIT_MASK(39));
-
-	nvdla_dev = devm_kzalloc(dev, sizeof(*nvdla_dev), GFP_KERNEL);
-	if (!nvdla_dev) {
-		err = -ENOMEM;
-		goto err_alloc_nvdla;
-	}
-
-	if (pdev->dev.of_node) {
-		nvdla_dev->icc_write = devm_of_icc_get(dev, "write");
-		if (IS_ERR(nvdla_dev->icc_write))
-			return dev_err_probe(&pdev->dev, PTR_ERR(nvdla_dev->icc_write),
-				     "failed to get icc write handle\n");
-	}
-
-	nvdla_dev->dev = dev;
-	nvdla_dev->pdev = pdev;
-	pdata->pdev = pdev;
-	mutex_init(&pdata->lock);
-	mutex_init(&nvdla_dev->cmd_lock);
-	init_completion(&nvdla_dev->cmd_completion);
-	mutex_init(&nvdla_dev->ping_lock);
-	pdata->private_data = nvdla_dev;
-	platform_set_drvdata(pdev, pdata);
-	nvdla_dev->dbg_mask = debug_err;
-
-	err = nvdla_module_init(pdev);
-	if (err != 0) {
-		dev_err(dev, "Failed to init device\n");
-		goto err_device_init;
-	}
-
-	if (pdata->version == FIRMWARE_ENCODE_VERSION(T23X)) {
 		if (num_enabled_dla_instances(soft_fuse_ret, fuse_register_ret) == 1) {
 			if (pdev->dev.of_node)
 				pdev->dev.of_node->name = "nvdla0";
@@ -1266,48 +1476,11 @@ static int nvdla_probe(struct platform_device *pdev)
 		}
 	}
 
-	/* create debugfs entries */
-	nvdla_debug_init(pdev);
-
-	(void) nvdla_fw_init(pdev);
-
-	nvdla_dev->pool = nvdla_queue_init(pdev, &nvdla_queue_ops,
-				MAX_NVDLA_QUEUE_COUNT);
-	if (IS_ERR(nvdla_dev->pool)) {
-		err = PTR_ERR(nvdla_dev->pool);
-		goto err_queue_init;
-	}
-
-	/* init reset handler workqueue */
-	nvdla_reset_handler_init(nvdla_dev);
-
-	/* init poweroff handler workqueue */
-	nvdla_poweroff_handler_init(nvdla_dev);
-
-	nvdla_dev->sync_dev = nvdla_sync_device_create_syncpoint(pdev);
-#if defined(BUG_4942853) && (BUG_4942853 == 1)
-	/* Intentionally left empty until bug is resolved */
-#else
-	if (nvdla_dev->sync_dev == NULL) {
-		err = -ENOMEM;
-		goto err_mss_init;
-	}
-#endif // BUG_4942853
-
-	err = nvdla_alloc_cmd_memory(pdev);
-	if (err)
-		goto err_alloc_cmd_mem;
-
-	err = nvdla_alloc_utilization_rate_memory(pdev);
-	if (err)
-		goto err_alloc_utilization_rate_mem;
-
-	err = nvdla_alloc_window_size_memory(pdev);
-	if (err)
-		goto err_alloc_window_size_mem;
+	pdata->pdev = pdev;
+	mutex_init(&pdata->lock);
+	platform_set_drvdata(pdev, pdata);
 
 #if defined(NVDLA_HAVE_CONFIG_HW_PERFMON) && (NVDLA_HAVE_CONFIG_HW_PERFMON == 1)
-	nvdla_dbg_info(pdev, "hwpm ip %s register", pdev->name);
 	hwpm_ip_ops.ip_dev = (void *)pdev;
 	hwpm_ip_ops.ip_base_address = pdev->resource[0].start;
 	hwpm_ip_ops.resource_enum = TEGRA_SOC_HWPM_RESOURCE_NVDLA;
@@ -1316,13 +1489,9 @@ static int nvdla_probe(struct platform_device *pdev)
 	tegra_soc_hwpm_ip_register(&hwpm_ip_ops);
 #endif
 
-#if defined(NVDLA_HAVE_CONFIG_HSIERRINJ) && (NVDLA_HAVE_CONFIG_HSIERRINJ == 1)
-	err = nvdla_error_inj_handler_init(nvdla_dev);
-	if (err) {
-		dev_err(dev, "Failed to register error injection\n");
-		goto err_inj_handler_init;
-	}
-#endif /* NVDLA_HAVE_CONFIG_HSIERRINJ */
+	err = nvdla_device_data_init(pdev);
+	if (err < 0)
+		goto unregister_hwpm_ip;
 
 #if !IS_ENABLED(CONFIG_TEGRA_GRHOST)
 	if (pdata->num_clks > 0) {
@@ -1330,13 +1499,13 @@ static int nvdla_probe(struct platform_device *pdev)
 				&pdev->dev.kobj, "%s", "clk_cap");
 		if (err) {
 			dev_err(dev, "Could not add dir 'clk_cap'\n");
-				goto err_clk_cap_fail;
+				goto deinit_device_data;
 		}
 
 		pdata->clk_cap_attrs = devm_kcalloc(dev, pdata->num_clks,
 			sizeof(*attr), GFP_KERNEL);
 		if (!pdata->clk_cap_attrs)
-			goto err_cleanup_sysfs;
+			goto cleanup_sysfs;
 
 		for (i = 0; i < pdata->num_clks; ++i) {
 			clks = &pdata->clks[i];
@@ -1355,58 +1524,46 @@ static int nvdla_probe(struct platform_device *pdev)
 				dev_err(dev, "Could not create sysfs attribute %s\n",
 					__clk_get_name(c));
 				err = -EIO;
-				goto err_cleanup_sysfs;
+				goto cleanup_sysfs;
 			}
 		}
 	}
 #endif
 
+	if (of_node) {
+		err = devm_of_platform_populate(&pdev->dev);
+		if (err < 0) {
+			dev_info(dev, "Failed to populate of_node\n");
+			goto err_of_platform_populate;
+		}
+	}
+
 	nvdla_dbg_info(pdev, "pdata:%p initialized\n", pdata);
 
 	return 0;
 
+err_of_platform_populate:
 #if !IS_ENABLED(CONFIG_TEGRA_GRHOST)
-err_cleanup_sysfs:
+cleanup_sysfs:
 	/* kobj of nvdla_kobj_ktype cleans up sysfs entries automatically */
-	kobject_put(&pdata->clk_cap_kobj);
-err_clk_cap_fail:
+	if (pdata->num_clks > 0)
+		kobject_put(&pdata->clk_cap_kobj);
+deinit_device_data:
 #endif
-#if defined(NVDLA_HAVE_CONFIG_HSIERRINJ) && (NVDLA_HAVE_CONFIG_HSIERRINJ == 1)
-err_inj_handler_init:
+	nvdla_device_data_deinit(pdev);
+unregister_hwpm_ip:
 #if defined(NVDLA_HAVE_CONFIG_HW_PERFMON) && (NVDLA_HAVE_CONFIG_HW_PERFMON == 1)
 	tegra_soc_hwpm_ip_unregister(&hwpm_ip_ops);
-#endif /* NVDLA_HAVE_CONFIG_HW_PERFMON */
-	nvdla_free_window_size_memory(pdev);
-#endif /* NVDLA_HAVE_CONFIG_HSIERRINJ */
-err_alloc_window_size_mem:
-	nvdla_free_utilization_rate_memory(pdev);
-err_alloc_utilization_rate_mem:
-	nvdla_free_cmd_memory(pdev);
-err_alloc_cmd_mem:
-	nvdla_sync_device_destroy(nvdla_dev->sync_dev);
-#if defined(BUG_4942853) && (BUG_4942853 == 1)
-	/* Intentionally left empty until bug is resolved */
-#else
-err_mss_init:
-#endif
-	nvdla_queue_deinit(nvdla_dev->pool);
-err_queue_init:
-	nvdla_fw_deinit(pdev);
-	nvdla_module_deinit(pdev);
-err_device_init:
-	mutex_destroy(&nvdla_dev->ping_lock);
-	devm_kfree(dev, nvdla_dev);
-err_alloc_nvdla:
+#endif // NVDLA_HAVE_CONFIG_HW_PERFMON
+	mutex_destroy(&pdata->lock);
 err_no_ip:
 err_get_pdata:
-
 	return err;
 }
 
 static int __exit nvdla_remove(struct platform_device *pdev)
 {
 	struct nvhost_device_data *pdata = platform_get_drvdata(pdev);
-	struct nvdla_device *nvdla_dev = pdata->private_data;
 #if defined(NVDLA_HAVE_CONFIG_HW_PERFMON) && (NVDLA_HAVE_CONFIG_HW_PERFMON == 1)
 	struct tegra_soc_hwpm_ip_ops hwpm_ip_ops;
 #endif /* NVDLA_HAVE_CONFIG_HW_PERFMON */
@@ -1414,6 +1571,9 @@ static int __exit nvdla_remove(struct platform_device *pdev)
 #if !IS_ENABLED(CONFIG_TEGRA_GRHOST)
 	int i;
 	struct kobj_attribute *attr = NULL;
+
+	if (pdev->dev.of_node)
+		devm_of_platform_depopulate(&pdev->dev);
 
 	if (pdata->clk_cap_attrs) {
 		for (i = 0; i < pdata->num_clks; i++) {
@@ -1435,39 +1595,7 @@ static int __exit nvdla_remove(struct platform_device *pdev)
 	tegra_soc_hwpm_ip_unregister(&hwpm_ip_ops);
 #endif /* NVDLA_HAVE_CONFIG_HW_PERFMON */
 
-#if defined(NVDLA_HAVE_CONFIG_HSIERRINJ) && (NVDLA_HAVE_CONFIG_HSIERRINJ == 1)
-	nvdla_error_inj_handler_deinit(nvdla_dev);
-#endif /* NVDLA_HAVE_CONFIG_HSIERRINJ */
-
-	nvdla_sync_device_destroy(nvdla_dev->sync_dev);
-	nvdla_queue_deinit(nvdla_dev->pool);
-	nvdla_module_deinit(pdev);
-	mutex_destroy(&nvdla_dev->ping_lock);
-	nvdla_free_gcov_region(pdev, false);
-
-	if (nvdla_dev->trace_dump_pa) {
-		dma_free_attrs(&pdev->dev, TRACE_BUFFER_SIZE,
-			       nvdla_dev->trace_dump_va,
-			       nvdla_dev->trace_dump_pa,
-			       0);
-		nvdla_dev->trace_dump_va = NULL;
-		nvdla_dev->trace_dump_pa = 0;
-	}
-
-	if (nvdla_dev->debug_dump_pa) {
-		dma_free_attrs(&pdev->dev, DEBUG_BUFFER_SIZE,
-			       nvdla_dev->debug_dump_va,
-			       nvdla_dev->debug_dump_pa,
-			       0);
-		nvdla_dev->debug_dump_va = NULL;
-		nvdla_dev->debug_dump_pa = 0;
-	}
-
-	nvdla_free_utilization_rate_memory(pdev);
-	nvdla_free_window_size_memory(pdev);
-
-	/* free command mem in last */
-	nvdla_free_cmd_memory(pdev);
+	nvdla_device_data_deinit(pdev);
 
 	nvdla_dbg_fn(pdev, "");
 
@@ -1507,7 +1635,7 @@ static int __exit nvdla_remove_wrapper(struct platform_device *pdev)
 }
 #endif
 
-static struct platform_driver nvdla_driver = {
+struct platform_driver nvdla_driver = {
 	.probe = nvdla_probe,
 	.remove = __exit_p(nvdla_remove_wrapper),
 	.driver = {
@@ -1531,13 +1659,13 @@ module_platform_driver(nvdla_driver);
 
 static int __init nvdla_init(void)
 {
-	return nvdla_driver_register(&nvdla_driver);
+	return nvdla_driver_register();
 }
 module_init(nvdla_init);
 
 static void __exit nvdla_exit(void)
 {
-	nvdla_driver_unregister(&nvdla_driver);
+	nvdla_driver_unregister();
 }
 module_exit(nvdla_exit);
 #endif

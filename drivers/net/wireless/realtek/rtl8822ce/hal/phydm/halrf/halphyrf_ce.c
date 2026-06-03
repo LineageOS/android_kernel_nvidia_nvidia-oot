@@ -192,6 +192,9 @@ void odm_get_tracking_table(void *dm_void, u8 thermal_value, u8 delta)
 
 	configure_txpower_track(dm, &c);
 
+	if (c.get_delta_swing_table == NULL)
+		return;
+
 	(*c.get_delta_swing_table)(dm,
 				   (u8 **)&pwrtrk_tab_up_a,
 				   (u8 **)&pwrtrk_tab_down_a,
@@ -376,6 +379,9 @@ void odm_pwrtrk_method(void *dm_void)
 	struct txpwrtrack_cfg c = {0};
 
 	configure_txpower_track(dm, &c);
+
+	if (c.odm_tx_pwr_track_set_pwr == NULL)
+		return;
 
 	if (dm->support_ic_type &
 		(ODM_RTL8188E | ODM_RTL8192E | ODM_RTL8821 | ODM_RTL8812 |
@@ -1052,7 +1058,7 @@ odm_txpowertracking_new_callback_thermal_meter(void *dm_void)
 			tracking_method = TSSI_MODE;
 		}
 	} else {
-		if (rf->power_track_type >= 0 && rf->power_track_type <= 3) {
+		if (rf->power_track_type <= 3) {
 			RF_DBG(dm, DBG_RF_TX_PWR_TRACK, "**********Enter POWER Tracking MIX_MODE**********\n");
 			tracking_method = MIX_MODE;
 		} else if (rf->power_track_type >= 4 && rf->power_track_type <= 7) {

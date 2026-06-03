@@ -17,6 +17,12 @@ properties:
     enum:
       - nvidia,tegra_bl_debug
 
+  usec_timer_reg_base:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    description: |
+      Base address of the Tegra USEC timer register.
+      If not specified, driver will fallback to use ARM generic timer.
+
 required:
   - compatible
 

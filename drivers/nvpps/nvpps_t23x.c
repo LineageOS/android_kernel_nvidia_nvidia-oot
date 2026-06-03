@@ -28,6 +28,9 @@
 #define T23X_TSC_ALIGNED_STATUS_BIT_OFFSET				0U
 #define T23X_TSC_LOCK_CTRL_ALIGN_BIT_OFFSET				0U
 
+#define T23X_TSC_LOCKING_CONFIG_EN_SHIFT				0U
+#define T23X_TSC_CAPTURE_CONFIG_EN_SHIFT				0U
+
 #define T23X_DEFAULT_REF_FREQ_INC_1S			0x1DCD650 /* 1s expressed in tick count */
 
 #define T23X_MIN_LOCK_THRESHOLD_1US				0x1FU
@@ -186,13 +189,35 @@ static void nvpps_t23x_ptp_tsc_synchronize(struct soc_dev_data *soc_data)
 
 static int32_t nvpps_t23x_ptp_tsc_suspend_sync(struct soc_dev_data *soc_data)
 {
-	/* Stub implementation */
+	uint32_t reg_val = 0;
+
+	/* Disable ability to feed the HW Lock mechanism */
+	reg_val = readl(soc_data->reg_map_base + T23X_TSC_CAPTURE_CONFIGURATION_PTX_OFFSET);
+	reg_val = (reg_val & ~BIT(T23X_TSC_CAPTURE_CONFIG_EN_SHIFT));
+	writel(reg_val, soc_data->reg_map_base + T23X_TSC_CAPTURE_CONFIGURATION_PTX_OFFSET);
+
+	/* Disable HW LOCKING Mechanism */
+	reg_val = readl(soc_data->reg_map_base + T23X_TSC_LOCKING_CONFIGURATION_OFFSET);
+	reg_val = (reg_val & ~BIT(T23X_TSC_LOCKING_CONFIG_EN_SHIFT));
+	writel(reg_val, soc_data->reg_map_base + T23X_TSC_LOCKING_CONFIGURATION_OFFSET);
+
 	return 0;
 }
 
 static int32_t nvpps_t23x_ptp_tsc_resume_sync(struct soc_dev_data *soc_data)
 {
-	/* Stub implementation */
+	uint32_t reg_val = 0;
+
+	/* Enable HW LOCKING Mechanism */
+	reg_val = readl(soc_data->reg_map_base + T23X_TSC_LOCKING_CONFIGURATION_OFFSET);
+	reg_val = (reg_val | BIT(T23X_TSC_LOCKING_CONFIG_EN_SHIFT));
+	writel(reg_val, soc_data->reg_map_base + T23X_TSC_LOCKING_CONFIGURATION_OFFSET);
+
+	/* Enable ability to feed the HW Lock mechanism */
+	reg_val = readl(soc_data->reg_map_base + T23X_TSC_CAPTURE_CONFIGURATION_PTX_OFFSET);
+	reg_val = (reg_val | BIT(T23X_TSC_CAPTURE_CONFIG_EN_SHIFT));
+	writel(reg_val, soc_data->reg_map_base + T23X_TSC_CAPTURE_CONFIGURATION_PTX_OFFSET);
+
 	return 0;
 }
 

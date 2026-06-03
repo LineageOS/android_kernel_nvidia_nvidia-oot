@@ -13,7 +13,6 @@
 #include <linux/moduleparam.h>
 #include <linux/io.h>
 #include <linux/tegra_nvadsp.h>
-#include <linux/version.h>
 #include <linux/slab.h>
 #include <soc/tegra/fuse-helper.h>
 #include <soc/tegra/virt/hv-ivc.h>

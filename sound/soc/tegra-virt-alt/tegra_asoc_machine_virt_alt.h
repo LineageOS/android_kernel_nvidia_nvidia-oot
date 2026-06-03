@@ -1,12 +1,16 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Copyright (c) 2021-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2021-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  */
 
 #ifndef __TEGRA_ASOC_MACHINE_VIRT_ALT_H__
 #define __TEGRA_ASOC_MACHINE_VIRT_ALT_H__
 
 #include "tegra210_virt_alt_admaif.h"
+
+/* ADSP ADMAIF offset constants */
+#define TEGRA186_ADSP_ADMAIF_OFFSET	20
+#define TEGRA264_ADSP_ADMAIF_OFFSET	32
 
 enum tegra210_xbar_dai_link {
 	TEGRA210_DAI_LINK_ADMAIF1,

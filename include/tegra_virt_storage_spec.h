@@ -10,6 +10,14 @@
 
 #define VS_REQ_OP_F_NONE      0
 
+/** Id of UFS RPMB request.
+ */
+#define UFS_RPMB_IOCTL_ID	    0x00000001U
+
+/** Length of the SCSI RPMB request header.
+ */
+#define SCSI_RPMB_HDR_LEN   12U
+
 enum vs_req_type {
 	VS_DATA_REQ = 1,
 	VS_CONFIGINFO_REQ = 2,
@@ -89,6 +97,7 @@ enum blk_cmd_op {
 	VS_BLK_SECURE_ERASE = 5,
 	VS_BLK_IOCTL = 6,
 	VS_BLK_ERASE = 7,
+	VS_BLK_RPMB = 8,
 	VS_BLK_INVAL_REQ = 32,
 	VS_UNKNOWN_BLK_CMD = 0xffffffff,
 };
@@ -102,9 +111,58 @@ enum blk_cmd_op {
 #define VS_BLK_IOCTL_OP_F         (1 << VS_BLK_IOCTL)
 #define VS_BLK_ERASE_OP_F         (1 << VS_BLK_ERASE)
 #define VS_BLK_READ_ONLY_MASK     ~(VS_BLK_READ_OP_F)
+#define VS_BLK_RPMB_OP_F          (1U << VS_BLK_RPMB)
 
 #pragma pack(push)
 #pragma pack(1)
+
+/** \struct vs_rpmb_request
+ *
+ *  Structure encapsulating virtual block device RPMB request arguments.
+ */
+struct vs_rpmb_request {
+
+	/** Id of the RPMB request. Supported UFS IDs is UFS_RPMB_IOCTL_ID.
+	 */
+	uint32_t rpmb_op_id;
+
+	/** Length of the mempool area associated for commands.
+	 */
+	uint32_t rpmb_len;
+
+	/** Offset into mempool for data region.
+	 */
+	uint32_t rpmb_data_offset;
+};
+
+
+
+/** \struct vs_rpmb_response
+ *
+ *  Structure encapsulating virtual block device RPMB response arguments.
+ */
+struct vs_rpmb_response {
+
+	/** Status code returned as part of response message of RPMB requests.
+	 * Status code value is "0" for success and "< 0" for failure
+	 * This value of this member is ignored in the RPMB request message.
+	 */
+	int32_t status;
+};
+
+
+struct vblk_rpmb_io_hdr {
+	uint8_t cdb[SCSI_RPMB_HDR_LEN];
+	int32_t data_direction;     /* [i] data transfer direction  */
+	uint8_t mx_sb_len;          /* [i] max length to write to sbp */
+	uint32_t dxfer_len;         /* [i] byte count of data transfer */
+	uint32_t xfer_arg_offset;  /* [i], [*io] offset to data transfer memory */
+	uint32_t sbp_arg_offset;    /* [i], [*o] offset to sense_buffer memory */
+	uint32_t status;            /* [o] scsi status */
+	uint8_t sb_len_wr;          /* [o] byte count actually written to sbp */
+	uint32_t dxfer_buf_len;     /* [i] Length of data transfer buffer */
+};
+
 
 struct vs_error_inject_request {
 	union {
@@ -151,6 +209,7 @@ struct vs_blkdev_request {
 	union {
 		struct vs_blk_request blk_req;
 		struct vs_ioctl_request ioctl_req;
+		struct vs_rpmb_request rpmb_req;
 	};
 };
 
@@ -181,6 +240,7 @@ struct vs_blkdev_response {
 	union {
 		struct vs_blk_response blk_resp;
 		struct vs_ioctl_response ioctl_resp;
+		struct vs_rpmb_response rpmb_resp;
 	};
 };
 

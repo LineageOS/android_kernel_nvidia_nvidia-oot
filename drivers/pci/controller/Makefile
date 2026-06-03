@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0
 # Copyright (c) 2022-2025, NVIDIA CORPORATION.  All rights reserved.
 
-obj-m += tegra-pcie-edma.o
 obj-m += pcie-tegra-vf.o
 
 # Set config when build as OOT module.

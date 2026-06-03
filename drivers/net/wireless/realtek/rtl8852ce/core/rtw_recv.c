@@ -1464,6 +1464,9 @@ int rtw_sta_rx_data_validate_hdr(_adapter *adapter, union recv_frame *rframe, st
 	u8 *whdr = get_recvframe_data(rframe);
 	u8 is_ra_bmc = IS_MCAST(GetAddr1Ptr(whdr)) ? 1 : 0;
 	sint ret = _FAIL;
+#ifdef CONFIG_LAYER2_ROAMING
+	struct mlme_priv *pmlmepriv = &adapter->mlmepriv;
+#endif
 
 	if (rattrib->to_fr_ds == 0) {
 		_rtw_memcpy(rattrib->ra, GetAddr1Ptr(whdr), ETH_ALEN);
@@ -1493,6 +1496,12 @@ int rtw_sta_rx_data_validate_hdr(_adapter *adapter, union recv_frame *rframe, st
 	}
 
 	if (!(MLME_STATE(adapter) & (WIFI_ASOC_STATE | WIFI_UNDER_LINKING))) {
+#ifdef CONFIG_LAYER2_ROAMING
+		if (pmlmepriv->roam_network) {
+			RTW_INFO_LMT("%s: ignore unexpected data when roaming\n", __func__);
+		}
+		else
+#endif
 		if (!is_ra_bmc) {
 			/* for AP multicast issue , modify by yiwei */
 			static systime send_issue_deauth_time = 0;
@@ -1546,6 +1555,12 @@ int rtw_sta_rx_data_validate_hdr(_adapter *adapter, union recv_frame *rframe, st
 	else
 		*sta = rtw_get_stainfo(stapriv, rattrib->ta);
 	if (*sta == NULL) {
+#ifdef CONFIG_LAYER2_ROAMING
+		if (pmlmepriv->roam_network) {
+			RTW_INFO_LMT("%s: ignore no sta data when roaming\n", __func__);
+		}
+		else
+#endif
 		#ifndef CONFIG_CUSTOMER_ALIBABA_GENERAL
 		if (!is_ra_bmc && !IS_RADAR_DETECTED(adapter_to_rfctl(adapter))) {
 			RTW_INFO(FUNC_ADPT_FMT" issue_deauth to "MAC_FMT" with reason(7), unknown TA\n"

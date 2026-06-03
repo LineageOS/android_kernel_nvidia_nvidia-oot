@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (C) 2022-2023, NVIDIA Corporation. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2022-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * DS90UH983-Q1 DP to FPD-Link Serializer driver
  */
@@ -19,7 +19,6 @@
 #include <linux/regulator/consumer.h>
 #include <linux/slab.h>
 #include <linux/regmap.h>
-#include <linux/of_gpio.h>
 #include <linux/workqueue.h>
 #include <linux/of_device.h>
 #include <linux/of.h>

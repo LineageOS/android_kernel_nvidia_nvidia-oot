@@ -2,20 +2,8 @@
 /*
  * Copyright (c) 2021, LGE Inc. All rights reserved.
  *
- * SPDX-FileCopyrightText: Copyright (c) 2022-2025 NVIDIA CORPORATION & AFFILIATES.
+ * SPDX-FileCopyrightText: Copyright (c) 2022-2026 NVIDIA CORPORATION & AFFILIATES.
  * All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <nvidia/conftest.h>
@@ -23,9 +11,7 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/slab.h>
-#include <linux/gpio.h>
 #include <linux/of.h>
-#include <linux/of_gpio.h>
 #include <linux/of_device.h>
 #include <linux/err.h>
 #include <linux/i2c.h>
@@ -1450,10 +1436,8 @@ static int fusb301_probe(struct i2c_client *client,
 	chip->wlock = wakeup_source_register(cdev, "fusb301-wake");
 	mutex_init(&chip->mlock);
 
-	ret = devm_request_threaded_irq(cdev, client->irq,
-			  fusb301_irq_handler, NULL,
-			  IRQF_ONESHOT, dev_name(cdev),
-			  chip);
+	ret = devm_request_irq(cdev, client->irq, fusb301_irq_handler,
+			       IRQF_TRIGGER_LOW, dev_name(cdev), chip);
 	if (ret)
 		goto destroy_workqueue;
 

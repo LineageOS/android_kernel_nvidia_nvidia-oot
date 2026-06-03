@@ -27,7 +27,6 @@
 #include <linux/nvhost.h>
 #include <linux/uaccess.h>
 #include <linux/poll.h>
-#include <linux/version.h>
 #include <asm/cacheflush.h>
 #include <uapi/linux/nvdev_fence.h>
 #include "device-group.h"
@@ -123,6 +122,9 @@ struct tegra_rtcpu_trace {
 
 	/* flag to indicate a panic occurred */
 	atomic_t panic_flag;
+
+	/* read index - starting position for new file descriptors */
+	u32 read_idx;
 };
 
 struct rtcpu_raw_trace_context {
@@ -1252,26 +1254,6 @@ static void rtcpu_trace_vi_event(struct tegra_rtcpu_trace *tracer,
 		break;
 	}
 }
-
-const char * const g_trace_isp_falcon_task_strs[] = {
-	"UNUSED",
-	"SCHED_ERROR",
-	"SCHED_HANDLE_STAT",
-	"SCHED_FINISH_TILE",
-	"SCHED_FINISH_SLICE",
-	"HANDLE_EVENT",
-	"INPUT_ACTION",
-	"ISR"
-};
-
-const unsigned int g_trace_isp_falcon_task_str_count =
-	ARRAY_SIZE(g_trace_isp_falcon_task_strs);
-
-#define TRACE_ISP_FALCON_EVENT_TS         13U
-#define TRACE_ISP_FALCON_EVENT_TE         14U
-#define TRACE_ISP_FALCON_PROFILE_START    16U
-#define TRACE_ISP_FALCON_PROFILE_END      17U
-
 /**
  * @brief Trace ISP task events
  *
@@ -1354,21 +1336,102 @@ static void rtcpu_trace_isp_task_event(struct tegra_rtcpu_trace *tracer,
 	}
 }
 
+/* ISP Falcon trace tag ID */
+#define CAMRTC_TRACE_ISP_FALCON_EVENT_TDSTATE           10U
+#define CAMRTC_TRACE_ISP_FALCON_EVENT_ACTIONLST         11U
+#define CAMRTC_TRACE_ISP_FALCON_EVENT_REGDUMP           12U
+#define CAMRTC_TRACE_ISP_FALCON_EVENT_TILE_START        13U
+#define CAMRTC_TRACE_ISP_FALCON_EVENT_TILE_END          14U
+#define CAMRTC_TRACE_ISP_FALCON_EVENT_CRCDUMP           15U
+#define CAMRTC_TRACE_ISP_FALCON_EVENT_PROFILE_START     16U
+#define CAMRTC_TRACE_ISP_FALCON_EVENT_PROFILE_END       17U
+#define CAMRTC_TRACE_ISP_FALCON_EVENT_PROFILE_READY     18U
+
+/* ISP Falcon profile(task) ID in PROFILE_START/END Trace */
+#define PROFILE_REGION_ISP_NOTHING_HAPPEN           0U
+#define PROFILE_REGION_ISP_SCHED_STAT_RECEIVED      1U
+#define PROFILE_REGION_ISP_SCHED_ERROR_HAPPEN       2U
+#define PROFILE_REGION_ISP_SCHED_TILE_FINISHED      3U
+#define PROFILE_REGION_ISP_SCHED_SLICE_FINISHED     4U
+#define PROFILE_REGION_ISP_HANDLE_EVENT             0xFU
+
+/* Tag string table for ISP Falcon events (index is tag value) */
+const char * const g_trace_isp_falcon_tag_strs[] = {
+	"RESERVED0  ",
+	"RESERVED1  ",
+	"RESERVED2  ",
+	"RESERVED3  ",
+	"RESERVED4  ",
+	"RESERVED5  ",
+	"RESERVED6  ",
+	"RESERVED7  ",
+	"RESERVED8  ",
+	"RESERVED9  ",
+	"TDSTATE    ",
+	"ACTIONLST  ",
+	"REG_DUMP   ",
+	"TILE_START ",
+	"TILE_END   ",
+	"CRC_DUMP   ",
+	"TASK_START ",
+	"TASK_END   ",
+	"FRAME_READY",
+};
+
+const unsigned int g_trace_isp_falcon_tag_str_count =
+	ARRAY_SIZE(g_trace_isp_falcon_tag_strs);
+
+const char * const g_trace_isp_falcon_task_strs[] = {
+	"NOTHING_HAPPEN",
+	"STAT_RECEIVED",
+	"ERROR_HAPPEN",
+	"TILE_FINISHED",
+	"SLICE_FINISHED",
+	"INPUT_ACTION",
+	"ISR",
+	"TASK7",
+	"TASK8",
+	"TASK9",
+	"TASK10",
+	"TASK11",
+	"TASK12",
+	"TASK13",
+	"TASK14",
+	"HANDLE_EVENT",
+};
+
+const unsigned int g_trace_isp_falcon_task_str_count =
+	ARRAY_SIZE(g_trace_isp_falcon_task_strs);
+
+/* SQE handle event strings (index is ev_type value) */
+const char * const g_trace_isp_sqe_event_strs[] = {
+	"NONE",
+	"SET_CMD",
+	"SET_ADDRL",
+	"SET_ADDRH",
+	"SET_SEQ",
+	"POP_HEAD",
+	"TIMEOUT",
+	"SWI",
+	"TASK_TIMEOUT",
+};
+
+const unsigned int g_trace_isp_sqe_event_str_count =
+	ARRAY_SIZE(g_trace_isp_sqe_event_strs);
+
 /**
  * @brief Trace ISP Falcon events
  *
  * This function traces ISP Falcon events based on the event ID.
  *  - It handles different ISP Falcon event types and their corresponding trace functions.
- *  - If event ID is @ref TRACE_ISP_FALCON_EVENT_TS, it prints the ISP Falcon tile start trace
- *    event using @ref trace_rtcpu_isp_falcon_tile_start()
- *  - If event ID is @ref TRACE_ISP_FALCON_EVENT_TE, it prints the ISP Falcon tile end trace event
- *    using @ref trace_rtcpu_isp_falcon_tile_end()
- *  - If event ID is @ref TRACE_ISP_FALCON_PROFILE_START, it prints the ISP Falcon task start trace
- *    event using @ref trace_rtcpu_isp_falcon_task_start()
- *  - If event ID is @ref TRACE_ISP_FALCON_PROFILE_END, it prints the ISP Falcon task end trace
- *    event using @ref trace_rtcpu_isp_falcon_task_end()
+ *  - If event ID is @ref CAMRTC_TRACE_ISP_FALCON_EVENT_TILE_START or
+ *    @ref CAMRTC_TRACE_ISP_FALCON_EVENT_TILE_END, using @ref trace_rtcpu_isp_falcon_tile().
+ *  - If event ID is @ref CAMRTC_TRACE_ISP_FALCON_EVENT_PROFILE_START or
+ *    @ref CAMRTC_TRACE_ISP_FALCON_EVENT_PROFILE_END, using @ref trace_rtcpu_isp_falcon_task().
+ *  - If event ID is @ref CAMRTC_TRACE_ISP_FALCON_EVENT_PROFILE_READY,
+ *    using @ref trace_rtcpu_isp_falcon_frame().
  *  - If event ID is not found, it prints the unknown trace event using
- *    @ref trace_rtcpu_isp_falcon()
+ *    @ref trace_rtcpu_isp_falcon().
  *
  * @param[in] event Pointer to the camrtc_event_struct structure.
  * 						Valid Range: Non-NULL pointer.
@@ -1376,43 +1439,72 @@ static void rtcpu_trace_isp_task_event(struct tegra_rtcpu_trace *tracer,
 static void rtcpu_trace_isp_falcon_event(struct camrtc_event_struct *event)
 {
 	u8 ispfalcon_tag = (u8) ((event->data.data32[0] & 0xFF) >> 1U);
-	u8 ch = (u8) ((event->data.data32[0] & 0xFF00) >> 8U);
+	u8 ch_isp = (u8) ((event->data.data32[0] & 0xFF00) >> 8U);
 	u8 seq = (u8) ((event->data.data32[0] & 0xFF0000) >> 16U);
 	u32 low_bits_ts = event->data.data32[1];
 	u32 high_bits_ts = event->data.data32[2];
-	u64 tstamp = ((u64)high_bits_ts << 32U) | low_bits_ts;
+	u64 isp_tstamp = ((u64)high_bits_ts << 32U) | low_bits_ts;
 	u32 isp_unit_id = event->data.data32[5];
+	u8 cch_isp = (u8) event->data.data32[6];
 
 	switch (ispfalcon_tag) {
-	case TRACE_ISP_FALCON_EVENT_TS:
-		trace_rtcpu_isp_falcon_tile_start(
-			ch, seq, tstamp, isp_unit_id,
-			(u8) (event->data.data32[4] & 0xFF),
-			(u8) ((event->data.data32[4] & 0xFF00) >> 8U),
-			(u16) (event->data.data32[3] & 0xFFFF),
-			(u16) ((event->data.data32[3] & 0xFFFF0000) >> 16U));
+	case CAMRTC_TRACE_ISP_FALCON_EVENT_TILE_START:
+	case CAMRTC_TRACE_ISP_FALCON_EVENT_TILE_END:
+	{
+		/* Extract tile-specific fields */
+		u8 tile_idx = (u8) (event->data.data32[4] & 0xFF);
+		u8 slice_idx = (u8) ((event->data.data32[4] & 0xFF00) >> 8U);
+		u16 tile_w = (u16) (event->data.data32[3] & 0xFFFF);
+		u16 tile_h = (u16) ((event->data.data32[3] & 0xFFFF0000) >> 16U);
+
+		trace_rtcpu_isp_falcon_tile(
+			event->header.tstamp, cch_isp, isp_unit_id,
+			ispfalcon_tag, ch_isp, seq,
+			slice_idx, tile_idx, tile_w, tile_h,
+			isp_tstamp);
 		break;
-	case TRACE_ISP_FALCON_EVENT_TE:
-		trace_rtcpu_isp_falcon_tile_end(
-			ch, seq, tstamp, isp_unit_id,
-			(u8) (event->data.data32[4] & 0xFF),
-			(u8) ((event->data.data32[4] & 0xFF00) >> 8U));
+	}
+	case CAMRTC_TRACE_ISP_FALCON_EVENT_PROFILE_START:
+	case CAMRTC_TRACE_ISP_FALCON_EVENT_PROFILE_END:
+	{
+		u32 task_id = (u32)(event->data.data32[3] & 0xFFFFU);
+
+		if (task_id == PROFILE_REGION_ISP_HANDLE_EVENT) {
+			/* Handle SQE events */
+			u32 ev_type = (u32)((event->data.data32[3] >> 16U) & 0xFFFFU);
+			u32 ev_data = event->data.data32[4];
+
+			trace_rtcpu_isp_falcon_sqe(
+				event->header.tstamp, cch_isp, isp_unit_id,
+				ispfalcon_tag, ch_isp, seq,
+				task_id, ev_type, ev_data,
+				isp_tstamp);
+		} else {
+			/* Handle regular task events */
+			u8 tile_idx = (u8) (event->data.data32[4] & 0xFF);
+			u8 slice_idx = (u8) ((event->data.data32[4] & 0xFF00) >> 8U);
+
+			trace_rtcpu_isp_falcon_task(
+				event->header.tstamp, cch_isp, isp_unit_id,
+				ispfalcon_tag, ch_isp, seq,
+				slice_idx, tile_idx, task_id,
+				isp_tstamp);
+		}
 		break;
-	case TRACE_ISP_FALCON_PROFILE_START:
-		trace_rtcpu_isp_falcon_task_start(
-			ch, tstamp, isp_unit_id,
-			event->data.data32[3]);
-		break;
-	case TRACE_ISP_FALCON_PROFILE_END:
-		trace_rtcpu_isp_falcon_task_end(
-			tstamp, isp_unit_id,
-			event->data.data32[3]);
+	}
+	case CAMRTC_TRACE_ISP_FALCON_EVENT_PROFILE_READY:
+		trace_rtcpu_isp_falcon_frame(
+			event->header.tstamp, cch_isp, isp_unit_id,
+			ispfalcon_tag, ch_isp, seq,
+			isp_tstamp);
 		break;
 	default:
 		trace_rtcpu_isp_falcon(
-			ispfalcon_tag, ch, seq, tstamp, isp_unit_id,
+			event->header.tstamp, cch_isp, isp_unit_id,
+			ispfalcon_tag, ch_isp, seq,
 			event->data.data32[3],
-			event->data.data32[4]);
+			event->data.data32[4],
+			isp_tstamp);
 		break;
 	}
 
@@ -2382,8 +2474,9 @@ rtcpu_raw_trace_read(struct file *file, char __user *user_buffer, size_t buffer_
  * @param[in,out] ppos     Pointer to the file position (not used).
  *                         Valid Range: Any.
  *
- * @retval buffer_size Size of the input buffer (always successful)
+ * @retval buffer_size Size of the input buffer (successful)
  * @retval -ENODEV File descriptor context or tracer not set
+ * @retval -EIO Invalid event_next_idx from RTCPU
  */
 static ssize_t rtcpu_raw_trace_write(
 	struct file *file, const char __user *user_buffer, size_t buffer_size, loff_t *ppos)
@@ -2391,6 +2484,7 @@ static ssize_t rtcpu_raw_trace_write(
 	struct tegra_rtcpu_trace *tracer;
 	const struct camrtc_trace_memory_header *header;
 	struct rtcpu_raw_trace_context *fd_context = file->private_data;
+	u32 current_idx;
 
 	if (!fd_context) {
 		pr_err("file descriptor context is not set in private data\n");
@@ -2404,10 +2498,29 @@ static ssize_t rtcpu_raw_trace_write(
 		return -ENODEV;
 	}
 
-	header = tracer->trace_memory;
+	/* Invalidate cache to get latest event_next_idx from RTCPU */
+	dma_sync_single_for_cpu(tracer->dev, tracer->dma_handle_pointers,
+		CAMRTC_TRACE_NEXT_IDX_SIZE, DMA_FROM_DEVICE);
 
-	fd_context->raw_trace_last_read_event_idx = header->event_next_idx;
-	file->private_data = fd_context;
+	header = tracer->trace_memory;
+	current_idx = header->event_next_idx;
+
+	/* Validate the index */
+	if (current_idx >= tracer->event_entries) {
+		dev_warn(tracer->dev,
+			"Invalid event_next_idx %u, max is %u\n",
+			current_idx, tracer->event_entries - 1);
+		return -EIO;
+	}
+
+	/* Update both global and fd-local state atomically under mutex */
+	mutex_lock(&tracer->lock);
+	tracer->read_idx = current_idx;
+	fd_context->raw_trace_last_read_event_idx = current_idx;
+	fd_context->first_read_call = false;
+	mutex_unlock(&tracer->lock);
+
+	dev_dbg(tracer->dev, "Trace cleared: set read index to %u\n", current_idx);
 
 	return buffer_size;
 }
@@ -2504,8 +2617,12 @@ static int rtcpu_raw_trace_open(struct inode *inode, struct file *file)
 	}
 
 	fd_context->tracer = tracer;
-	fd_context->raw_trace_last_read_event_idx = 0;
-	fd_context->first_read_call = true;
+
+	mutex_lock(&tracer->lock);
+	fd_context->raw_trace_last_read_event_idx = tracer->read_idx;
+	fd_context->first_read_call = (tracer->read_idx == 0);
+	mutex_unlock(&tracer->lock);
+
 	file->private_data = fd_context;
 
 	return nonseekable_open(inode, file);
@@ -2798,7 +2915,7 @@ struct tegra_rtcpu_trace *tegra_rtcpu_trace_create(struct device *dev,
 	tracer = kzalloc(sizeof(*tracer), GFP_KERNEL);
 	if (unlikely(tracer == NULL)) {
 		dev_err(dev, "%s: failed to allocate tracer\n", __func__);
-		return NULL;
+		return ERR_PTR(-ENOMEM);
 	}
 
 	tracer->dev = dev;
@@ -2809,7 +2926,7 @@ struct tegra_rtcpu_trace *tegra_rtcpu_trace_create(struct device *dev,
 	if (ret) {
 		dev_err(dev, "%s: failed to setup trace memory, err=%d\n", __func__, ret);
 		kfree(tracer);
-		return NULL;
+		return ERR_PTR(ret);
 	}
 
 	/* Initialize the trace memory */
@@ -2856,7 +2973,7 @@ struct tegra_rtcpu_trace *tegra_rtcpu_trace_create(struct device *dev,
 	if (of_property_read_u32(tracer->of_node, NV(interval-ms), &param)) {
 		dev_err(dev, "%s: interval-ms property not present\n", __func__);
 		kfree(tracer);
-		return NULL;
+		return ERR_PTR(-EINVAL);
 	}
 
 	tracer->enable_printk = of_property_read_bool(tracer->of_node,
@@ -2867,7 +2984,7 @@ struct tegra_rtcpu_trace *tegra_rtcpu_trace_create(struct device *dev,
 				&tracer->log_prefix)) {
 		dev_err(dev, "%s: RTCPU property not present\n", __func__);
 		kfree(tracer);
-		return NULL;
+		return ERR_PTR(-EINVAL);
 	}
 
 	INIT_DELAYED_WORK(&tracer->work, rtcpu_trace_worker);
@@ -2883,7 +3000,7 @@ struct tegra_rtcpu_trace *tegra_rtcpu_trace_create(struct device *dev,
 	if (ret) {
 		dev_err(dev, "%s: failed to register device node, err=%d\n", __func__, ret);
 		kfree(tracer);
-		return NULL;
+		return ERR_PTR(ret);
 	}
 
 	return tracer;

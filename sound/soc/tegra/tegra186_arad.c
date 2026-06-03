@@ -168,7 +168,7 @@ static int tegra186_arad_mux_get(struct snd_kcontrol *kcontrol,
 {
 	struct soc_enum *arad_private =
 		(struct soc_enum  *)kcontrol->private_value;
-	struct snd_soc_component *cmpnt = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *cmpnt = snd_kcontrol_chip(kcontrol);
 	struct tegra186_arad *arad = snd_soc_component_get_drvdata(cmpnt);
 	unsigned int val, loop = 0;
 
@@ -193,7 +193,7 @@ static int tegra186_arad_mux_put(struct snd_kcontrol *kcontrol,
 
 	struct soc_enum *arad_private =
 		(struct soc_enum  *)kcontrol->private_value;
-	struct snd_soc_component *cmpnt = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *cmpnt = snd_kcontrol_chip(kcontrol);
 	struct tegra186_arad *arad = snd_soc_component_get_drvdata(cmpnt);
 	unsigned int val = ucontrol->value.integer.value[0];
 	if (!val)
@@ -224,7 +224,7 @@ static int tegra186_arad_get_ratio_int(struct snd_kcontrol *kcontrol,
 {
 	struct soc_mixer_control *arad_private =
 		(struct soc_mixer_control *)kcontrol->private_value;
-	struct snd_soc_component *cmpnt = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *cmpnt = snd_kcontrol_chip(kcontrol);
 	struct tegra186_arad *arad = snd_soc_component_get_drvdata(cmpnt);
 	unsigned int val;
 
@@ -239,7 +239,7 @@ static int tegra186_arad_get_ratio_frac(struct snd_kcontrol *kcontrol,
 {
 	struct soc_mixer_control *arad_private =
 		(struct soc_mixer_control *)kcontrol->private_value;
-	struct snd_soc_component *cmpnt = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *cmpnt = snd_kcontrol_chip(kcontrol);
 	struct tegra186_arad *arad = snd_soc_component_get_drvdata(cmpnt);
 	unsigned int val;
 
@@ -254,7 +254,7 @@ static int tegra186_arad_get_enable_lane(struct snd_kcontrol *kcontrol,
 {
 	struct soc_mixer_control *arad_private =
 		(struct soc_mixer_control *)kcontrol->private_value;
-	struct snd_soc_component *cmpnt = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *cmpnt = snd_kcontrol_chip(kcontrol);
 	struct tegra186_arad *arad = snd_soc_component_get_drvdata(cmpnt);
 	unsigned int enable;
 
@@ -270,7 +270,7 @@ static int tegra186_arad_put_enable_lane(struct snd_kcontrol *kcontrol,
 {
 	struct soc_mixer_control *arad_private =
 		(struct soc_mixer_control *)kcontrol->private_value;
-	struct snd_soc_component *cmpnt = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *cmpnt = snd_kcontrol_chip(kcontrol);
 	struct device *dev = cmpnt->dev;
 	struct tegra186_arad *arad = snd_soc_component_get_drvdata(cmpnt);
 	unsigned int enable = 0, lane_id = arad_private->shift, state;
@@ -354,7 +354,7 @@ static int tegra186_arad_get_prescalar(struct snd_kcontrol *kcontrol,
 {
 	struct soc_mixer_control *arad_private =
 		(struct soc_mixer_control *)kcontrol->private_value;
-	struct snd_soc_component *cmpnt = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *cmpnt = snd_kcontrol_chip(kcontrol);
 	struct tegra186_arad *arad = snd_soc_component_get_drvdata(cmpnt);
 	unsigned int reg = arad_private->reg;
 	unsigned int val = 0;
@@ -370,7 +370,7 @@ static int tegra186_arad_put_prescalar(struct snd_kcontrol *kcontrol,
 {
 	struct soc_mixer_control *arad_private =
 		(struct soc_mixer_control *)kcontrol->private_value;
-	struct snd_soc_component *cmpnt = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *cmpnt = snd_kcontrol_chip(kcontrol);
 	struct tegra186_arad *arad = snd_soc_component_get_drvdata(cmpnt);
 	unsigned int reg = arad_private->reg;
 

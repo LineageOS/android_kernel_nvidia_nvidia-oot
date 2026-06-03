@@ -30,13 +30,13 @@ int dce_log_buf_mem_init(struct tegra_dce *d)
 	int ret = 0;
 
 	ret = dce_os_init_log_buffer(d);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(d, "Failed to allocate memory for DCE log buffer");
 		goto out;
 	}
 
 out:
-	if (ret)
+	if (ret != 0)
 		dce_os_deinit_log_buffer(d);
 	return ret;
 }
@@ -59,7 +59,7 @@ int dce_log_init(struct tegra_dce *d, struct dce_ipc_message *msg)
 	set_info->stream_id	= dce_os_get_dce_stream_id(d);
 
 	ret = dce_admin_set_log_info(d, msg);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(d, "Failed to initialize logging, ret = %d\n", ret);
 		goto out;
 	}
@@ -80,7 +80,7 @@ int dce_log_clear_buffer(struct tegra_dce *d, struct dce_ipc_message *msg)
 	ipc_info->flags |= DCE_ADMIN_LOG_FL_CLEAR_BUFFER;
 
 	ret = dce_admin_set_log_info(d, msg);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(d, "Failed while making set admin call, ret = %d\n", ret);
 		goto out;
 	}
@@ -103,7 +103,7 @@ int dce_log_set_log_level(struct tegra_dce *d, struct dce_ipc_message *msg,
 	ipc_info->log_level = log_lvl;
 
 	ret = dce_admin_set_log_info(d, msg);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(d, "Failed while making set admin call, ret = %d\n", ret);
 		goto out;
 	}

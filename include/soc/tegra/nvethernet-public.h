@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0-only
-/* SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES.
+/* SPDX-License-Identifier: GPL-2.0-only
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES.
  * All rights reserved.
  *
  *
@@ -70,5 +70,34 @@ int nvether_coe_config(struct net_device *ndev,
  */
 int nvether_coe_chan_config(struct net_device *ndev, u32 dmachan,
 				   struct nvether_per_coe_cfg *p_coe_cfg);
+
+/**
+ * @brief Configure FRP for COE packet classification
+ *
+ * Programs the Flexible Receive Parser (FRP) to classify AVTP COE packets
+ * (EtherType 0x22F0). This should be called when the first COE channel opens
+ * on an MGBE instance, and disabled when the last channel closes.
+ *
+ * @param[in] ndev: Network device instance
+ * @param[in] enable: 1 to enable FRP for COE, 0 to disable
+ * @param[in] vlan_enable: 1 if COE packets are VLAN tagged, 0 otherwise
+ *
+ * @retval 0 on success
+ * @retval negative errno on failure
+ */
+int nvether_coe_frp_config(struct net_device *ndev, u32 enable, u32 vlan_enable);
+
+/**
+ * @brief Check if MGBE is in a healthy state after CoE session
+ *
+ * Sends a gratuitous ARP and verifies that tx_packets increments to
+ * detect a stuck TX path (DMA lockup).
+ *
+ * @param[in] ndev: Network device instance
+ *
+ * @retval true if MGBE is healthy
+ * @retval false if MGBE appears to be in a bad state and needs reset
+ */
+bool nvether_coe_check_health(struct net_device *ndev);
 
 #endif /* INCLUDE_NVETHERNET_PUBLIC_H */

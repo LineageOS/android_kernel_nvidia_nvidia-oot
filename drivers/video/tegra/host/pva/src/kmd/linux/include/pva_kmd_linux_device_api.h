@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
+/* SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
 
 #ifndef PVA_KMD_LINUX_DEVICE_API_H
 #define PVA_KMD_LINUX_DEVICE_API_H
@@ -87,15 +87,15 @@ struct nvpva_device_data {
 	/** SMMU context platform devices */
 	struct platform_device *smmu_contexts[PVA_MAX_NUM_SMMU_CONTEXTS];
 	/** ISR data for interrupt lines */
-	struct pva_kmd_isr_data isr[PVA_KMD_INTR_LINE_COUNT];
+	struct pva_kmd_isr_data isr_handlers[PVA_KMD_INTR_LINE_COUNT];
 
 	/* === Device Configuration === */
 	/** IP version number */
-	int version;
+	enum pva_chip_id version;
 	/** Device class ID */
 	uint32_t class;
 	/** Firmware filename */
-	char *firmware_name;
+	const char *firmware_name;
 
 	/* === Device State Flags === */
 	/** Device is booted when PM runtime is disabled */

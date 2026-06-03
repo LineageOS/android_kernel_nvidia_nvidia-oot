@@ -78,7 +78,7 @@ enum pva_error pva_kmd_shared_buffer_init(struct pva_kmd_device *pva,
 	/* CERT INT31-C: iova and size validated to fit in uint32_t, safe to cast */
 	pva_kmd_set_cmd_init_shared_dram_buffer(&init_cmd, (uint8_t)interface,
 						device_memory->iova,
-						(uint32_t)device_memory->size);
+						device_memory->size);
 
 	err = pva_kmd_submit_cmd_sync(&pva->submitter, &init_cmd,
 				      (uint32_t)sizeof(init_cmd),
@@ -148,6 +148,7 @@ static void process_fw_event_msg(struct pva_kmd_device *pva, void *msg_body,
 static void process_trace_msg(struct pva_kmd_device *pva, uint32_t msg_type,
 			      void *msg_body, uint32_t msg_size)
 {
+#if (PVA_ENABLE_FW_TRACEPOINTS == 1) || (PVA_ENABLE_NSYS_PROFILING == 1)
 	switch (msg_type) {
 #if PVA_ENABLE_FW_TRACEPOINTS == 1
 	case PVA_KMD_FW_BUF_MSG_TYPE_FW_TRACEPOINT: {
@@ -195,13 +196,19 @@ static void process_trace_msg(struct pva_kmd_device *pva, uint32_t msg_type,
 		break;
 	}
 #endif
-	default: {
-		// This should not happen as we only call this function for known message types.
-		// Added for fixing the compiler warning.
+	default:
 		FAULT("Unexpected trace message type in process_trace_msg");
+		/* NOTREACHED */
 		break;
 	}
-	}
+#else
+	/* Trace features disabled - this function should not be called */
+	(void)pva;
+	(void)msg_type;
+	(void)msg_body;
+	(void)msg_size;
+	FAULT("Trace message received when tracing disabled");
+#endif
 }
 
 static void process_res_unreg_msg(struct pva_kmd_device *pva, uint8_t interface,
@@ -211,7 +218,9 @@ static void process_res_unreg_msg(struct pva_kmd_device *pva, uint8_t interface,
 	struct pva_kmd_context *ctx = NULL;
 
 	ASSERT(msg_size == sizeof(struct pva_kmd_fw_msg_res_unreg));
-	(void)memcpy((void *)&unreg_data, (const void *)msg_body,
+	/* MISRA C-2023 Rule 11.5: msg_body is void*, explicit cast needed for type safety */
+	(void)memcpy(&unreg_data,
+		     (const struct pva_kmd_fw_msg_res_unreg *)msg_body,
 		     sizeof(unreg_data));
 	ctx = pva_kmd_get_context(pva, interface);
 
@@ -234,7 +243,8 @@ static void shared_buffer_process_msg(struct pva_kmd_device *pva,
 	ASSERT(msg != NULL);
 
 	// Copy the header
-	(void)memcpy((void *)&header, (const void *)msg, sizeof(header));
+	(void)memcpy(&header, (const struct pva_kmd_fw_buffer_msg_header *)msg,
+		     sizeof(header));
 	msg_size = safe_subu32(header.size, (uint32_t)sizeof(header));
 	msg_body = (uint8_t *)msg + sizeof(header);
 
@@ -253,7 +263,8 @@ static void shared_buffer_process_msg(struct pva_kmd_device *pva,
 		process_res_unreg_msg(pva, interface, msg_body, msg_size);
 		break;
 	default:
-		FAULT("Unexpected message type while processing shared buffer");
+		pva_kmd_log_err(
+			"Unexpected message type while processing shared buffer");
 		break;
 	}
 }
@@ -316,8 +327,7 @@ void pva_kmd_shared_buffer_process(void *pva_dev, uint8_t interface)
 			// Note that ideally this should never happen as the buffer is expected to be
 			// the same size as the resource table.
 			// TODO: abort only the user context, not the device.
-			pva_kmd_abort_fw(pva,
-					 (enum pva_error)PVA_BUF_OUT_OF_RANGE);
+			pva_kmd_abort_fw(pva, PVA_BUF_OUT_OF_RANGE);
 		}
 
 		// Buffer corresponding to CCQ 0 is used for sending messages common to a VM.

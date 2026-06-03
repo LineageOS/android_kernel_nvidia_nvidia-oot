@@ -1,6 +1,15 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/*
- * Copyright (c) 2017-2022 NVIDIA Corporation.  All rights reserved.
+/* SPDX-FileCopyrightText: Copyright (c) 2017-2026 NVIDIA CORPORATION & AFFILIATES.
+ * All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms and conditions of the GNU General Public License,
+ * version 2, as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
  */
 
 /**
@@ -58,9 +67,6 @@ struct vi_capture {
 	uint32_t stream_id; /**< NVCSI PixelParser index [0-5] */
 	uint32_t csi_port; /**< NVCSI ports A-H [0-7] */
 	uint32_t virtual_channel_id; /**< CSI virtual channel id [0-15] */
-
-	uint32_t num_gos_tables; /**< No. of cv devices in gos_tables */
-	const dma_addr_t *gos_tables; /**< IOVA addresses of all GoS devices */
 
 	struct syncpoint_info progress_sp; /**< Syncpoint for frame progress */
 	struct syncpoint_info embdata_sp;
@@ -145,7 +151,10 @@ struct vi_capture_setup {
 		 * Bitmask for NOTIFY errors that force channel stop upon
 		 * receipt
 		 */
-	uint64_t reserved[2];
+	uint32_t pipeline_id;
+		/**< Pipeline ID for logging */
+	uint32_t reserved[3];
+		/**< Padding for alignment */
 } __VI_CAPTURE_ALIGN;
 
 /**

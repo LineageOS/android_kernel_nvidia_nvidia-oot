@@ -3,14 +3,8 @@
 
 #include "ether_linux.h"
 
-/**
- * @brief Function used to get PTP time
- * @param[in] data: OSI core private data structure
- *
- * @retval "nano seconds" of MAC system time
- */
-static inline int ether_get_hw_time(struct net_device *dev,
-				    void *ts, int ts_type)
+int ether_get_hw_time(struct net_device *dev,
+		      void *ts, int ts_type)
 {
 	struct ether_priv_data *pdata;
 	struct osi_dma_priv_data *osi_dma;
@@ -161,6 +155,15 @@ int ether_set_time(struct ptp_clock_info *ptp, const struct timespec64 *ts)
 	unsigned long flags;
 	int ret = -1;
 
+	if ((ts->tv_nsec < 0) || (ts->tv_nsec >= OSI_NSEC_PER_SEC_SIGNED)) {
+		dev_err(pdata->dev, "%s: Invalid nsec\n", __func__);
+		return -ERANGE;
+	}
+	if ((ts->tv_sec < 0) || (ts->tv_sec > UINT_MAX_SIGNED)) {
+		dev_err(pdata->dev, "%s: Invalid sec\n", __func__);
+		return -ERANGE;
+	}
+
 	raw_spin_lock_irqsave(&pdata->ptp_lock, flags);
 
 	ioctl_data.cmd = OSI_CMD_SET_SYSTOHW_TIME;
@@ -265,6 +268,7 @@ void ether_ptp_remove(struct ether_priv_data *pdata)
 {
 	if (pdata->ptp_clock) {
 		ptp_clock_unregister(pdata->ptp_clock);
+		pdata->ptp_clock = NULL;
 	}
 }
 

@@ -25,10 +25,25 @@ export CONFIG_TEGRA_DRM_DISABLE_LEGACY_IOCTL=y
 subdir-ccflags-y += -DCONFIG_TEGRA_DRM_DISABLE_LEGACY_IOCTL
 endif
 
+ifeq ($(NV_OOT_NVHOST_DISABLE_LEGACY_INTERFACE),y)
+export CONFIG_TEGRA_DRM_DISABLE_LEGACY_INTERFACE=y
+subdir-ccflags-y += -DCONFIG_TEGRA_DRM_DISABLE_LEGACY_INTERFACE
+endif
+
+# Enable legacy DRM Tegra firewall for pre-T186 chips only
+# Post-T186 Host1x HW has native capability to detect illegal opcodes
+ifeq ($(NV_OOT_ENABLE_LEGACY_DRM_TEGRA_FIREWALL),y)
+export CONFIG_DRM_TEGRA_LEGACY_FIREWALL=y
+subdir-ccflags-y += -DCONFIG_DRM_TEGRA_LEGACY_FIREWALL
+endif
+
 ifdef CONFIG_DRM
 obj-m += drm/tegra/
 endif
 obj-m += host1x/
 obj-m += host1x-fence/
+ifneq ($(NV_OOT_NVHOST_DISABLE_LEGACY_INTERFACE),y)
 obj-m += host1x-nvhost/
+endif
 obj-m += power/tegra/
+

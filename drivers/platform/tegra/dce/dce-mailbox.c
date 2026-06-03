@@ -65,8 +65,8 @@ void dce_mailbox_isr(struct tegra_dce *d)
 		 * Get the mailbox on which the interrupt
 		 * is received.
 		 */
-		if (irq_sources & (BIT(d_mb->r_mb)
-			<< DCE_MAILBOX_FULL_INT_SHIFT)) {
+		if ((irq_sources & (BIT(d_mb->r_mb)
+			<< DCE_MAILBOX_FULL_INT_SHIFT)) != 0U) {
 			/**
 			 * Read and store the value.
 			 *
@@ -234,7 +234,7 @@ int dce_mailbox_send_cmd_sync(struct tegra_dce *d, u32 cmd, u32 interface)
 
 	ret = dce_fsm_post_event(d, EVENT_ID_DCE_BOOT_CMD_MSG_REQUESTED,
 				 (void *)&params);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(d, "Unable to send msg ret :%d", ret);
 		goto out;
 	}
@@ -256,13 +256,14 @@ int dce_mailbox_init_interface(struct tegra_dce *d, u8 id, u8 s_mb,
 		void *notify_data, void (*notify)(struct tegra_dce *, void *))
 {
 	int ret;
-	u64 ie_wr_val;
+	u32 ie_wr_val;
+	u32 ie_val;
 	struct dce_mailbox_interface *d_mb;
 
 	d_mb = &d->d_mb[id];
 
 	ret = dce_os_mutex_init(&d_mb->lock);
-	if (ret) {
+	if (ret != 0) {
 		dce_os_err(d, "dce lock initialization failed for mailbox");
 		goto err_lock_init;
 	}
@@ -271,8 +272,10 @@ int dce_mailbox_init_interface(struct tegra_dce *d, u8 id, u8 s_mb,
 
 	d->hsp.smb_set_full_ie(d, true, d->hsp_id, r_mb);
 
-	ie_wr_val = BIT(r_mb) << 8U;
+	ie_val = d->hsp.hsp_ie_read(d, d->hsp_id, CCPLEX_HSP_IE);
+	ie_wr_val = ie_val | (BIT(r_mb) << DCE_MAILBOX_FULL_INT_SHIFT);
 	d->hsp.hsp_ie_write(d, ie_wr_val, d->hsp_id, CCPLEX_HSP_IE);
+	dce_os_debug(d, "id:%u ie:0x%08x->0x%08x\n", id, ie_val, ie_wr_val);
 
 	d_mb->s_mb = s_mb;
 	d_mb->r_mb = r_mb;
@@ -291,17 +294,29 @@ err_lock_init:
 
 /**
  * dce_mailbox_deinit_interface - Releases the resources
- *					associated with boot interface.
+ *					associated with mailbox interface.
  *
  * @d : Pointer to tegra_dce struct.
+ * @id : Mailbox interface id.
  *
  * Return : Void
  */
 void dce_mailbox_deinit_interface(struct tegra_dce *d, u8 id)
 {
+	u32 ie_val;
+	u32 ie_clear_val;
 	struct dce_mailbox_interface *d_mb;
 
 	d_mb = &d->d_mb[id];
 
+	/* Clear full interrupt enable for receive mailbox */
+	d->hsp.smb_set_full_ie(d, false, d->hsp_id, d_mb->r_mb);
+
+	/* Clear interrupt enable bits for this mailbox */
+	ie_val = d->hsp.hsp_ie_read(d, d->hsp_id, CCPLEX_HSP_IE);
+	ie_clear_val = ie_val & ~(BIT(d_mb->r_mb) << DCE_MAILBOX_FULL_INT_SHIFT);
+	d->hsp.hsp_ie_write(d, ie_clear_val, d->hsp_id, CCPLEX_HSP_IE);
+
+	dce_os_debug(d, "id:%u ie:0x%08x->0x%08x\n", id, ie_val, ie_clear_val);
 	dce_os_mutex_destroy(&d_mb->lock);
 }

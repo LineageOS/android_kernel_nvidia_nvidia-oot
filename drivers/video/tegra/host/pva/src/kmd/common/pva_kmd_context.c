@@ -70,7 +70,10 @@ free_queue_mem:
 	pva_kmd_free(ctx->queue_allocator_mem);
 free_ctx:
 	pva_kmd_mutex_deinit(&ctx->ocb_lock);
-	(void)pva_kmd_free_block(&pva->context_allocator, alloc_id);
+	err = pva_kmd_free_block(&pva->context_allocator, alloc_id);
+	if (err != PVA_SUCCESS) {
+		pva_kmd_log_err("Failed to free context block");
+	}
 err_out:
 	pva_kmd_log_err("Failed to create PVA context");
 	return NULL;
@@ -180,7 +183,7 @@ static enum pva_error notify_fw_context_init(struct pva_kmd_context *ctx)
 
 	update_cmd = (struct pva_cmd_update_resource_table *)pva_offset_pointer(
 		&cmd_scratch[0], current_offset);
-	current_offset += (uint32_t)sizeof(*update_cmd);
+	/* current_offset not incremented here - no more commands follow */
 
 	pva_kmd_set_cmd_init_resource_table(
 		res_cmd, ctx->resource_table_id,
@@ -348,7 +351,10 @@ enum pva_error pva_kmd_context_init(struct pva_kmd_context *ctx,
 	return PVA_SUCCESS;
 
 deinit_fw_context:
-	(void)notify_fw_context_deinit(ctx);
+	if (PVA_SUCCESS != notify_fw_context_deinit(ctx)) {
+		pva_kmd_log_err(
+			"Failed to deinitialize FW context during cleanup");
+	}
 deinit_submitter:
 	pva_kmd_mutex_deinit(&ctx->chunk_pool_lock);
 deinit_submit_lock:

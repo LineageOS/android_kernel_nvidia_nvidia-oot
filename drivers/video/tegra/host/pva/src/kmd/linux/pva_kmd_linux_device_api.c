@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #include <nvidia/conftest.h>
 
 #include <linux/clk.h>
@@ -69,22 +69,22 @@ int nvpva_syncpt_unit_interface_init(struct platform_device *pdev)
 	struct nvpva_device_data *pdata = platform_get_drvdata(pdev);
 	struct nvpva_syncpt_interface *syncpt_if;
 	phys_addr_t base;
-	uint32_t stride, num_syncpts;
+	uint32_t syncpt_stride, num_syncpts;
 	int err;
 
 	syncpt_if = devm_kzalloc(&pdev->dev, sizeof(*syncpt_if), GFP_KERNEL);
 	if (!syncpt_if)
 		return -ENOMEM;
 
-	err = host1x_syncpt_get_shim_info(pdata->host1x, &base, &stride,
+	err = host1x_syncpt_get_shim_info(pdata->host1x, &base, &syncpt_stride,
 					  &num_syncpts);
 	if (err < 0) {
 		dev_err(&pdev->dev, "failed to get shim info\n");
 		return err;
 	}
-	syncpt_if->size = stride * num_syncpts;
+	syncpt_if->size = syncpt_stride * num_syncpts;
 
-	syncpt_if->page_size = stride;
+	syncpt_if->page_size = syncpt_stride;
 
 	/* If IOMMU is enabled, map it into the device memory */
 	if (iommu_get_domain_for_dev(&pdev->dev)) {

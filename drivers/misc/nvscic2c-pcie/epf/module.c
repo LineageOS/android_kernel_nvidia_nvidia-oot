@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+/*
+ * SPDX-FileCopyrightText: Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES.
+ * All rights reserved.
+ */
 
 #include <nvidia/conftest.h>
 
@@ -50,6 +53,7 @@ static const struct pci_epf_device_id nvscic2c_pcie_epf_ids[] = {
 	{},
 };
 
+#if defined(NV_PLATFORM_MSI_DOMAIN_ALLOC_IRQS_PRESENT)
 #define MSI_MSG_DATA_OFFSET \
 	((TEGRA264_PCIE_DMA_MSI_REMOTE_VEC + 2) - TEGRA264_PCIE_DMA_MSI_LOCAL_VEC)
 static void
@@ -70,6 +74,7 @@ nvscic2c_dma_epf_write_msi_msg(struct msi_desc *desc, struct msi_msg *msg)
 		msi_data = msg->data - MSI_MSG_DATA_OFFSET;
 	}
 }
+#endif
 
 static irqreturn_t
 nvscic2c_dma_epf_irq(int irq, void *arg)
@@ -85,10 +90,8 @@ free_msi_data(struct driver_ctx_t *drv_ctx, struct platform_device *pdev)
 		drv_ctx->epf_ctx->isr_registered = false;
 	}
 
+#if defined(NV_PLATFORM_MSI_DOMAIN_FREE_IRQS_PRESENT)
 	if (drv_ctx->chip_id == TEGRA264)
-#if defined(NV_PLATFORM_DEVICE_MSI_INIT_AND_ALLOC_IRQS_PRESENT) /* Linux v6.9 */
-		platform_device_msi_free_irqs_all(&pdev->dev);
-#else
 		platform_msi_domain_free_irqs(&pdev->dev);
 #endif
 }
@@ -109,16 +112,13 @@ get_msi_data(struct driver_ctx_t *drv_ctx, struct platform_device *pdev)
 		return -ENOMEM;
 	}
 
-#if defined(NV_PLATFORM_DEVICE_MSI_INIT_AND_ALLOC_IRQS_PRESENT) /* Linux v6.9 */
-	ret = platform_device_msi_init_and_alloc_irqs(&pdev->dev, 8,
-						nvscic2c_dma_epf_write_msi_msg);
-#else
+#if defined(NV_PLATFORM_MSI_DOMAIN_ALLOC_IRQS_PRESENT)
 	ret = platform_msi_domain_alloc_irqs(&pdev->dev, 8, nvscic2c_dma_epf_write_msi_msg);
-#endif
 	if (ret < 0) {
 		pr_err("failed to allocate MSIs: %d\n", ret);
 		return ret;
 	}
+#endif
 #if defined(NV_MSI_GET_VIRQ_PRESENT) /* Linux v6.1 */
 	drv_ctx->msi_irq = msi_get_virq(&pdev->dev, TEGRA264_PCIE_DMA_MSI_LOCAL_VEC);
 	epf_ctx->irq = msi_get_virq(&pdev->dev, (TEGRA264_PCIE_DMA_MSI_REMOTE_VEC + 2));
@@ -315,6 +315,13 @@ clear_inbound_translation(struct pci_epf *epf)
 		return;
 	}
 
+	if (drv_ctx->chip_id == TEGRA264) {
+		epf_bar = &epf->bar[BAR_2];
+
+		/* Clear BAR:2. */
+		pci_epc_clear_bar(epf->epc, epf->func_no, epf->vfunc_no, epf_bar);
+	}
+
 	epf_bar = &epf->bar[drv_ctx->bar];
 	pci_epc_clear_bar(epf->epc, epf->func_no, epf->vfunc_no, epf_bar);
 
@@ -466,6 +473,8 @@ init_work(struct work_struct *work)
 {
 	int ret = 0;
 	struct comm_msg msg = {0};
+	struct pci_epc *epc = NULL;
+	struct platform_device *pdev = NULL;
 	struct epf_context_t *epf_ctx =
 		container_of(work, struct epf_context_t, initialization_work);
 	struct driver_ctx_t *drv_ctx = (struct driver_ctx_t *)epf_ctx->drv_ctx;
@@ -479,6 +488,17 @@ init_work(struct work_struct *work)
 	if (ret) {
 		pr_err("(%s): vmap_init() failed\n", drv_ctx->drv_name);
 		goto err;
+	}
+
+	if (drv_ctx->chip_id == TEGRA264) {
+		epc = drv_ctx->epf_ctx->epf->epc;
+		pdev = of_find_device_by_node(epc->dev.parent->of_node);
+
+		ret = get_msi_data(drv_ctx, pdev);
+		if (ret != 0) {
+			pr_err("failed in fetching MSI data with : %d\n", ret);
+			goto err_get_msi;
+		}
 	}
 
 	ret = edma_module_init(drv_ctx);
@@ -517,6 +537,8 @@ err_msg_send:
 err_endpoint:
 	edma_module_deinit(drv_ctx);
 err_edma_init:
+	free_msi_data(drv_ctx, pdev);
+err_get_msi:
 	vmap_deinit(&drv_ctx->vmap_h);
 err:
 	return;
@@ -650,8 +672,8 @@ deinit_work(struct work_struct *work)
 
 	endpoints_release(&drv_ctx->endpoints_h);
 	edma_module_deinit(drv_ctx);
-	vmap_deinit(&drv_ctx->vmap_h);
 	free_msi_data(drv_ctx, pdev);
+	vmap_deinit(&drv_ctx->vmap_h);
 	clear_outbound_translation(drv_ctx->epf_ctx->epf, &drv_ctx->peer_mem);
 	atomic_set(&drv_ctx->epf_ctx->epf_initialized, 0);
 }
@@ -692,17 +714,25 @@ nvscic2c_pcie_epf_core_deinit(struct pci_epf *epf)
 		 * NvSciC2CPcie needs to clear CPU mapping once all the endpoints are closed.
 		 * Hence release mutex before scheduling the work and take back once done.
 		 */
-		if (drv_ctx->chip_id == TEGRA264)
-			mutex_unlock(&epc->lock);
+		if (drv_ctx->chip_id == TEGRA264) {
+			if (mutex_is_locked(&epc->lock)) {
+				atomic_set(&drv_ctx->epf_ctx->lock_status, 1);
+				mutex_unlock(&epc->lock);
+			} else
+				atomic_set(&drv_ctx->epf_ctx->lock_status, 0);
+		}
 
 		schedule_work(&drv_ctx->epf_ctx->deinitialization_work);
 		flush_work(&drv_ctx->epf_ctx->deinitialization_work);
 
 		clear_inbound_translation(epf);
 
-		if (drv_ctx->chip_id == TEGRA264)
-			mutex_lock(&epc->lock);
-
+		if (drv_ctx->chip_id == TEGRA264) {
+			if (atomic_read(&drv_ctx->epf_ctx->lock_status)) {
+				atomic_set(&drv_ctx->epf_ctx->lock_status, 0);
+				mutex_lock(&epc->lock);
+			}
+		}
 		atomic_set(&drv_ctx->epf_ctx->core_initialized, 0);
 	}
 	wake_up_interruptible_all(&drv_ctx->epf_ctx->core_initialized_waitq);
@@ -752,6 +782,7 @@ static void
 nvscic2c_pcie_epf_unbind(struct pci_epf *epf)
 {
 	long ret = 0;
+	struct platform_device *pdev = NULL;
 	struct driver_ctx_t *drv_ctx = NULL;
 
 	if (!epf)
@@ -761,6 +792,7 @@ nvscic2c_pcie_epf_unbind(struct pci_epf *epf)
 	if (!drv_ctx)
 		return;
 
+	pdev = of_find_device_by_node(drv_ctx->cdev->of_node);
 	/* timeout should be higher than that of endpoints to close.*/
 	ret = wait_event_interruptible
 			(drv_ctx->epf_ctx->core_initialized_waitq,
@@ -769,6 +801,11 @@ nvscic2c_pcie_epf_unbind(struct pci_epf *epf)
 		pr_err("(%s): Interrupted waiting for CORE_DEINIT to complete\n",
 		       drv_ctx->drv_name);
 
+	if ((drv_ctx->chip_id == TEGRA264) && (drv_ctx->bar2_self_mem.pva)) {
+		dma_free_coherent(&pdev->dev, SZ_32M, drv_ctx->bar2_self_mem.pva,
+				  drv_ctx->bar2_self_mem.dma_handle);
+		drv_ctx->bar2_self_mem.pva = NULL;
+	}
 	comm_channel_unregister_msg_cb(drv_ctx->comm_channel_h,
 				       COMM_MSG_TYPE_SHUTDOWN);
 	comm_channel_unregister_msg_cb(drv_ctx->comm_channel_h,
@@ -886,14 +923,6 @@ nvscic2c_pcie_epf_bind(struct pci_epf *epf)
 		goto err_register_msg;
 	}
 
-	if (drv_ctx->chip_id == TEGRA264) {
-		ret = get_msi_data(drv_ctx, pdev);
-		if (ret != 0) {
-			pr_err("failed in fetching MSI data with : %d\n", ret);
-			goto err_get_msi;
-		}
-	}
-
 	/* BAR:0 settings. - done here to save time in CORE_INIT.*/
 	epf_bar = &epf->bar[drv_ctx->bar];
 	epf_bar->phys_addr = drv_ctx->self_mem.dma_handle;
@@ -916,10 +945,9 @@ nvscic2c_pcie_epf_bind(struct pci_epf *epf)
 			pr_err("dma_alloc failed for BAR2\n");
 			goto err_bar2_alloc;
 		}
-		drv_ctx->bar2_self_mem.phys_addr = virt_to_phys(drv_ctx->bar2_self_mem.pva);
 		epf_bar = &epf->bar[BAR_2];
 		epf_bar->phys_addr = drv_ctx->bar2_self_mem.dma_handle;
-		epf_bar->addr = drv_ctx->bar2_self_mem.pva;
+		epf_bar->addr = NULL;
 		epf_bar->size = SZ_32M;
 		epf_bar->barno = BAR_2;
 		epf_bar->flags |= PCI_BASE_ADDRESS_MEM_TYPE_64 | PCI_BASE_ADDRESS_MEM_PREFETCH;
@@ -950,9 +978,9 @@ err_core_init:
 err_get_features:
 	dma_free_coherent(&pdev->dev, SZ_32M, drv_ctx->bar2_self_mem.pva,
 			  drv_ctx->bar2_self_mem.dma_handle);
+	drv_ctx->bar2_self_mem.pva = NULL;
+
 err_bar2_alloc:
-	free_msi_data(drv_ctx, pdev);
-err_get_msi:
 err_register_msg:
 	comm_channel_deinit(&drv_ctx->comm_channel_h);
 
@@ -1082,6 +1110,9 @@ nvscic2c_pcie_epf_probe(struct pci_epf *epf)
 
 	/* to check if shutdown message response required. */
 	atomic_set(&epf_ctx->shutdown_msg_received, 0);
+
+	/* to initialize lock management in deinit */
+	atomic_set(&drv_ctx->epf_ctx->lock_status, 0);
 
 	return ret;
 

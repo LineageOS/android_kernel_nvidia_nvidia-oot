@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2011-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2011-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * Interface with nvmap carveouts
  */
@@ -30,9 +30,11 @@ extern const struct file_operations debug_device_list_fops;
 
 int nvmap_create_carveout(const struct nvmap_platform_carveout *co)
 {
-	int i, err = 0, index_free_from = -1, index_free_to = 0;
+	int i, err = 0;
 	struct nvmap_carveout_node **node_ptr;
 	struct nvmap_carveout_node *node;
+	size_t size_tmp;
+	phys_addr_t base_tmp;
 
 	mutex_lock(&nvmap_dev->carveout_lock);
 	if (!nvmap_dev->heaps) {
@@ -44,8 +46,9 @@ int nvmap_create_carveout(const struct nvmap_platform_carveout *co)
 		else
 			nr_heaps = 1;
 
-		nvmap_dev->heaps = kcalloc(nr_heaps, sizeof(struct nvmap_carveout_node *),
-					GFP_KERNEL);
+		nvmap_dev->heaps = devm_kcalloc(nvmap_dev->dev, nr_heaps,
+						sizeof(struct nvmap_carveout_node *),
+						GFP_KERNEL);
 		if (!nvmap_dev->heaps) {
 			err = -ENOMEM;
 			pr_err("couldn't allocate carveout memory\n");
@@ -53,19 +56,18 @@ int nvmap_create_carveout(const struct nvmap_platform_carveout *co)
 		}
 
 		for (i = 0; i < nr_heaps; i++) {
-			nvmap_dev->heaps[i] = kzalloc(sizeof(struct nvmap_carveout_node),
-						GFP_KERNEL);
+			nvmap_dev->heaps[i] = devm_kzalloc(nvmap_dev->dev,
+							   sizeof(struct nvmap_carveout_node),
+							   GFP_KERNEL);
 			if (!nvmap_dev->heaps[i]) {
-				index_free_from = i - 1;
-				index_free_to = 0;
 				err = -ENOMEM;
-				goto free_mem;
+				goto out;
 			}
 		}
 
 		nvmap_dev->nr_heaps = nr_heaps;
 	} else if (nvmap_dev->nr_carveouts >= nvmap_dev->nr_heaps) {
-		node_ptr = krealloc(nvmap_dev->heaps,
+		node_ptr = devm_krealloc(nvmap_dev->dev, nvmap_dev->heaps,
 				sizeof(struct nvmap_carveout_node *) *
 				(nvmap_dev->nr_carveouts + 1),
 				GFP_KERNEL);
@@ -77,13 +79,12 @@ int nvmap_create_carveout(const struct nvmap_platform_carveout *co)
 
 		nvmap_dev->heaps = node_ptr;
 		for (i = nvmap_dev->nr_heaps; i < nvmap_dev->nr_carveouts + 1; i++) {
-			nvmap_dev->heaps[i] = kzalloc(sizeof(struct nvmap_carveout_node),
-						GFP_KERNEL);
+			nvmap_dev->heaps[i] = devm_kzalloc(nvmap_dev->dev,
+							   sizeof(struct nvmap_carveout_node),
+							   GFP_KERNEL);
 			if (!nvmap_dev->heaps[i]) {
-				index_free_from = i - 1;
-				index_free_to = nvmap_dev->nr_heaps;
 				err = -ENOMEM;
-				goto free_mem;
+				goto out;
 			}
 		}
 
@@ -103,8 +104,17 @@ int nvmap_create_carveout(const struct nvmap_platform_carveout *co)
 	node = nvmap_dev->heaps[nvmap_dev->nr_carveouts];
 
 	node->base = round_up(co->base, PAGE_SIZE);
-	node->size = round_down(co->size -
-				(node->base - co->base), PAGE_SIZE);
+	if (check_sub_overflow(node->base, (phys_addr_t)co->base, &base_tmp)) {
+		err = -EOVERFLOW;
+		goto out;
+	}
+
+	if (check_sub_overflow(co->size, (size_t)base_tmp, &size_tmp)) {
+		err = -EOVERFLOW;
+		goto out;
+	}
+
+	node->size = round_down(size_tmp, PAGE_SIZE);
 	if (co->size == 0)
 		goto out;
 
@@ -167,16 +177,6 @@ int nvmap_create_carveout(const struct nvmap_platform_carveout *co)
 		}
 	}
 out:
-	mutex_unlock(&nvmap_dev->carveout_lock);
-	return err;
-
-free_mem:
-	for (i = index_free_from; i >= index_free_to; i--)
-		kfree(nvmap_dev->heaps[i]);
-
-	if (index_free_to == 0)
-		kfree(nvmap_dev->heaps);
-
 	mutex_unlock(&nvmap_dev->carveout_lock);
 	return err;
 }

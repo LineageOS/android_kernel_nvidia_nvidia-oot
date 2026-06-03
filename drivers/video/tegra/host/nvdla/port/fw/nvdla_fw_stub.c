@@ -62,7 +62,22 @@ int32_t nvdla_fw_interrupt_stat_read(struct platform_device *pdev,
 	return -1;
 }
 
+int32_t nvdla_fw_interrupt_stat_read_mnoc(struct platform_device *pdev,
+	int32_t *stat)
+{
+	(void) pdev;
+
+	return -1;
+}
+
 int32_t nvdla_fw_interrupt_stat_clear(struct platform_device *pdev)
+{
+	(void) pdev;
+
+	return -1;
+}
+
+int32_t nvdla_fw_interrupt_stat_clear_mnoc(struct platform_device *pdev)
 {
 	(void) pdev;
 
@@ -77,6 +92,22 @@ int32_t nvdla_fw_inject_corrected_error(struct platform_device *pdev)
 }
 
 int32_t nvdla_fw_inject_uncorrected_error(struct platform_device *pdev)
+{
+	(void) pdev;
+
+	return -1;
+}
+
+int32_t nvdla_fw_update_response_stats(struct platform_device *pdev,
+	uint32_t error_status)
+{
+	(void) pdev;
+
+	return -1;
+}
+
+int32_t nvdla_fw_update_response_stats_mnoc(struct platform_device *pdev,
+	uint32_t error_status)
 {
 	(void) pdev;
 

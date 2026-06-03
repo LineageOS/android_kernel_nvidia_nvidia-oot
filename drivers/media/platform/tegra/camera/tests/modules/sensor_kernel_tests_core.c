@@ -1,9 +1,7 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-FileCopyrightText: Copyright (c) 2018-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 /*
  * sensor_kernel_tests_core - sensor kernel tests module core
- *
- * Copyright (c) 2018-2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- *
  */
 
 #include <linux/err.h>
@@ -11,7 +9,6 @@
 #include <linux/jiffies.h>
 #include <linux/module.h>
 #include <linux/skbuff.h>
-#include <linux/version.h>
 #include <linux/wait.h>
 #include <linux/workqueue.h>
 #include <net/netlink.h>

@@ -23,7 +23,13 @@
  * @{
  */
 #define DLA_ENGINE_ID		0x44U
+
+// Rx size in bytes.
+#define DLA_MNOC_MSG_RX_SIZE_IN_BYTES   8U
+
 /** @} */
+
+#define DLA_MAX_MNOC_MESSAGE_SIZE 8U
 
 /**
  * @ingroup Command
@@ -33,6 +39,59 @@
  * @{
  */
 #define DLA_METHOD_ID_CMD_MASK		0xffU
+enum dla_submit_cmd_mask {
+	/**
+	 * Command ID (7:0)
+	 */
+	DLA_SUBMIT_CMD_ID_MASK			= 0xffU,
+	/**
+	 * Command interrupt on complete (8:8)
+	 */
+	DLA_SUBMIT_CMD_INTR_ON_COMPLETE_MASK	= 0x1U,
+	/**
+	 * Command interrupt on complete (9:9)
+	 */
+	DLA_SUBMIT_CMD_INTR_ON_ERROR_MASK	= 0x1U,
+	/**
+	 * Command context mode (10:10)
+	 */
+	DLA_SUBMIT_CMD_CTX_ENABLE_MASK		= 0x1U,
+	/**
+	 * Command response through context port (11:11)
+	 */
+	DLA_SUBMIT_CMD_CTX_RESPONSE_ENABLE_MASK	= 0x1U,
+	/**
+	 * Command context ID (14:12)
+	 */
+	DLA_SUBMIT_CMD_CTX_ID_MASK		= 0x3U,
+};
+
+enum dla_submit_cmd_shift {
+	/**
+	 * Command ID (7:0)
+	 */
+	DLA_SUBMIT_CMD_ID_SHIFT			= 0U,
+	/**
+	 * Command interrupt on complete (8:8)
+	 */
+	DLA_SUBMIT_CMD_INTR_ON_COMPLETE_SHIFT	= 8U,
+	/**
+	 * Command interrupt on complete (9:9)
+	 */
+	DLA_SUBMIT_CMD_INTR_ON_ERROR_SHIFT	= 9U,
+	/**
+	 * Command context mode (10:10)
+	 */
+	DLA_SUBMIT_CMD_CTX_ENABLE_SHIFT		= 10U,
+	/**
+	 * Command response through context port (11:11)
+	 */
+	DLA_SUBMIT_CMD_CTX_RESPONSE_ENABLE_SHIFT    = 11U,
+	/**
+	 * Command context ID (14:12)
+	 */
+	DLA_SUBMIT_CMD_CTX_ID_SHIFT		= 12U,
+};
 /** @} */
 
 /**
@@ -43,17 +102,25 @@
  */
 enum dla_response_mask {
 	/**
-	 * Response Message Mask
+	 * Response Message Mask (7:0)
 	 */
 	DLA_RESPONSE_MSG_MASK		= 0xffU,
 	/**
-	 * Response Command Mask
+	 * Response Command Mask (15:8)
 	 */
 	DLA_RESPONSE_CMD_MASK		= 0xffU,
 	/**
-	 * Response Error Mask
+	 * Response Error Mask (23:16)
 	 */
 	DLA_RESPONSE_ERROR_MASK		= 0xffU,
+	/**
+	 * Context ID (30:28)
+	 */
+	DLA_RESPONSE_CTX_ID_MASK	= 0x3U,
+	/**
+	 * Command corresponds to context (31:31)
+	 */
+	DLA_RESPONSE_CTX_ENABLE_MASK	= 0x1U,
 };
 
 /**
@@ -64,17 +131,25 @@ enum dla_response_mask {
  */
 enum dla_response_shift {
 	/**
-	 * Response Message Shift
+	 * Response Message Shift (7:0)
 	 */
 	DLA_RESPONSE_MSG_SHIFT		= 0U,
 	/**
-	 * Response Command Shift
+	 * Response Command Shift (15:8)
 	 */
 	DLA_RESPONSE_CMD_SHIFT		= 8U,
 	/**
-	 * Response Error Shift
+	 * Response Error Shift (23:16)
 	 */
 	DLA_RESPONSE_ERROR_SHIFT	= 16U,
+	/**
+	 * Context ID (30:28)
+	 */
+	DLA_RESPONSE_CTX_ID_SHIFT	= 28U,
+	/**
+	 * Response corresponds to context (31:31)
+	 */
+	DLA_RESPONSE_CTX_ENABLE_SHIFT	= 31U,
 };
 
 /**
@@ -186,6 +261,14 @@ enum dla_commands {
 	 * Gets dvfs statdump
 	 */
 	DLA_CMD_GET_STATISTICS2			= 20U,
+	/**
+	 * Sets dvfs config
+	 */
+	DLA_CMD_SET_DVFS_CONFIG			= 21U,
+	/**
+	 * Gets dvfs config
+	 */
+	DLA_CMD_GET_DVFS_CONFIG			= 22U,
 	/**
 	 * Sets LPWR config
 	 */
@@ -314,6 +397,54 @@ struct dla_lpwr_config {
 	uint8_t idle_notification_enable;
 	uint32_t idledelay_us;
 	uint8_t reserved[34];
+} __packed __aligned(4);
+
+struct dla_dvfs_config {
+#define DLA_DVFS_VERSION 1U
+	uint8_t version;
+
+#define DLA_DVFS_MODE_DISABLE 0U
+#define DLA_DVFS_MODE_ROUNDROBIN 1U
+#define DLA_DVFS_MODE_DVFS 2U
+	uint8_t mode;
+
+#define DLA_DVFS_PERIODICITY_MS_MIN 2U
+	uint32_t periodicity_ms;
+
+#define DLA_DVFS_FREQ_LIST_MAX 10U
+	uint32_t num_roundrobin_freqs;
+	uint32_t roundrobin_freq_kHz[DLA_DVFS_FREQ_LIST_MAX];
+
+#define DLA_DVFS_TELEMETRY_DISABLE 0U
+#define DLA_DVFS_TELEMETRY_ENABLE 1U
+	uint8_t telemetry_enable;
+
+#define DLA_DVFS_PRIORITY_MIN 0U
+#define DLA_DVFS_PRIORITY_MAX 31U
+	uint8_t priority;
+	uint8_t pri_lookahead0;
+	uint8_t pri_lookahead1;
+	uint32_t pri_hyst;
+	uint8_t mem_stall_lvl2freq_throttle_no;
+	uint8_t mem_stall_lvl2freq_throttle_low;
+	uint8_t mem_stall_lvl2freq_throttle_med;
+	uint8_t mem_stall_lvl2freq_throttle_high;
+	uint32_t mem_stall_thresh1;
+	uint32_t mem_stall_thresh2;
+	uint32_t mem_stall_thresh3;
+	uint32_t arb_freq_weight0;
+	uint32_t arb_freq_weight1;
+	uint32_t arb_freq_weight2;
+#define DVFS_POLICY_MAX 0U
+#define DVFS_POLICY_WEIGHTED_AVG 1U
+	uint8_t arb_policy_selection;
+	uint8_t util2freq_index_lo_util;
+	uint8_t util2freq_index_hi_util;
+	uint8_t util_thresh_lo_util;
+	uint8_t util_thresh_hi_util;
+#define DLA_DVFS_PRI2FREQ_MAX_NUM_ENTRIES 32U
+	uint32_t pri2freq[DLA_DVFS_PRI2FREQ_MAX_NUM_ENTRIES];
+	uint8_t reserved[33];
 } __packed __aligned(4);
 
 /**
@@ -506,6 +637,71 @@ static inline uint32_t dla_response(uint32_t msg, uint32_t cmd, uint32_t error)
 	return ((msg & (uint32_t)DLA_RESPONSE_MSG_MASK) |
 		(cmd << (uint32_t)DLA_RESPONSE_CMD_SHIFT) |
 		(error << (uint32_t)DLA_RESPONSE_ERROR_SHIFT));
+}
+
+static inline uint32_t dla_ctx_response(uint32_t msg, uint32_t cmd,
+	uint32_t error,
+	uint32_t ctx_id,
+	bool context)
+{
+	uint32_t response = 0U;
+
+	response |= ((msg & DLA_RESPONSE_MSG_MASK) <<
+				DLA_RESPONSE_MSG_SHIFT);
+	response |= ((cmd & DLA_RESPONSE_CMD_MASK) <<
+				DLA_RESPONSE_CMD_SHIFT);
+	response |= ((error & DLA_RESPONSE_ERROR_MASK) <<
+				DLA_RESPONSE_ERROR_SHIFT);
+	if (context) {
+		response |= ((ctx_id & DLA_RESPONSE_CTX_ID_MASK) <<
+					DLA_RESPONSE_CTX_ID_SHIFT);
+		response |= ((0x1 & DLA_RESPONSE_CTX_ENABLE_MASK) <<
+					DLA_RESPONSE_CTX_ENABLE_SHIFT);
+	}
+
+	return response;
+}
+
+static inline uint32_t dla_ctx_submit_cmd(uint32_t cmd_id,
+	bool intr_on_complete,
+	bool intr_on_error,
+	bool context_reply,
+	uint32_t ctx_id,
+	bool context)
+{
+	uint32_t submit_cmd = 0U;
+
+	submit_cmd |= ((cmd_id & DLA_SUBMIT_CMD_ID_MASK) <<
+					DLA_SUBMIT_CMD_ID_SHIFT);
+
+	if (intr_on_complete) {
+		submit_cmd |=
+			((0x1 & DLA_SUBMIT_CMD_INTR_ON_COMPLETE_MASK) <<
+				DLA_SUBMIT_CMD_INTR_ON_COMPLETE_SHIFT);
+	}
+
+	if (intr_on_complete) {
+		submit_cmd |=
+			((0x1 & DLA_SUBMIT_CMD_INTR_ON_ERROR_MASK) <<
+				DLA_SUBMIT_CMD_INTR_ON_ERROR_SHIFT);
+	}
+
+	if (context) {
+		submit_cmd |=
+			((ctx_id & DLA_SUBMIT_CMD_CTX_ID_MASK) <<
+				DLA_SUBMIT_CMD_CTX_ID_SHIFT);
+		submit_cmd |=
+			((0x1 & DLA_SUBMIT_CMD_CTX_ENABLE_MASK) <<
+				DLA_SUBMIT_CMD_CTX_ENABLE_SHIFT);
+	}
+
+	if (context_reply) {
+		submit_cmd |=
+			((0x1 & DLA_SUBMIT_CMD_CTX_RESPONSE_ENABLE_MASK) <<
+				DLA_SUBMIT_CMD_CTX_RESPONSE_ENABLE_SHIFT);
+	}
+
+	return submit_cmd;
 }
 
 static inline uint32_t dla_command(uint32_t method_id)

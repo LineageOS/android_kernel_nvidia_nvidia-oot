@@ -1,13 +1,12 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Copyright (c) 2015-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2015-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  */
 
 #ifndef __ISC_MGR_PRIV_H__
 #define __ISC_MGR_PRIV_H__
 
 #include <linux/cdev.h>
-#include <linux/version.h>
 
 struct isc_mgr_priv {
 	struct device *pdev; /* parent device */

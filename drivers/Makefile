@@ -9,6 +9,7 @@ LINUXINCLUDE += -I$(srctree.hwpm)/include
 obj-m += block/tegra_virt_storage/
 ifdef CONFIG_PSTORE
 obj-m += block/tegra_oops_virt_storage/
+obj-m += block/tegra_oops_nvlog/
 endif
 ifdef CONFIG_BT
 ifneq ($(NV_OOT_REALTEK_BTUSB_SKIP_BUILD),y)
@@ -82,8 +83,14 @@ ifdef CONFIG_TEGRA_HOST1X
 obj-m += video/tegra/
 endif
 obj-m += virt/tegra/
+obj-m += ivc_sample_server/
 ifdef CONFIG_TEGRA_HOST1X
 obj-m += media/
 endif
 obj-m += nv-virtio/
 obj-m += usb/
+ifdef CONFIG_HID
+ifeq ($(CONFIG_TEGRA_SYSTEM_TYPE_ACK),y)
+obj-m += hid/
+endif
+endif

@@ -2098,7 +2098,7 @@ void rtw_free_assoc_resources(_adapter *adapter, u8 lock_scanned_queue)
 		rtw_init_self_stainfo(adapter, PHL_CMD_DIRECTLY);
 		/* _rtw_spinunlock_bh(&(pstapriv->sta_hash_lock)); */
 #ifdef CONFIG_RTW_FSM
-		rtw_fsm_notify_disconnect(&adapter->fsmpriv, psta);
+		rtw_fsm_notify_free_sta(&adapter->fsmpriv);
 #endif
 		pmlmeinfo->assoc_AP_vendor = HT_IOT_PEER_UNKNOWN;
 		rtw_update_phl_iot(adapter, HT_IOT_PEER_UNKNOWN);
@@ -2601,10 +2601,6 @@ void rtw_joinbss_event_prehandle(_adapter *adapter, u8 *pbuf, u16 status)
 	pmlmepriv->LinkDetectInfo.TrafficTransitionCount = 0;
 	pmlmepriv->LinkDetectInfo.LowPowerTransitionCount = 0;
 
-#ifdef CONFIG_RTW_FSM
-	rtw_fsm_notify_connect(&adapter->fsmpriv,
-		rtw_get_stainfo(pstapriv, pnetwork->network.MacAddress), pnetwork->join_res);
-#endif
 	if (pnetwork->join_res > 0) {
 		_rtw_spinlock_bh(&(pmlmepriv->scanned_queue.lock));
 		_rtw_spinlock_bh(&(pmlmepriv->scanned_mld_queue.lock));
@@ -2769,6 +2765,9 @@ ignore_joinbss_callback:
 	_rtw_spinunlock_bh(&pmlmepriv->lock);
 
 exit:
+#ifdef CONFIG_RTW_FSM
+	rtw_fsm_notify_connect(&adapter->fsmpriv, pnetwork->join_res);
+#endif
 	return;
 }
 
@@ -7127,6 +7126,9 @@ static enum phl_mdl_ret_code _disconnect_msg_hdlr(void* dispr, void* priv,
 	case MSG_EVT_DISCONNECT_END:
 		RTW_INFO(FUNC_ADPT_FMT ": MSG_EVT_DISCONNECT_END\n",
 						FUNC_ADPT_ARG(a));
+#ifdef CONFIG_RTW_FSM
+		rtw_fsm_notify_disconnect_end(&a->fsmpriv);
+#endif
 	#ifdef CONFIG_DBCC_P2P_BG_LISTEN
 		/*B0 GC disconnect*/
 		if (rtw_dbcc_chk_enable_hdl(a, PHL_CMD_DIRECTLY, DBCC_CHK_STA_DIS))

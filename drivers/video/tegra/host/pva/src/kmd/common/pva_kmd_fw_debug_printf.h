@@ -1,11 +1,10 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
+/* SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
 
 #ifndef PVA_KMD_FW_DEBUG_PRINTF_H
 #define PVA_KMD_FW_DEBUG_PRINTF_H
 #include "pva_api.h"
 #include "pva_fw.h"
-#include "pva_kmd_device.h"
 
 /**
  * @brief Structure for managing firmware print buffer access

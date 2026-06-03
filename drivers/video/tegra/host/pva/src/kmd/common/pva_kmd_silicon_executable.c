@@ -10,6 +10,7 @@
 #include "pva_kmd_t23x.h"
 #include "pva_kmd_t26x.h"
 #include "pva_math_utils.h"
+#include "pva_utils.h"
 
 /**
   *  enum to identify different segments of VPU ELF
@@ -240,12 +241,23 @@ update_exports_symbol(elf_parser_ctx elf,
 	uint32_t symOffset = 0U;
 	enum pva_error err = PVA_SUCCESS;
 	pva_math_error math_err = MATH_OP_SUCCESS;
+	uint32_t symbol_end;
+	uint32_t section_end;
 
-	if ((section_header == NULL) ||
-	    (symbol_info->vmem_addr < section_header->addr) ||
-	    (addu32(symbol_info->vmem_addr, (uint32_t)SIZE_EXPORTS_TABLE_ENTRY,
-		    &math_err) >
-	     addu32(section_header->addr, section_header->size, &math_err))) {
+	if (section_header == NULL) {
+		err = PVA_INVAL;
+		goto done;
+	}
+
+	/* Calculate symbol end address */
+	symbol_end = addu32(symbol_info->vmem_addr,
+			    (uint32_t)SIZE_EXPORTS_TABLE_ENTRY, &math_err);
+	/* Calculate section end address */
+	section_end =
+		addu32(section_header->addr, section_header->size, &math_err);
+
+	if ((symbol_info->vmem_addr < section_header->addr) ||
+	    (symbol_end > section_end)) {
 		err = PVA_INVAL;
 		goto done;
 	} else {
@@ -452,7 +464,13 @@ static void *copy_text_section(const elf_parser_ctx elf,
 		safe_pow2_roundup_u32(needed_size, TEXT_SECTION_ALIGNMENT);
 
 	if (needed_size > *buffer_size) {
-		out_buffer = pva_realloc(out_buffer, *buffer_size, needed_size);
+		void *new_out_buffer =
+			pva_realloc(out_buffer, *buffer_size, needed_size);
+		if (new_out_buffer == NULL) {
+			/* pva_realloc already freed out_buffer */
+			return NULL;
+		}
+		out_buffer = new_out_buffer;
 		*buffer_size = needed_size;
 	}
 
@@ -463,12 +481,13 @@ static void *copy_text_section(const elf_parser_ctx elf,
 	elf_data = elf_section_contents(elf, section_header);
 	if (elf_data == NULL) {
 		pva_kmd_log_err("copy_text_section elf_data error");
-		return NULL;
+		goto err_out;
 	}
 
 	word = (uint32_t const *)(void const *)elf_data;
 
-	ASSERT(((uintptr_t)(void *)out_buffer % sizeof(uint32_t)) == 0U);
+	/* MISRA 11.6: Use union-based helper for pointer-integer conversion */
+	ASSERT((pva_ptr_to_uintptr(out_buffer) % sizeof(uint32_t)) == 0U);
 	ASSERT((load_addr_bytes % sizeof(uint32_t)) == 0U);
 
 	/* Use byte pointer arithmetic to avoid INT36-C violation */
@@ -479,6 +498,10 @@ static void *copy_text_section(const elf_parser_ctx elf,
 	}
 
 	return out_buffer;
+
+err_out:
+	pva_kmd_free(out_buffer);
+	return NULL;
 }
 
 /**
@@ -555,7 +578,7 @@ static void copy_data_section(const elf_parser_ctx elf,
 
 	ASSERT(elf_data != NULL);
 
-	(void)memcpy(dst, elf_data, section_header->size);
+	(void)memcpy(dst, (const void *)elf_data, section_header->size);
 
 	*buffer_offset = safe_addu32(*buffer_offset, aligned_size);
 }
@@ -740,7 +763,7 @@ load_metainfo(struct pva_kmd_device *pva, uint64_t section_iova,
 	dev_mem = pva_kmd_device_memory_alloc_map(
 		alloc_size, pva, PVA_ACCESS_RO, PVA_R5_SMMU_CONTEXT_ID);
 	if (dev_mem == NULL) {
-		goto out;
+		goto err_out;
 	}
 
 	metainfo = dev_mem->va;
@@ -769,8 +792,7 @@ load_metainfo(struct pva_kmd_device *pva, uint64_t section_iova,
 		mulu32(n_data_sections, (uint32_t)sizeof(*section_infos),
 		       &math_err));
 	if (math_err != MATH_OP_SUCCESS) {
-		dev_mem = NULL;
-		goto out;
+		goto free_dev_mem;
 	}
 
 	for (i = 0; i < n_symbols; i++) {
@@ -782,8 +804,12 @@ load_metainfo(struct pva_kmd_device *pva, uint64_t section_iova,
 		vmem_buffers_mem[i].size = symbol_table[i].size;
 	}
 
-out:
 	return dev_mem;
+
+free_dev_mem:
+	pva_kmd_device_memory_free(dev_mem);
+err_out:
+	return NULL;
 }
 
 /**

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
-//
-// SPDX-FileCopyrightText: Copyright (c) 2021-2024 NVIDIA CORPORATION. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2021-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+
+#include <nvidia/conftest.h>
 
 #include <linux/module.h>
 #include <linux/platform_device.h>
@@ -236,7 +237,11 @@ int tegra_virt_t210mixer_set_adder_config(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
 {
 	struct snd_soc_dapm_context *dapm =
+#if defined(NV_SND_SOC_DAPM_KCONTROL_TO_DAPM) /* Linux v7.0 */
+		snd_soc_dapm_kcontrol_to_dapm(kcontrol);
+#else
 		snd_soc_dapm_kcontrol_dapm(kcontrol);
+#endif
 	struct soc_mixer_control *mc =
 		(struct soc_mixer_control *)kcontrol->private_value;
 	int32_t reg = mc->reg;

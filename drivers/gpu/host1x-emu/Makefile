@@ -6,11 +6,21 @@ ifeq ($(NV_BUILD_CONFIGURATION_EMU_SYNCPT),1)
 ccflags-y += -DHOST1X_EMU_HYPERVISOR
 endif
 
+#Enable Syncpoint save and restore during suspemd/resume.
+#This functionality is not required if syncpoint-mem is allocated from DRAM.
+#ccflags-y += -DHOST1X_EMU_PM_SYNCPT_SAVE_RESTORE
+
+#Enable Enable fence scanning on SyncpointIncr
+ccflags-y += -DHOST1X_EMU_SYNC_INC_FENCE_SCAN
+
 #Enable Tasklet based fence scanning in SyncpointIncr
-#ccflags-y += -DHOST1X_EMU_SYNC_INC_TASKLET
+#ccflags-y += -DHOST1X_EMU_SYNC_INC_FENCE_SCAN_TASKLET
 
 # Enable KThread based fence scanning
 ccflags-y += -DHOST1X_EMU_KTHREAD_FENCE_SCAN
+
+# Enable High Priority Workqueue based fence scanning
+#ccflags-y += -DHOST1X_EMU_KTHREAD_HIGHPRI_WQ
 
 # Enable HRTimer based fence scanning
 ccflags-y += -DHOST1X_EMU_HRTIMER_FENCE_SCAN
@@ -19,10 +29,8 @@ ccflags-y += -DHOST1X_EMU_HRTIMER_FENCE_SCAN
 # to co-exits with "Host1x" driver by exporting modified kernel symbol.
 ccflags-y += -DCONFIG_TEGRA_HOST1X_EMU_DBG_SYMBL
 
-ifeq ($(NV_BUILD_CONFIGURATION_EXPOSING_T26X), 1)
 # Enable debug
-CONFIG_TEGRA_HOST1X_EMU_SYNCPT_DEBUG := 1
-endif
+#CONFIG_TEGRA_HOST1X_EMU_SYNCPT_DEBUG := 1
 
 LINUXINCLUDE += -I$(srctree.nvidia-oot)/drivers/gpu/host1x-emu/include
 LINUXINCLUDE += -I$(srctree.nvidia-oot)/drivers/gpu/host1x-fence/include
@@ -40,7 +48,7 @@ ifdef CONFIG_TEGRA_HOST1X_EMU_SYNCPT_DEBUG
 host1x-emu-y += \
 	debug.o
 
-ccflags-y += -DHOST1X_EMU_SYNCPT_DEGUB
+ccflags-y += -DHOST1X_EMU_SYNCPT_DEBUG
 endif
 
 obj-m := host1x-emu.o

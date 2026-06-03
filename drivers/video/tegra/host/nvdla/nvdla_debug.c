@@ -16,6 +16,7 @@
 #include "dla_os_interface.h"
 #include "nvdla.h"
 #include "nvdla_debug.h"
+#include "dla_t25x_fw_version.h"
 #include "port/nvdla_fw.h"
 #include "port/nvdla_device.h"
 #include "port/nvdla_pm.h"
@@ -47,6 +48,87 @@ struct nvdla_debug_ctrl {
 
 	struct list_head list;
 };
+
+#define DLA_PRETTYCONFIG_KEY_MAX_LEN 256U
+struct prettyconfig {
+	char key[DLA_PRETTYCONFIG_KEY_MAX_LEN];
+	uint32_t nvalues;
+	char values[DLA_PRETTYCONFIG_KEY_MAX_LEN][DLA_DVFS_FREQ_LIST_MAX];
+};
+
+static int32_t parse_pretty_config(struct platform_device *pdev,
+		char *user_value, struct prettyconfig *prettyconfig)
+{
+	char *sep;
+	char *value;
+	char *next_val;
+	uint32_t value_count = 0;
+	uint32_t keylen;
+
+	// Input validation
+	if (!user_value || !prettyconfig) {
+		nvdla_dbg_err(pdev, "NULL input parameters\n");
+		return -EINVAL;
+	}
+
+	// Find the separator '='
+	sep = strchr(user_value, '=');
+	if (!sep || sep == user_value) {
+		nvdla_dbg_err(pdev, "invalid format, expect key=value1,value2,...\n");
+		return -EINVAL;
+	}
+
+	// Copy key (everything before '=')
+	keylen = sep - user_value;
+	if (keylen >= sizeof(prettyconfig->key)) {
+		nvdla_dbg_err(pdev, "key too long\n");
+		return -EINVAL;
+	}
+	memcpy(prettyconfig->key, user_value, keylen);
+	prettyconfig->key[keylen] = '\0';
+
+	// Move to first value
+	value = sep + 1;
+	if (!*value) {
+		nvdla_dbg_err(pdev, "no values after '='\n");
+		return -EINVAL;
+	}
+
+	// Parse comma-separated values
+	while (value && value_count < DLA_DVFS_FREQ_LIST_MAX) {
+		// Find next comma
+		next_val = strchr(value, ',');
+		if (next_val) {
+			*next_val = '\0';
+			next_val++;
+		}
+
+		// Skip empty values
+		if (*value == '\0') {
+			value = next_val;
+			continue;
+		}
+
+		// Copy value
+		if (strlen(value) >= sizeof(prettyconfig->values[0])) {
+			nvdla_dbg_err(pdev, "value too long: '%s'\n", value);
+			return -EINVAL;
+		}
+		strncpy(prettyconfig->values[value_count], value, strlen(value));
+		prettyconfig->values[value_count][strlen(value)] = '\0';
+		value_count++;
+
+		value = next_val;
+	}
+
+	if (value_count == 0) {
+		nvdla_dbg_err(pdev, "no valid values found\n");
+		return -EINVAL;
+	}
+
+	prettyconfig->nvalues = value_count;
+	return 0;
+}
 
 static struct nvdla_debug_ctrl *s_nvdla_debug_ctrl_get_by_pdev(
 	struct platform_device *pdev)
@@ -515,6 +597,120 @@ static int debug_dla_fw_ping_show(struct seq_file *s, void *data)
 }
 
 // fw dvfs show functions
+static int debug_dla_fw_dvfs_prettyconfig_show(struct seq_file *s, void *data)
+{
+	int err;
+	struct platform_device *pdev;
+	struct dla_dvfs_config config;
+	uint32_t i;
+	(void) data;
+
+	err = s_nvdla_get_pdev_from_seq(s, &pdev);
+	if (err < 0)
+		return -1;
+
+	err = nvdla_pm_get_dvfs_config(pdev, &config);
+	if (err < 0) {
+		nvdla_dbg_err(pdev, "Failed to get DVFS config");
+		return err;
+	}
+
+	/* Basic config */
+	seq_printf(s, "mode                        : %u\n", config.mode);
+	seq_printf(s, "roundrobin_interval_ms      : %u\n", config.periodicity_ms);
+	seq_printf(s, "telemetry_enable            : %u\n", config.telemetry_enable);
+	seq_printf(s, "default_priority            : %u\n", config.priority);
+
+	/* Round robin config */
+	seq_puts(s, "roundrobin_freq_kHz         : ");
+	for (i = 0; i < config.num_roundrobin_freqs; i++) {
+		seq_printf(s, "%u", config.roundrobin_freq_kHz[i]);
+		if (i < config.num_roundrobin_freqs - 1)
+			seq_puts(s, ", ");
+	}
+	seq_puts(s, "\n");
+
+	/* Priority config */
+	seq_printf(s, "pri_lookahead0              : %u\n", config.pri_lookahead0);
+	seq_printf(s, "pri_lookahead1              : %u\n", config.pri_lookahead1);
+	seq_printf(s, "pri_hyst                    : %u\n", config.pri_hyst);
+
+	/* Memory stall config*/
+	seq_printf(s, "mem_stall_thresholds        : %u, %u, %u\n",
+		config.mem_stall_thresh1,
+		config.mem_stall_thresh2,
+		config.mem_stall_thresh3);
+
+	seq_printf(s, "mem_stall_lvl2freq_throttle : %u, %u, %u, %u\n",
+		config.mem_stall_lvl2freq_throttle_no,
+		config.mem_stall_lvl2freq_throttle_low,
+		config.mem_stall_lvl2freq_throttle_med,
+		config.mem_stall_lvl2freq_throttle_high);
+
+	/* Arbitration config */
+	seq_printf(s, "arb_freq_weights            : %u, %u, %u\n",
+		config.arb_freq_weight0,
+		config.arb_freq_weight1,
+		config.arb_freq_weight2);
+	seq_printf(s, "arb_policy                  : %u\n", config.arb_policy_selection);
+
+	/* Utilization config */
+	seq_printf(s, "util2freq_indices           : %u, %u\n",
+		config.util2freq_index_lo_util,
+		config.util2freq_index_hi_util);
+	seq_printf(s, "util_thresholds             : %u, %u\n",
+		config.util_thresh_lo_util,
+		config.util_thresh_hi_util);
+
+	return 0;
+}
+
+static int debug_dla_fw_dvfs_prettyconfig_help_show(struct seq_file *s, void *data)
+{
+	int err;
+	struct platform_device *pdev;
+	(void) data;
+
+	err = s_nvdla_get_pdev_from_seq(s, &pdev);
+	if (err < 0)
+		return -1;
+
+	seq_puts(s, "\n\n\t\tDVFS Pretty Config Help\n");
+	seq_puts(s, "\tUsage: echo -n key=value1,value2,... >"
+		"/sys/kernel/debug/nvdla0/firmware/dvfs/prettyconfig\n\n");
+	seq_puts(s, "\tKeys:\n");
+	seq_puts(s, "\tmode                        : "
+		"0=Disable, 1=RoundRobin, 2=DVFS\n");
+	seq_puts(s, "\troundrobin_interval_ms      : "
+		"Time in ms (min 2ms)\n");
+	seq_puts(s, "\troundrobin_freq_khz         : "
+		"Comma-separated frequencies (max 10)\n");
+	seq_puts(s, "\ttelemetry_enable            : "
+		"0=Off, 1=On, DVFS telemetry\n");
+	seq_puts(s, "\tdefault_priority            : "
+		"0-31 default priority\n");
+	seq_puts(s, "\tpri_lookahead0              : "
+		"Initial lookahead num networks\n");
+	seq_puts(s, "\tpri_lookahead1              : "
+		"After 2ms lookahead num networks\n");
+	seq_puts(s, "\tpri_hyst                    : "
+		"Hysteresis (num of DVFS loop cycles to lookback)\n");
+	seq_puts(s, "\tmem_stall_thresholds        : "
+		"mem_stall_thresh1, mem_stall_thresh2, mem_stall_thresh3\n");
+	seq_puts(s, "\tmem_stall_lvl2freq_throttle : "
+		"no, low, med, high throttle values (in ascending order)\n");
+	seq_puts(s, "\tarb_freq_weights            : "
+		"freq_pri_wt0, freq_stall_wt1, freq_util_wt2 (sum to 100)\n");
+	seq_puts(s, "\tarb_policy                  : "
+		"0=Max, 1=WeightedAvg\n");
+	seq_puts(s, "\tutil2freq_indices           : "
+		"util2freq_index_lo_util, util2freq_index_hi_util\n");
+	seq_puts(s, "\tutil_thresholds             : "
+		"util_thresh_lo_util, util_thresh_hi_util\n");
+
+	return 0;
+}
+
 static int debug_dla_fw_dvfs_mode_show(struct seq_file *s, void *data)
 {
 	int err;
@@ -1605,6 +1801,348 @@ fail:
 	return -1;
 }
 
+#define NVDLA_DEBUG_PRETTYCONFIG_MAX_LEN (256U * 12U)
+static ssize_t debug_dla_fw_dvfs_prettyconfig_write(struct file *file,
+		const char __user *buffer, size_t count, loff_t *off)
+{
+	int err;
+	struct platform_device *pdev;
+	char *user_data = NULL;
+	int user_data_length;
+	struct prettyconfig *dvfs_prettyconfig = NULL;
+	struct dla_dvfs_config *dvfs_config = NULL;
+
+	err = s_nvdla_get_pdev_from_file(file, &pdev);
+	if (err < 0) {
+		nvdla_dbg_err(pdev, "Failed to get platform device\n");
+		return err;
+	}
+
+	user_data = kzalloc(NVDLA_DEBUG_PRETTYCONFIG_MAX_LEN, GFP_KERNEL);
+	if (!user_data) {
+		err = -ENOMEM;
+		goto fail;
+	}
+
+	dvfs_prettyconfig = kzalloc(sizeof(*dvfs_prettyconfig), GFP_KERNEL);
+	if (!dvfs_prettyconfig) {
+		err = -ENOMEM;
+		goto fail;
+	}
+
+	dvfs_config = kzalloc(sizeof(*dvfs_config), GFP_KERNEL);
+	if (!dvfs_config) {
+		err = -ENOMEM;
+		goto fail;
+	}
+
+	user_data_length = simple_write_to_buffer(user_data,
+					(NVDLA_DEBUG_PRETTYCONFIG_MAX_LEN - 1U),
+					off,
+					buffer,
+					count);
+	user_data[user_data_length] = '\0';
+
+	nvdla_dbg_info(pdev, "received data: '%s'\n", user_data);
+
+	err = parse_pretty_config(pdev, user_data, dvfs_prettyconfig);
+	if (err < 0) {
+		nvdla_dbg_err(pdev, "parse_pretty_config failed: %d\n", err);
+		goto fail;
+	}
+
+	nvdla_dbg_info(pdev, "prettyconfig.key = %s\n", dvfs_prettyconfig->key);
+	nvdla_dbg_info(pdev, "prettyconfig.nvalues = %u\n", dvfs_prettyconfig->nvalues);
+	if (dvfs_prettyconfig->nvalues > 0) {
+		for (int i = 0; i < dvfs_prettyconfig->nvalues; i++)
+			nvdla_dbg_info(pdev, "prettyconfig.values[%d] = %s\n",
+							i, dvfs_prettyconfig->values[i]);
+	}
+
+	err = nvdla_pm_get_dvfs_config(pdev, dvfs_config);
+	if (err < 0) {
+		nvdla_dbg_err(pdev, "Failed to get config. err: %d", err);
+		goto fail;
+	}
+
+	if (strcmp(dvfs_prettyconfig->key, "mode") == 0) {
+		uint8_t mode;
+
+		err = kstrtou8(dvfs_prettyconfig->values[0], 10, &mode);
+		if (err < 0) {
+			nvdla_dbg_err(pdev, "Invalid dvfs mode value");
+			goto fail;
+		}
+		switch (mode) {
+		case DLA_DVFS_MODE_DISABLE:
+		case DLA_DVFS_MODE_ROUNDROBIN:
+		case DLA_DVFS_MODE_DVFS:
+			dvfs_config->mode = mode;
+			break;
+		default:
+			err = -EINVAL;
+			nvdla_dbg_err(pdev, "Invalid dvfs mode: %u", mode);
+			goto fail;
+		}
+	} else if (strcmp(dvfs_prettyconfig->key, "roundrobin_interval_ms") == 0) {
+		uint32_t periodicity_ms;
+
+		err = kstrtou32(dvfs_prettyconfig->values[0], 10, &periodicity_ms);
+		if (err < 0) {
+			nvdla_dbg_err(pdev, "Invalid roundrobin_periodicity_ms value");
+			goto fail;
+		}
+		if (periodicity_ms < DLA_DVFS_PERIODICITY_MS_MIN) {
+			err = -EINVAL;
+			nvdla_dbg_err(pdev, "Periodicity must be >= %u ms",
+				DLA_DVFS_PERIODICITY_MS_MIN);
+			goto fail;
+		}
+		dvfs_config->periodicity_ms = periodicity_ms;
+		nvdla_dbg_info(pdev, "periodicity_ms = %u\n", periodicity_ms);
+
+	} else if (strcmp(dvfs_prettyconfig->key, "roundrobin_freq_khz") == 0) {
+		uint32_t i;
+
+		if (dvfs_prettyconfig->nvalues > DLA_DVFS_FREQ_LIST_MAX) {
+			nvdla_dbg_err(pdev, "Too many frequencies specified");
+			goto fail;
+		}
+		dvfs_config->num_roundrobin_freqs = dvfs_prettyconfig->nvalues;
+		for (i = 0; i < dvfs_prettyconfig->nvalues; i++) {
+			err = kstrtou32(dvfs_prettyconfig->values[i], 10,
+				&dvfs_config->roundrobin_freq_kHz[i]);
+			if (err < 0) {
+				nvdla_dbg_err(pdev, "Invalid frequency value");
+				goto fail;
+			}
+			nvdla_dbg_info(pdev, "roundrobin_freq_kHz[%d] = %u\n",
+							i, dvfs_config->roundrobin_freq_kHz[i]);
+		}
+	} else if (strcmp(dvfs_prettyconfig->key, "telemetry_enable") == 0) {
+		uint8_t telemetry_enable;
+
+		err = kstrtou8(dvfs_prettyconfig->values[0], 10, &telemetry_enable);
+		if (err < 0) {
+			nvdla_dbg_err(pdev, "Invalid telemetry enable value");
+			goto fail;
+		}
+		switch (telemetry_enable) {
+		case DLA_DVFS_TELEMETRY_DISABLE:
+		case DLA_DVFS_TELEMETRY_ENABLE:
+			dvfs_config->telemetry_enable = telemetry_enable;
+			break;
+		default:
+			err = -EINVAL;
+			nvdla_dbg_err(pdev, "Invalid telemetry enable value");
+			goto fail;
+		}
+	} else if (strcmp(dvfs_prettyconfig->key, "default_priority") == 0) {
+		uint8_t priority;
+
+		err = kstrtou8(dvfs_prettyconfig->values[0], 10, &priority);
+		if (err < 0) {
+			nvdla_dbg_err(pdev, "Invalid priority value");
+			goto fail;
+		}
+		if (priority < DLA_DVFS_PRIORITY_MIN || priority > DLA_DVFS_PRIORITY_MAX) {
+			err = -EINVAL;
+			nvdla_dbg_err(pdev, "Priority must be between %u and %u",
+				DLA_DVFS_PRIORITY_MIN, DLA_DVFS_PRIORITY_MAX);
+			goto fail;
+		}
+		dvfs_config->priority = priority;
+	} else if (strcmp(dvfs_prettyconfig->key, "pri_lookahead0") == 0) {
+		uint8_t lookahead;
+
+		err = kstrtou8(dvfs_prettyconfig->values[0], 10, &lookahead);
+		if (err < 0) {
+			nvdla_dbg_err(pdev, "Invalid lookahead value");
+			goto fail;
+		}
+		dvfs_config->pri_lookahead0 = lookahead;
+	} else if (strcmp(dvfs_prettyconfig->key, "pri_lookahead1") == 0) {
+		uint8_t lookahead;
+
+		err = kstrtou8(dvfs_prettyconfig->values[0], 10, &lookahead);
+		if (err < 0) {
+			nvdla_dbg_err(pdev, "Invalid lookahead value");
+			goto fail;
+		}
+		dvfs_config->pri_lookahead1 = lookahead;
+	} else if (strcmp(dvfs_prettyconfig->key, "pri_hyst") == 0) {
+		uint32_t hyst;
+
+		err = kstrtou32(dvfs_prettyconfig->values[0], 10, &hyst);
+		if (err < 0) {
+			nvdla_dbg_err(pdev, "Invalid hysteresis value");
+			goto fail;
+		}
+		dvfs_config->pri_hyst = hyst;
+	} else if (strcmp(dvfs_prettyconfig->key, "mem_stall_thresholds") == 0) {
+		uint32_t thresh1, thresh2, thresh3;
+
+		if (dvfs_prettyconfig->nvalues != 3) {
+			nvdla_dbg_err(pdev, "Need 3 threshold values");
+			goto fail;
+		}
+		err = kstrtou32(dvfs_prettyconfig->values[0], 10, &thresh1);
+		if (err < 0)
+			goto fail;
+		err = kstrtou32(dvfs_prettyconfig->values[1], 10, &thresh2);
+		if (err < 0)
+			goto fail;
+		err = kstrtou32(dvfs_prettyconfig->values[2], 10, &thresh3);
+		if (err < 0)
+			goto fail;
+
+		if (thresh1 >= thresh2 || thresh2 >= thresh3) {
+			err = -EINVAL;
+			nvdla_dbg_err(pdev, "Thresholds must be in ascending order");
+			goto fail;
+		}
+
+		dvfs_config->mem_stall_thresh1 = thresh1;
+		dvfs_config->mem_stall_thresh2 = thresh2;
+		dvfs_config->mem_stall_thresh3 = thresh3;
+	} else if (strcmp(dvfs_prettyconfig->key, "mem_stall_lvl2freq_throttle") == 0) {
+		uint8_t throttle_no, throttle_low, throttle_med, throttle_high;
+
+		if (dvfs_prettyconfig->nvalues != 4) {
+			nvdla_dbg_err(pdev, "Need 4 throttle values");
+			goto fail;
+		}
+		err = kstrtou8(dvfs_prettyconfig->values[0], 10, &throttle_no);
+		if (err < 0)
+			goto fail;
+		err = kstrtou8(dvfs_prettyconfig->values[1], 10, &throttle_low);
+		if (err < 0)
+			goto fail;
+		err = kstrtou8(dvfs_prettyconfig->values[2], 10, &throttle_med);
+		if (err < 0)
+			goto fail;
+		err = kstrtou8(dvfs_prettyconfig->values[3], 10, &throttle_high);
+		if (err < 0)
+			goto fail;
+
+		if (throttle_no >= throttle_low || throttle_low >= throttle_med ||
+			throttle_med >= throttle_high) {
+			err = -EINVAL;
+			nvdla_dbg_err(pdev, "Throttle values must be in ascending order");
+			goto fail;
+		}
+
+		dvfs_config->mem_stall_lvl2freq_throttle_no = throttle_no;
+		dvfs_config->mem_stall_lvl2freq_throttle_low = throttle_low;
+		dvfs_config->mem_stall_lvl2freq_throttle_med = throttle_med;
+		dvfs_config->mem_stall_lvl2freq_throttle_high = throttle_high;
+	} else if (strcmp(dvfs_prettyconfig->key, "arb_freq_weights") == 0) {
+		uint32_t weight0, weight1, weight2;
+
+		err = kstrtou32(dvfs_prettyconfig->values[0], 10, &weight0);
+		if (err < 0) {
+			nvdla_dbg_err(pdev, "Invalid weight0 value");
+			goto fail;
+		}
+
+		err = kstrtou32(dvfs_prettyconfig->values[1], 10, &weight1);
+		if (err < 0) {
+			nvdla_dbg_err(pdev, "Invalid weight1 value");
+			goto fail;
+		}
+
+		err = kstrtou32(dvfs_prettyconfig->values[2], 10, &weight2);
+		if (err < 0) {
+			nvdla_dbg_err(pdev, "Invalid weight2 value");
+			goto fail;
+		}
+
+		if ((weight0 + weight1 + weight2) != 100U) {
+			err = -EINVAL;
+			nvdla_dbg_err(pdev, "Weights must sum to 100");
+			goto fail;
+		}
+
+		dvfs_config->arb_freq_weight0 = weight0;
+		dvfs_config->arb_freq_weight1 = weight1;
+		dvfs_config->arb_freq_weight2 = weight2;
+	} else if (strcmp(dvfs_prettyconfig->key, "arb_policy") == 0) {
+		uint8_t policy;
+
+		err = kstrtou8(dvfs_prettyconfig->values[0], 10, &policy);
+		if (err < 0) {
+			nvdla_dbg_err(pdev, "Invalid policy value");
+			goto fail;
+		}
+		switch (policy) {
+		case DVFS_POLICY_MAX:
+		case DVFS_POLICY_WEIGHTED_AVG:
+			dvfs_config->arb_policy_selection = policy;
+			break;
+		default:
+			err = -EINVAL;
+			nvdla_dbg_err(pdev, "Invalid arb policy value");
+			goto fail;
+		}
+	} else if (strcmp(dvfs_prettyconfig->key, "util2freq_indices") == 0) {
+		uint8_t lo_util, hi_util;
+
+		if (dvfs_prettyconfig->nvalues != 2) {
+			nvdla_dbg_err(pdev, "Need 2 util index values");
+			goto fail;
+		}
+		err = kstrtou8(dvfs_prettyconfig->values[0], 10, &lo_util);
+		if (err < 0)
+			goto fail;
+		err = kstrtou8(dvfs_prettyconfig->values[1], 10, &hi_util);
+		if (err < 0)
+			goto fail;
+
+		dvfs_config->util2freq_index_lo_util = lo_util;
+		dvfs_config->util2freq_index_hi_util = hi_util;
+	} else if (strcmp(dvfs_prettyconfig->key, "util_thresholds") == 0) {
+		uint8_t lo_thresh, hi_thresh;
+
+		if (dvfs_prettyconfig->nvalues != 2) {
+			nvdla_dbg_err(pdev, "Need 2 util threshold values");
+			goto fail;
+		}
+		err = kstrtou8(dvfs_prettyconfig->values[0], 10, &lo_thresh);
+		if (err < 0)
+			goto fail;
+		err = kstrtou8(dvfs_prettyconfig->values[1], 10, &hi_thresh);
+		if (err < 0)
+			goto fail;
+
+		if (lo_thresh >= hi_thresh) {
+			err = -EINVAL;
+			nvdla_dbg_err(pdev, "Low threshold must be less than high threshold");
+			goto fail;
+		}
+
+		dvfs_config->util_thresh_lo_util = lo_thresh;
+		dvfs_config->util_thresh_hi_util = hi_thresh;
+	} else {
+		err = -EINVAL;
+		nvdla_dbg_err(pdev, "Invalid dvfs config key: %s", dvfs_prettyconfig->key);
+		goto fail;
+	}
+
+	err = nvdla_pm_set_dvfs_config(pdev, dvfs_config);
+	if (err < 0) {
+		nvdla_dbg_err(pdev, "Failed to set dvfs config. err: %d", err);
+		goto fail;
+	}
+
+fail:
+	kfree(dvfs_config);
+	kfree(dvfs_prettyconfig);
+	kfree(user_data);
+	if (err < 0)
+		return err;
+	return count;
+}
+
 static ssize_t debug_dla_fw_dvfs_mode_write(struct file *file,
 		const char __user *buffer, size_t count, loff_t *off)
 {
@@ -1742,6 +2280,8 @@ static ssize_t debug_dla_ctrl_clk_core_khz_write(struct file *file,
 		const char __user *buffer, size_t count, loff_t *off)
 {
 	int err;
+	struct seq_file *priv_data;
+	struct nvdla_device *nvdla_dev;
 	struct platform_device *pdev;
 	long write_value;
 
@@ -1750,12 +2290,26 @@ static ssize_t debug_dla_ctrl_clk_core_khz_write(struct file *file,
 	if (err < 0)
 		goto fail;
 
-	err = s_nvdla_get_pdev_from_file(file, &pdev);
-	if (err < 0)
+	priv_data = file->private_data;
+	if (priv_data == NULL)
 		goto fail;
 
-	nvdla_dbg_info(pdev, "[CTRL/CLK] core_khz = %u\n",
-		(unsigned int) write_value);
+	nvdla_dev = (struct nvdla_device *) priv_data->private;
+	if (nvdla_dev == NULL)
+		goto fail;
+
+	pdev = nvdla_dev->pdev;
+	if (pdev == NULL)
+		goto fail;
+
+	if (write_value > UINT_MAX)
+		goto fail;
+
+	err = nvdla_pm_clock_set_core_freq(pdev, write_value);
+	if (err != 0) {
+		nvdla_dbg_err(pdev, "Failed to send set core freq command");
+		goto fail;
+	}
 
 	return count;
 
@@ -2132,7 +2686,159 @@ fail:
 	return -1;
 }
 
+// virt cmd show functions
 
+static int debug_dla_cmd_response_mode_show(struct seq_file *s, void *data)
+{
+	int err;
+	char *mode;
+	struct platform_device *pdev;
+	struct nvdla_device *nvdla_dev = (struct nvdla_device *)s->private;
+	(void) data;
+
+	if (nvdla_dev == NULL) {
+		err = -EFAULT;
+		goto fail;
+	}
+
+	err = s_nvdla_get_pdev_from_seq(s, &pdev);
+	if (err < 0) {
+		nvdla_dbg_err(pdev, "failed to get pdev. err %d", err);
+		goto fail;
+	}
+
+	nvdla_dbg_info(pdev, "Cmd Response mode show");
+
+	switch (nvdla_dev->response_info.response_mode) {
+		case (NVDLA_RESPONSE_MODE_SWGEN): {
+			mode = "SWGEN";
+			break;
+		}
+		case (NVDLA_RESPONSE_MODE_MNOC): {
+			mode = "MNOC";
+			break;
+		}
+		default: {
+			nvdla_dbg_err(pdev, "failed to get cmd mode");
+			goto fail;
+		}
+	}
+
+	seq_printf(s, "mode: %s\n", mode);
+	return 0;
+
+fail:
+	return err;
+}
+
+static int debug_dla_cmd_response_stat_show(struct seq_file *s, void *data)
+{
+	int err;
+	struct platform_device *pdev;
+	struct nvdla_device *nvdla_dev = (struct nvdla_device *)s->private;
+	(void) data;
+
+	if (nvdla_dev == NULL) {
+		err = -EFAULT;
+		goto fail;
+	}
+
+	err = s_nvdla_get_pdev_from_seq(s, &pdev);
+	if (err < 0) {
+		nvdla_dbg_err(pdev, "failed to get pdev. err: %d", err);
+		goto fail;
+	}
+
+	nvdla_dbg_info(pdev, "Cmd response stat show");
+
+	seq_printf(s, "swgeninterrupts              : %u\n",
+					nvdla_dev->response_info.num_interrupts_swgen);
+	seq_printf(s, "lastexecutionerrorstatus     : %u\n",
+					nvdla_dev->response_info.last_err_status_swgen);
+	seq_printf(s, "lastexecutionerrortimestamp  : %llu\n",
+					nvdla_dev->response_info.last_err_timestamp_swgen);
+
+	seq_printf(s, "mnocinterrupts               : %u\n",
+					nvdla_dev->response_info.num_interrupts_mnoc);
+	seq_printf(s, "lastexecutionerrorstatus     : %u\n",
+					nvdla_dev->response_info.last_err_status_mnoc);
+	seq_printf(s, "lastexecutionerrortimestamp  : %llu\n",
+					nvdla_dev->response_info.last_err_timestamp_mnoc);
+
+	return 0;
+
+fail:
+	return err;
+}
+
+// virt cmd write functions
+
+#define NVDLA_DEBUG_CMD_RESPONSE_MODE_MAX_LEN 256U
+static ssize_t debug_dla_cmd_response_mode_write(struct file *file,
+		const char __user *buffer, size_t count, loff_t *off)
+{
+	int32_t err;
+	struct seq_file *priv_data;
+	struct nvdla_device *nvdla_dev;
+	struct platform_device *pdev;
+	struct nvhost_device_data *pdata;
+	char mode[NVDLA_DEBUG_CMD_RESPONSE_MODE_MAX_LEN];
+	int32_t mode_length;
+
+	priv_data = file->private_data;
+	if (priv_data == NULL) {
+		err = -EFAULT;
+		goto fail;
+	}
+
+	nvdla_dev = (struct nvdla_device *) priv_data->private;
+	if (nvdla_dev == NULL) {
+		err = -EFAULT;
+		goto fail;
+	}
+
+	/* Fetch user requested write-value. */
+	mode_length = simple_write_to_buffer(mode,
+					(NVDLA_DEBUG_CMD_RESPONSE_MODE_MAX_LEN - 1U),
+					off,
+					buffer,
+					count);
+	mode[mode_length] = '\0';
+
+	err = s_nvdla_get_pdev_from_file(file, &pdev);
+	if (err < 0)
+		goto fail;
+
+	pdata = platform_get_drvdata(pdev);
+	if (pdata == NULL) {
+		err = -EFAULT;
+		goto fail;
+	}
+
+	if (pdata->version != FIRMWARE_ENCODE_VERSION(T25X_V2)) {
+		err = -EINVAL;
+		goto fail;
+	}
+
+	nvdla_dbg_info(pdev, "[CMD RESPONSE] mode = %s\n", mode);
+
+	if (strcmp(mode, "swgen") == 0) {
+		/* set response mode to swgen */
+		nvdla_dev->response_info.response_mode = NVDLA_RESPONSE_MODE_SWGEN;
+	} else if (strcmp(mode, "mnoc") == 0) {
+		/* set response mode to mnoc */
+		nvdla_dev->response_info.response_mode = NVDLA_RESPONSE_MODE_MNOC;
+	} else {
+		err = -EINVAL;
+		nvdla_dbg_err(pdev, "Invalid cmd response mode: %s", mode);
+		goto fail;
+	}
+
+	return count;
+
+fail:
+	return err;
+}
 
 static int debug_dla_enable_trace_open(struct inode *inode, struct file *file)
 {
@@ -2185,6 +2891,16 @@ static int debug_dla_fw_ping_open(struct inode *inode, struct file *file)
 }
 
 // fw dvfs open callback functions
+static int debug_dla_fw_dvfs_prettyconfig_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, debug_dla_fw_dvfs_prettyconfig_show, inode->i_private);
+}
+
+static int debug_dla_fw_dvfs_prettyconfig_help_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, debug_dla_fw_dvfs_prettyconfig_help_show, inode->i_private);
+}
+
 static int debug_dla_fw_dvfs_mode_open(struct inode *inode, struct file *file)
 {
 	return single_open(file, debug_dla_fw_dvfs_mode_show, inode->i_private);
@@ -2334,6 +3050,17 @@ static int debug_dla_ctrl_rail_idletime_us_open(struct inode *inode, struct file
 static int debug_dla_ctrl_rail_statdump_open(struct inode *inode, struct file *file)
 {
 	return single_open(file, debug_dla_ctrl_rail_statdump_show, inode->i_private);
+}
+
+// virt cmd open callback functions
+static int debug_dla_cmd_response_mode_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, debug_dla_cmd_response_mode_show, inode->i_private);
+}
+
+static int debug_dla_cmd_response_stat_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, debug_dla_cmd_response_stat_show, inode->i_private);
 }
 
 static int debug_set_trace_event_config(struct platform_device *pdev,
@@ -2647,6 +3374,21 @@ static const struct file_operations debug_dla_ping_fops = {
 };
 
 // fw dvfs file operations
+static const struct file_operations debug_dla_fw_dvfs_prettyconfig_fops = {
+		.open		= debug_dla_fw_dvfs_prettyconfig_open,
+		.read		= seq_read,
+		.llseek		= seq_lseek,
+		.release	= single_release,
+		.write		= debug_dla_fw_dvfs_prettyconfig_write,
+};
+
+static const struct file_operations debug_dla_fw_dvfs_prettyconfig_help_fops = {
+		.open		= debug_dla_fw_dvfs_prettyconfig_help_open,
+		.read		= seq_read,
+		.llseek		= seq_lseek,
+		.release	= single_release,
+};
+
 static const struct file_operations debug_dla_fw_dvfs_mode_fops = {
 		.open		= debug_dla_fw_dvfs_mode_open,
 		.read		= seq_read,
@@ -2874,6 +3616,22 @@ static const struct file_operations debug_dla_ctrl_rail_statdump_fops = {
 		.release	= single_release,
 };
 
+// virt cmd file operations
+static const struct file_operations debug_dla_cmd_response_mode_fops = {
+		.open		= debug_dla_cmd_response_mode_open,
+		.read		= seq_read,
+		.llseek		= seq_lseek,
+		.release	= single_release,
+		.write		= debug_dla_cmd_response_mode_write,
+};
+
+static const struct file_operations debug_dla_cmd_response_stat_fops = {
+		.open		= debug_dla_cmd_response_stat_open,
+		.read		= seq_read,
+		.llseek		= seq_lseek,
+		.release	= single_release,
+};
+
 static void dla_fw_debugfs_init(struct platform_device *pdev)
 {
 	struct dentry *fw_dir, *fw_trace, *events, *fw_gcov, *fw_dvfs;
@@ -2931,6 +3689,10 @@ static void dla_fw_debugfs_init(struct platform_device *pdev)
 
 	fw_dvfs = debugfs_create_dir("dvfs", fw_dir);
 	if (!fw_dvfs ||
+		!debugfs_create_file("prettyconfig", 0600, fw_dvfs, nvdla_dev,
+							&debug_dla_fw_dvfs_prettyconfig_fops) ||
+		!debugfs_create_file("prettyconfighelp", 0600, fw_dvfs, nvdla_dev,
+							&debug_dla_fw_dvfs_prettyconfig_help_fops) ||
 		!debugfs_create_file("mode", 0600, fw_dvfs, nvdla_dev,
 							&debug_dla_fw_dvfs_mode_fops) ||
 		!debugfs_create_file("enable", 0600, fw_dvfs, nvdla_dev,
@@ -3034,6 +3796,29 @@ static void dla_ctrl_debugfs_init(struct platform_device *pdev)
 
 cleanup:
 	debugfs_remove_recursive(ctrl_dir);
+}
+
+static void dla_cmd_response_debugfs_init(struct platform_device *pdev)
+{
+	struct nvhost_device_data *pdata = platform_get_drvdata(pdev);
+	struct nvdla_device *nvdla_dev = pdata->private_data;
+	struct dentry *dla_debugfs_root = pdata->debugfs;
+
+	if (!dla_debugfs_root)
+		return;
+
+	if (!debugfs_create_file("cmdresponsemode", 0600, dla_debugfs_root,
+			nvdla_dev, &debug_dla_cmd_response_mode_fops)) {
+		goto fail;
+	}
+
+	if (!debugfs_create_file("cmdresponsestat", 0400, dla_debugfs_root,
+			nvdla_dev, &debug_dla_cmd_response_stat_fops)) {
+		goto fail;
+	}
+
+fail:
+	return;
 }
 
 #ifdef CONFIG_PM
@@ -3256,6 +4041,167 @@ fail_create_file_err_inj:
 }
 #endif /* NVDLA_HAVE_CONFIG_HSIERRINJ */
 
+#define NVDLA_DEBUG_CMD_SUBMIT_MODE_MAX_LEN 256U
+static ssize_t debug_dla_submit_mode_write(struct file *file,
+		const char __user *buffer, size_t count, loff_t *off)
+{
+	struct seq_file *priv_data;
+	struct nvdla_device *nvdla_dev;
+	struct platform_device *pdev;
+	char mode[NVDLA_DEBUG_CMD_SUBMIT_MODE_MAX_LEN];
+	int32_t mode_length;
+
+	/* Fetch user requested write-value. */
+	mode_length = simple_write_to_buffer(mode,
+					(NVDLA_DEBUG_CMD_SUBMIT_MODE_MAX_LEN - 1U),
+					off,
+					buffer,
+					count);
+	mode[mode_length] = '\0';
+
+	if ((strcmp(mode, "mthd") != 0) && (strcmp(mode, "mnoc") != 0))
+		goto fail;
+
+	priv_data = file->private_data;
+	if (priv_data == NULL)
+		goto fail;
+
+	nvdla_dev = (struct nvdla_device *) priv_data->private;
+	if (nvdla_dev == NULL)
+		goto fail;
+
+	pdev = nvdla_dev->pdev;
+	if (pdev == NULL)
+		goto fail;
+
+	if (strcmp(mode, "mthd") == 0)
+		nvdla_dev->submit_mode = (uint32_t) NVDLA_SUBMIT_MODE_MTHD;
+	else
+		nvdla_dev->submit_mode = (uint32_t) NVDLA_SUBMIT_MODE_MNOC;
+
+	return count;
+
+fail:
+	return -1;
+}
+
+static int debug_dla_submit_mode_show(struct seq_file *s, void *data)
+{
+	int err;
+	struct nvdla_device *nvdla_dev;
+	uint32_t submit_mode;
+
+	if (s == NULL) {
+		err = -EFAULT;
+		goto fail;
+	}
+
+	nvdla_dev = (struct nvdla_device *) s->private;
+	if (nvdla_dev == NULL) {
+		err = -EFAULT;
+		goto fail;
+	}
+
+	submit_mode = nvdla_dev->submit_mode;
+
+	if ((submit_mode != (uint32_t) NVDLA_SUBMIT_MODE_MTHD) &&
+			(submit_mode != (uint32_t) NVDLA_SUBMIT_MODE_MNOC)) {
+		err = -EINVAL;
+		goto fail;
+	}
+
+	if (submit_mode == (uint32_t) NVDLA_SUBMIT_MODE_MTHD)
+		seq_puts(s, "MTHD\n");
+	else
+		seq_puts(s, "MNOC\n");
+
+	return 0;
+
+fail:
+	return err;
+}
+
+static int debug_dla_submit_mode_open(struct inode *inode,
+	struct file *file)
+{
+	return single_open(file, debug_dla_submit_mode_show,
+				inode->i_private);
+}
+
+static const struct file_operations debug_dla_submit_mode_fops = {
+	.open		= debug_dla_submit_mode_open,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+	.write		= debug_dla_submit_mode_write,
+};
+
+
+static int debug_dla_submit_stat_show(struct seq_file *s, void *data)
+{
+	int err;
+	struct nvdla_device *nvdla_dev;
+	struct nvdla_submit_stat *submit_stat;
+
+	if (s == NULL) {
+		err = -EFAULT;
+		goto fail;
+	}
+
+	nvdla_dev = (struct nvdla_device *) s->private;
+	if (nvdla_dev == NULL) {
+		err = -EFAULT;
+		goto fail;
+	}
+
+	// MTHID-MTHDDATA submit stats
+	submit_stat = &nvdla_dev->submit_stat[NVDLA_SUBMIT_MODE_MTHD];
+	seq_printf(s, "(MTHD) Number of successful submits  : %llu\n",
+		submit_stat->num_successes);
+	seq_printf(s, "(MTHD) Number of timedout submits    : %llu\n",
+		submit_stat->num_timeouts);
+	seq_printf(s, "(MTHD) Number of failed submits      : %llu\n",
+		submit_stat->num_fails);
+	seq_printf(s, "(MTHD) Last submit status            : %d\n",
+		submit_stat->last_error);
+	seq_printf(s, "(MTHD) Timestamp (in ns)             : %llu\n",
+		submit_stat->timestamp_ns);
+
+	if (nvdla_is_ctx_device(nvdla_dev->pdev)) {
+		// MNOC submit stats
+		submit_stat = &nvdla_dev->submit_stat[NVDLA_SUBMIT_MODE_MNOC];
+		seq_printf(s, "(MNOC) Number of successful submits  : %llu\n",
+				submit_stat->num_successes);
+		seq_printf(s, "(MNOC) Number of timedout submits    : %llu\n",
+				submit_stat->num_timeouts);
+		seq_printf(s, "(MNOC) Number of failed submits      : %llu\n",
+				submit_stat->num_fails);
+		seq_printf(s, "(MNOC) Last submit status            : %d\n",
+				submit_stat->last_error);
+		seq_printf(s, "(MNOC) Timestamp (in ns)             : %llu\n",
+				submit_stat->timestamp_ns);
+	}
+
+	return 0;
+
+fail:
+	return err;
+}
+
+static int debug_dla_submit_stat_open(struct inode *inode,
+	struct file *file)
+{
+	return single_open(file, debug_dla_submit_stat_show,
+				inode->i_private);
+}
+
+static const struct file_operations debug_dla_submit_stat_fops = {
+	.open		= debug_dla_submit_stat_open,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+
 void nvdla_debug_init(struct platform_device *pdev)
 {
 	struct nvhost_device_data *pdata = platform_get_drvdata(pdev);
@@ -3282,12 +4228,8 @@ void nvdla_debug_init(struct platform_device *pdev)
 	debugfs_create_u32("en_trace", 0644, de,
 			&nvdla_dev->en_trace);
 #endif
-	debugfs_create_u32("submit_mode", 0644, de,
-			&nvdla_dev->submit_mode);
-
-	/* Check if isolate context enabled if submit mode is CHANNEL */
-	nvdla_dev->submit_mode = nvdla_dev->submit_mode &&
-				pdata->isolate_contexts;
+	(void) debugfs_create_file("cmdsubmitmode", 0600, de, nvdla_dev,
+			&debug_dla_submit_mode_fops);
 
 #if defined(NVDLA_HAVE_CONFIG_HSIERRINJ) && (NVDLA_HAVE_CONFIG_HSIERRINJ == 1)
 	nvdla_err_inj_debugfs_init(pdev);
@@ -3298,5 +4240,9 @@ void nvdla_debug_init(struct platform_device *pdev)
 #endif
 
 	dla_fw_debugfs_init(pdev);
+	dla_cmd_response_debugfs_init(pdev);
 	dla_ctrl_debugfs_init(pdev);
+
+	(void) debugfs_create_file("cmdsubmitstat", 0400, de, nvdla_dev,
+			&debug_dla_submit_stat_fops);
 }

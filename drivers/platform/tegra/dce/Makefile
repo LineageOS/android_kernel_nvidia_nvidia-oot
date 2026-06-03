@@ -16,6 +16,7 @@ ccflags-y += -I$(srctree.nvidia-oot)/include
 ccflags-y += -I$(srctree.nvidia-oot)/drivers/platform/tegra/dce/include
 ccflags-y += -I$(srctree.nvidia-oot)/drivers/platform/tegra/dce/os/include
 ccflags-y += -I$(srctree.nvidia-oot)/drivers/platform/tegra/dce/os/linux/include
+ccflags-y += -DNV_DCE_CORE_ENABLE_ASYNC_RM_EVENT
 obj-$(CONFIG_TEGRA_DCE) += tegra-dce.o
 
 tegra-dce-$(CONFIG_TEGRA_DCE) += dce-ast.o
@@ -34,6 +35,7 @@ tegra-dce-$(CONFIG_TEGRA_DCE) += dce-ipc-signal.o
 tegra-dce-$(CONFIG_TEGRA_DCE) += dce-client-ipc.o
 tegra-dce-$(CONFIG_TEGRA_DCE) += dce-logging.o
 tegra-dce-$(CONFIG_TEGRA_DCE) += dce-module.o
+tegra-dce-$(CONFIG_TEGRA_DCE) += dce-psc-client.o
 tegra-dce-$(CONFIG_TEGRA_DCE) += dce-pm.o
 tegra-dce-$(CONFIG_TEGRA_DCE) += dce-os-work.o
 tegra-dce-$(CONFIG_TEGRA_DCE) += dce-os-utils.o

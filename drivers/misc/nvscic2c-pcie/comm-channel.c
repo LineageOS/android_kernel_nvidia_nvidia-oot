@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2022-2024, NVIDIA CORPORATION & AFFILIATES.
+ * SPDX-FileCopyrightText: Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES.
  * All rights reserved.
  */
 
@@ -565,6 +565,9 @@ allocate_syncpoint(struct comm_channel_ctx_t *comm_ctx)
 {
 	int ret = 0;
 	int prot = 0;
+	phys_addr_t base = 0;
+	uint32_t stride = 0U;
+	uint32_t num_syncpts = 0U;
 	struct host1x *host1x = NULL;
 	struct syncpt_t *syncpt = NULL;
 	size_t offsetof = 0x0;
@@ -579,9 +582,8 @@ allocate_syncpoint(struct comm_channel_ctx_t *comm_ctx)
 	syncpt->sp = host1x_syncpt_alloc(host1x, HOST1X_SYNCPT_CLIENT_MANAGED,
 					 "nvscic2c-pcie-comm-ch");
 	if (IS_ERR_OR_NULL(syncpt->sp)) {
-		ret = -ENOMEM;
 		pr_err("Failed to reserve comm notify syncpt\n");
-		goto err;
+		return -ENOMEM;
 	}
 
 	/*
@@ -592,8 +594,15 @@ allocate_syncpoint(struct comm_channel_ctx_t *comm_ctx)
 		return -ENOMEM;
 	syncpt->id = host1x_syncpt_id(syncpt->sp);
 	/* physical address of syncpoint shim. */
-	syncpt->phy_addr = get_syncpt_shim_offset(syncpt->id, comm_ctx->chip_id);
+	ret = host1x_syncpt_get_shim_info(host1x, &base, &stride, &num_syncpts);
+	if (ret < 0) {
+		pr_err("Failed to fetch shim info\n");
+		goto err;
+	}
+
+	syncpt->phy_addr = (base + ((u64)syncpt->id * stride));
 	syncpt->size = SP_MAP_SIZE;
+	(void)num_syncpts;
 
 	/* reserve iova with the iova manager.*/
 	ret = pci_client_alloc_iova(comm_ctx->pci_client_h, syncpt->size,

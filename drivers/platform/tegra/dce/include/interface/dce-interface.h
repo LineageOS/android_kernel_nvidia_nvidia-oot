@@ -116,6 +116,7 @@ typedef uint32_t				hsp_mbox_t;
 #define DCE_IRQ_ABORT		DCE_BIT(19)	// uCode abort occurred
 #define DCE_IRQ_SC7_ENTERED	DCE_BIT(18)	// DCE state saved
 						// can be powered off
+#define DCE_IRQ_DEINIT_DONE	DCE_BIT(17)	// DCE deinit completed
 
 /*
  * MBOX contents for IPC are the same for all of the mailboxes that are

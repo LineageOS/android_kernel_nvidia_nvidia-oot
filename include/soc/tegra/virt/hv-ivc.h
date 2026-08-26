@@ -30,7 +30,10 @@ struct tegra_hv_ivm_cookie {
 	void *reserved;
 };
 
-bool is_tegra_hypervisor_mode(void);
+static inline bool is_tegra_hypervisor_mode(void)
+{
+	return false;
+}
 
 /**
  * tegra_hv_ivc_reserve - Reserve an IVC queue for use

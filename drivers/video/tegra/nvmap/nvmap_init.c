@@ -155,6 +155,7 @@ found:
 	return NULL;
 }
 
+#ifdef NVMAP_CONFIG_SCIIPC
 static int __init nvmap_populate_ivm_carveout(struct device *dev)
 {
 	char *name;
@@ -268,6 +269,7 @@ err:
 	return ret;
 
 }
+#endif
 
 /*
  * This requires proper kernel arguments to have been passed.
@@ -450,11 +452,13 @@ int __init nvmap_init(struct platform_device *pdev)
 			goto end;
 	}
 
+#ifdef NVMAP_CONFIG_SCIIPC
 	err = nvmap_populate_ivm_carveout(&pdev->dev);
 	if (err)
 		goto end;
 
 	err = nvmap_init_ivc_queue(&pdev->dev);
+#endif
 
 end:
 	return err;
@@ -526,7 +530,9 @@ static void __exit nvmap_exit_driver(void)
 		platform_device_unregister(pdev);
 	platform_driver_unregister(&nvmap_driver);
 	nvmap_heap_deinit();
+#ifdef NVMAP_CONFIG_SCIIPC
 	nvmap_deinit_ivc_queue();
+#endif
 	nvmap_dev = NULL;
 }
 module_exit(nvmap_exit_driver);

@@ -416,11 +416,11 @@ struct nvmap_handle_ref *__nvmap_validate_locked(struct nvmap_client *c,
 int nvmap_sci_ipc_init(void);
 void nvmap_sci_ipc_exit(void);
 #else
-__weak int nvmap_sci_ipc_init(void)
+static inline int nvmap_sci_ipc_init(void)
 {
 	return 0;
 }
-__weak void nvmap_sci_ipc_exit(void)
+static inline void nvmap_sci_ipc_exit(void)
 {
 }
 #endif

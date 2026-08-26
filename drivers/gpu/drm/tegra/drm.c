@@ -1427,7 +1427,6 @@ static struct platform_driver * const drivers[] = {
 	&tegra_nvjpg_driver,
 	&tegra_ofa_driver,
 #endif
-	&tegra_virt_engine_driver,
 };
 
 static int __init host1x_drm_init(void)

@@ -1224,6 +1224,7 @@ out:
 	NVMAP_TAG_TRACE(trace_nvmap_destroy_handle,
 		NULL, get_current()->pid, 0, NVMAP_TP_ARGS_H(h));
 
+#ifdef NVMAP_CONFIG_SCIIPC
 	if (h->heap_type == NVMAP_HEAP_CARVEOUT_IVM &&
 		atomic_read(&h->imported_from_peer)) {
 		/*
@@ -1232,6 +1233,7 @@ out:
 		 */
 		nvmap_decrement_handle_refcount_by_ivm_id(h->ivm_id, h->peer);
 	}
+#endif
 
 	kfree(h);
 }

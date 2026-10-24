@@ -1,8 +1,7 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-FileCopyrightText: Copyright (c) 2016-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 /*
  * max96712.c - max96712 IO Expander driver
- *
- * Copyright (c) 2016-2023, NVIDIA CORPORATION & AFFILIATES. All Rights Reserved.
  */
 
 /* #define DEBUG */
@@ -13,15 +12,15 @@
 #include <linux/debugfs.h>
 #include <media/camera_common.h>
 #include <linux/module.h>
-#include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/of.h>
-#include <linux/of_gpio.h>
 
 
 struct max96712 {
 	struct i2c_client *i2c_client;
 	struct regmap *regmap;
 	const char *channel;
+	struct gpio_desc *pwdn_gpiod;
 };
 static struct max96712 *global_priv[4];
 
@@ -155,19 +154,12 @@ static const struct file_operations max96712_debugfs_fops = {
 
 static int  max96712_power_on(struct max96712 *priv)
 {
-	struct i2c_client *i2c_client = priv->i2c_client;
-	struct device_node *np = i2c_client->dev.of_node;
-	unsigned int pwdn_gpio = 0;
-
-	if(np) {
-		pwdn_gpio = of_get_named_gpio(np, "pwdn-gpios", 0);
-		dev_info(&i2c_client->dev,"%s: pwdn_gpio = %d\n",__func__,pwdn_gpio);
-	}
-	if (pwdn_gpio > 0) {
-		gpio_direction_output(pwdn_gpio, 1);
-		gpio_set_value(pwdn_gpio, 1);
+	if (priv->pwdn_gpiod) {
+		gpiod_direction_output(priv->pwdn_gpiod, 1);
+		gpiod_set_value(priv->pwdn_gpiod, 1);
 		msleep(100);
 	}
+
 	return 0;
 }
 
@@ -251,6 +243,14 @@ static int max96712_probe(struct i2c_client *client,
 	}
 
 	mutex_init(&max96712_rw);
+
+	priv->pwdn_gpiod = devm_gpiod_get_optional(&client->dev, "pwdn",
+						   GPIOD_ASIS);
+	if (IS_ERR(priv->pwdn_gpiod)) {
+		dev_err(&client->dev, "Failed to get pwdn GPIO: %ld\n",
+			PTR_ERR(priv->pwdn_gpiod));
+		return PTR_ERR(priv->pwdn_gpiod);
+	}
 
 	err = max96712_power_on(priv);
 	if (err) {

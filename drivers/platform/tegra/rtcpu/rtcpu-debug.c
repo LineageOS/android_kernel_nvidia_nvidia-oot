@@ -3,6 +3,8 @@
 
 #include "soc/tegra/camrtc-dbg-messages.h"
 
+#include <nvidia/conftest.h>
+
 #include <linux/debugfs.h>
 #if IS_ENABLED(CONFIG_INTERCONNECT)
 #include <linux/interconnect.h>
@@ -146,8 +148,23 @@ static int __init camrtc_dbgfs_rmem_init(struct reserved_mem *rmem)
 	return 0;
 }
 
+#if defined(NV_RESERVED_MEM_OPS_STRUCT_HAS_NODE_INIT) /* Linux v7.1 */
+static int __init camrtc_dbgfs_rmem_node_init(unsigned long node,
+					      struct reserved_mem *rmem)
+{
+	return camrtc_dbgfs_rmem_init(rmem);
+}
+
+static const struct reserved_mem_ops camrtc_dbgfs_rmem_ops = {
+	.node_init = camrtc_dbgfs_rmem_node_init,
+};
+
+RESERVEDMEM_OF_DECLARE(tegra_cam_rtcpu,
+		"nvidia,camdbg_carveout", &camrtc_dbgfs_rmem_ops);
+#else
 RESERVEDMEM_OF_DECLARE(tegra_cam_rtcpu,
 		"nvidia,camdbg_carveout", camrtc_dbgfs_rmem_init);
+#endif
 
 /**
  * @brief Gets the camera-rtcpu device from an IVC channel

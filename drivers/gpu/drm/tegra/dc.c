@@ -2795,7 +2795,11 @@ static int tegra_dc_runtime_suspend(struct host1x_client *client)
 	}
 
 	if (dc->soc->has_powergate)
+#if defined(NV_TEGRA_PMC_POWERGATE_POWER_OFF_PRESENT) /* Linux v7.2 */
+		tegra_pmc_powergate_power_off(dc->pmc, dc->powergate);
+#else
 		tegra_powergate_power_off(dc->powergate);
+#endif
 
 	clk_disable_unprepare(dc->clk);
 	pm_runtime_put_sync(dev);
@@ -2816,8 +2820,14 @@ static int tegra_dc_runtime_resume(struct host1x_client *client)
 	}
 
 	if (dc->soc->has_powergate) {
+#if defined(NV_TEGRA_PMC_POWERGATE_POWER_OFF_PRESENT) /* Linux v7.2 */
+		err = tegra_pmc_powergate_sequence_power_up(dc->pmc,
+							    dc->powergate,
+							    dc->clk, dc->rst);
+#else
 		err = tegra_powergate_sequence_power_up(dc->powergate, dc->clk,
 							dc->rst);
+#endif
 		if (err < 0) {
 			dev_err(dev, "failed to power partition: %d\n", err);
 			goto put_rpm;
@@ -3245,12 +3255,23 @@ static int tegra_dc_probe(struct platform_device *pdev)
 	clk_disable_unprepare(dc->clk);
 
 	if (dc->soc->has_powergate) {
+#if defined(NV_TEGRA_PMC_POWERGATE_POWER_OFF_PRESENT) /* Linux v7.2 */
+		dc->pmc = devm_tegra_pmc_get(dc->dev);
+		if (IS_ERR(dc->pmc))
+			return dev_err_probe(dc->dev, PTR_ERR(dc->pmc),
+					     "failed to get PMC\n");
+#endif
+
 		if (dc->pipe == 0)
 			dc->powergate = TEGRA_POWERGATE_DIS;
 		else
 			dc->powergate = TEGRA_POWERGATE_DISB;
 
+#if defined(NV_TEGRA_PMC_POWERGATE_POWER_OFF_PRESENT) /* Linux v7.2 */
+		tegra_pmc_powergate_power_off(dc->pmc, dc->powergate);
+#else
 		tegra_powergate_power_off(dc->powergate);
+#endif
 	}
 
 	err = tegra_dc_init_opp_table(dc);

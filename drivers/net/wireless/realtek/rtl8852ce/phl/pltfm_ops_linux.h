@@ -620,7 +620,7 @@ static inline void _os_mutex_deinit(void *d, _os_mutex *mutex)
 
 static inline void _os_mutex_lock(void *d, _os_mutex *mutex)
 {
-	_rtw_mutex_lock_interruptible(mutex);
+	_rtw_mutex_lock(mutex);
 }
 
 static inline void _os_mutex_unlock(void *d, _os_mutex *mutex)

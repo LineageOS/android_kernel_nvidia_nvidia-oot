@@ -16,11 +16,16 @@
 
 #include <nvidia/conftest.h>
 #include <linux/version.h>
+#include <linux/bitops.h>
 #include <linux/iommu.h>
+#ifdef CONFIG_XDP_SOCKETS
+#include <linux/rtnetlink.h>
+#endif
 #ifdef HSI_SUPPORT
 #include <linux/tegra-epl.h>
-#endif
+#endif /* HSI_SUPPORT */
 #include "ether_linux.h"
+#include "ether_xdp.h"
 #include <linux/of.h>
 #include <soc/tegra/fuse.h>
 #include <soc/tegra/fuse-helper.h>
@@ -28,6 +33,7 @@
 #include <soc/tegra/nvethernet-public.h>
 #include <linux/time.h>
 #include <linux/inetdevice.h>
+#include <linux/reboot.h>
 #include <net/arp.h>
 
 #ifdef CONFIG_DEBUG_FS
@@ -60,8 +66,18 @@ static struct ether_phy_reset_gpio phy_reset_gpio[ETHER_MAX_IP_INSTANCES] = {
 	{ 0, ATOMIC_INIT(0) },
 };
 
+static inline bool ether_napi_is_scheduled(struct napi_struct *napi)
+{
+	return test_bit(NAPI_STATE_SCHED, &napi->state);
+}
+
 /* Mutex to protect access to phy_reset_gpio array */
 static DEFINE_MUTEX(phy_reset_gpio_mutex);
+
+#if defined(CONFIG_PM) && !defined(OSI_STRIPPED_LIB)
+static int ether_reboot_notifier(struct notifier_block *nb,
+				 unsigned long event, void *unused);
+#endif
 
 static int handle_phy_reset(struct device *dev, struct ether_priv_data *pdata,
 			    unsigned int value)
@@ -1495,7 +1511,29 @@ void set_speed_work_func(struct work_struct *work)
 	ioctl_data.cmd = OSI_CMD_SET_SPEED;
 	ioctl_data.arg6_32 = speed;
 	ret = osi_handle_ioctl(pdata->osi_core, &ioctl_data);
-	if (ret < 0) {
+	if (ret == OSI_SET_SPEED_IN_PROGRESS) {
+		/* OSI ran a bounded chunk of the XPCS link poll and yielded so
+		 * that same-priority work (suspend, other controllers) can run.
+		 * This is not a real bringup attempt: undo this call's retry
+		 * increment and just re-arm the workqueue to resume the poll.
+		 * The link state (carrier off, monitor clocks) has not changed,
+		 * so we deliberately skip re-asserting it every cycle. After
+		 * ETHER_SET_SPEED_RESUME_MAX resumes (~1s at the fixed 10ms
+		 * cadence) ask OSI for a fresh full lane bringup and let this
+		 * cycle count as one attempt against the retry budget.
+		 */
+		pdata->poll_resume_count++;
+		if (pdata->poll_resume_count >= ETHER_SET_SPEED_RESUME_MAX) {
+			pdata->osi_core->set_speed_force_fresh = OSI_ENABLE;
+			pdata->poll_resume_count = 0;
+		}
+		schedule_delayed_work(&pdata->set_speed_work, msecs_to_jiffies(10));
+		atomic_set(&pdata->set_speed_ref_cnt, OSI_DISABLE);
+	} else if (ret < 0) {
+		/* Hard failure: OSI has already cleared its in-progress poll
+		 * state, so drop the resume ramp for the next bringup.
+		 */
+		pdata->poll_resume_count = 0;
 		ether_dump_link_status(pdata, phydev, 0U);
 		/* marking the link as down */
 		pdata->oldlink = 0;
@@ -1504,33 +1542,39 @@ void set_speed_work_func(struct work_struct *work)
 		schedule_delayed_work(&pdata->set_speed_work, msecs_to_jiffies(10));
 		atomic_set(&pdata->set_speed_ref_cnt, OSI_DISABLE);
 		return;
-	}
+	} else {
+		/* Set MGBE MAC_DIV/TX clk rate */
+		pdata->speed = speed;
+		ether_dump_link_status(pdata, phydev, 1U);
+		pdata->oldlink = 1;
 
-	/* Set MGBE MAC_DIV/TX clk rate */
-	pdata->speed = speed;
-	ether_dump_link_status(pdata, phydev, 1U);
-	pdata->oldlink = 1;
-	val = pdata->xstats.link_connect_count;
-	pdata->xstats.link_connect_count = update_stats_counter(val, 1UL);
-	set_mac_tx_clks(pdata);
+		/* Link is up: end the chunked-poll resume ramp */
+		pdata->poll_resume_count = 0;
+		val = pdata->xstats.link_connect_count;
+		pdata->xstats.link_connect_count = update_stats_counter(val, 1UL);
+		set_mac_tx_clks(pdata);
 
-	ether_en_dis_monitor_clks(pdata, OSI_ENABLE);
+		ether_en_dis_monitor_clks(pdata, OSI_ENABLE);
 #ifndef OSI_STRIPPED_LIB
-	if (pdata->eee_enabled && pdata->tx_lpi_enabled) {
-		/* Configure EEE if it is enabled */
-		eee_enable = OSI_ENABLE;
-	}
-	pdata->eee_active = ether_conf_eee(pdata, eee_enable);
+		if (pdata->eee_enabled && pdata->tx_lpi_enabled) {
+			/* Configure EEE if it is enabled */
+			eee_enable = OSI_ENABLE;
+		}
+		pdata->eee_active = ether_conf_eee(pdata, eee_enable);
 #endif /* !OSI_STRIPPED_LIB */
-	netif_carrier_on(dev);
+		netif_carrier_on(dev);
+#ifdef CONFIG_XDP_SOCKETS
+		/* Restart descriptors queued while the interface was waiting for link. */
+		ether_xsk_tx_wakeup_all(pdata);
+#endif
 
-	if ((pdata->osi_core->use_virtualization == OSI_ENABLE) &&
-		(pdata->fixed_link == OSI_ENABLE) && (phydev->link)) {
-		/* Monitor the link for every 5 sec for virtualization enable */
-		schedule_delayed_work(&pdata->set_speed_work, msecs_to_jiffies(5000));
+		if ((pdata->osi_core->use_virtualization == OSI_ENABLE) &&
+			(pdata->fixed_link == OSI_ENABLE) && (phydev->link)) {
+			/* Monitor the link for every 5 sec for virtualization enable */
+			schedule_delayed_work(&pdata->set_speed_work, msecs_to_jiffies(5000));
+		}
+		atomic_set(&pdata->set_speed_ref_cnt, OSI_DISABLE);
 	}
-
-	atomic_set(&pdata->set_speed_ref_cnt, OSI_DISABLE);
 }
 
 void ether_adjust_link(struct net_device *dev)
@@ -1772,6 +1816,11 @@ void ether_adjust_link(struct net_device *dev)
 		set_mac_tx_clks(pdata);
 	}
 
+#ifdef CONFIG_XDP_SOCKETS
+	if (new_state && phydev->link && netif_carrier_ok(dev))
+		ether_xsk_tx_wakeup_all(pdata);
+#endif
+
 #ifndef OSI_STRIPPED_LIB
 	/* Configure EEE if it is enabled */
 	if (pdata->eee_enabled && pdata->tx_lpi_enabled) {
@@ -1842,8 +1891,9 @@ irqreturn_t ether_vm_isr(int irq, void *data)
 	struct ether_tx_napi *tx_napi = NULL;
 	unsigned int dma_status[3] = {0};
 	const nveu32_t global_dma_status_reg_cnt[3] = {1, 1, 3};
+	unsigned long flags;
+	bool do_schedule;
 
-	/* TODO: locking required since this is shared register b/w VM IRQ's */
 	(void)osi_get_global_dma_status(osi_dma, dma_status);
 	for (i = 0U; i < global_dma_status_reg_cnt[osi_dma->mac]; i++) {
 		dma_status[i] &= vm_irq->chan_mask[i];
@@ -1859,30 +1909,33 @@ irqreturn_t ether_vm_isr(int irq, void *data)
 			if (txrx) {
 				rx_napi = pdata->rx_napi[chan];
 
+				raw_spin_lock_irqsave(&pdata->dma_ch_lock[chan], flags);
 				osi_handle_dma_intr(osi_dma, chan,
 						    OSI_DMA_CH_RX_INTR,
 						    OSI_DMA_INTR_DISABLE);
+				do_schedule = napi_schedule_prep(&rx_napi->napi);
+				raw_spin_unlock_irqrestore(&pdata->dma_ch_lock[chan], flags);
 
-				if (likely(napi_schedule_prep(&rx_napi->napi))) {
-					/* TODO: Schedule NAPI on different CPU core */
+				if (likely(do_schedule))
 					__napi_schedule_irqoff(&rx_napi->napi);
-				}
 			} else {
 				tx_napi = pdata->tx_napi[chan];
+				do_schedule = false;
 
+				raw_spin_lock_irqsave(&pdata->dma_ch_lock[chan], flags);
 				osi_handle_dma_intr(osi_dma, chan,
 						    OSI_DMA_CH_TX_INTR,
 						    OSI_DMA_INTR_DISABLE);
 #ifdef BW_TEST
-				if (pdata->test_tx_bandwidth == OSI_DISABLE) {
+					if (pdata->test_tx_bandwidth == OSI_DISABLE)
+						do_schedule = napi_schedule_prep(&tx_napi->napi);
+#else
+					do_schedule = napi_schedule_prep(&tx_napi->napi);
 #endif
-				if (likely(napi_schedule_prep(&tx_napi->napi))) {
-					/* TODO: Schedule NAPI on different CPU core */
+				raw_spin_unlock_irqrestore(&pdata->dma_ch_lock[chan], flags);
+
+				if (likely(do_schedule))
 					__napi_schedule_irqoff(&tx_napi->napi);
-				}
-#ifdef BW_TEST
-				}
-#endif
 			}
 
 			dma_status[i] &= ~BIT(temp);
@@ -1915,17 +1968,19 @@ static irqreturn_t ether_tx_chan_isr(int irq, void *data)
 	unsigned int chan = tx_napi->chan;
 	unsigned long flags;
 	unsigned long val;
+	bool do_schedule;
 
-	raw_spin_lock_irqsave(&pdata->rlock, flags);
+	raw_spin_lock_irqsave(&pdata->dma_ch_lock[chan], flags);
 	osi_handle_dma_intr(osi_dma, chan,
 			    OSI_DMA_CH_TX_INTR,
 			    OSI_DMA_INTR_DISABLE);
-	raw_spin_unlock_irqrestore(&pdata->rlock, flags);
+	do_schedule = napi_schedule_prep(&tx_napi->napi);
+	raw_spin_unlock_irqrestore(&pdata->dma_ch_lock[chan], flags);
 
 	val = pdata->xstats.tx_normal_irq_n[chan];
 	pdata->xstats.tx_normal_irq_n[chan] = update_stats_counter(val, 1U);
 
-	if (likely(napi_schedule_prep(&tx_napi->napi))) {
+	if (likely(do_schedule)) {
 		__napi_schedule_irqoff(&tx_napi->napi);
 	/* NAPI may get scheduled when tx_usecs is enabled */
 	} else if (osi_dma->use_tx_usecs == OSI_DISABLE) {
@@ -1961,17 +2016,19 @@ static irqreturn_t ether_rx_chan_isr(int irq, void *data)
 	struct osi_dma_priv_data *osi_dma = pdata->osi_dma;
 	unsigned int chan = rx_napi->chan;
 	unsigned long val, flags;
+	bool do_schedule;
 
-	raw_spin_lock_irqsave(&pdata->rlock, flags);
+	raw_spin_lock_irqsave(&pdata->dma_ch_lock[chan], flags);
 	osi_handle_dma_intr(osi_dma, chan,
 			    OSI_DMA_CH_RX_INTR,
 			    OSI_DMA_INTR_DISABLE);
-	raw_spin_unlock_irqrestore(&pdata->rlock, flags);
+	do_schedule = napi_schedule_prep(&rx_napi->napi);
+	raw_spin_unlock_irqrestore(&pdata->dma_ch_lock[chan], flags);
 
 	val = pdata->xstats.rx_normal_irq_n[chan];
 	pdata->xstats.rx_normal_irq_n[chan] = update_stats_counter(val, 1U);
 
-	if (likely(napi_schedule_prep(&rx_napi->napi))) {
+	if (likely(do_schedule)) {
 		__napi_schedule_irqoff(&rx_napi->napi);
 	} else {
 		pr_err("Rx DMA-%d IRQ when NAPI already scheduled!\n", chan);
@@ -2437,10 +2494,17 @@ static void ether_free_rx_skbs(struct osi_rx_swcx *rx_swcx,
 		if (prx_swcx->buf_virt_addr != NULL) {
 			if (resv_buf_virt_addr != prx_swcx->buf_virt_addr) {
 #ifdef ETHER_PAGE_POOL
-				if (chan != ETHER_INVALID_CHAN_NUM)
-					page_pool_put_full_page(pdata->page_pool[chan],
-								prx_swcx->buf_virt_addr,
-								false);
+				if (chan != ETHER_INVALID_CHAN_NUM) {
+#ifdef CONFIG_XDP_SOCKETS
+					if ((prx_swcx->flags & OSI_RX_SWCX_XSK_BUFF) ==
+					    OSI_RX_SWCX_XSK_BUFF)
+						xsk_buff_free(prx_swcx->buf_virt_addr);
+					else
+#endif /* CONFIG_XDP_SOCKETS */
+						page_pool_put_full_page(pdata->page_pool[chan],
+									prx_swcx->buf_virt_addr,
+									false);
+				}
 #else
 				dma_unmap_single(pdata->dev,
 						 prx_swcx->buf_phy_addr,
@@ -2495,6 +2559,10 @@ static void free_rx_dma_resources(struct osi_dma_priv_data *osi_dma,
 			kfree(rx_ring);
 			osi_dma->rx_ring[i] = NULL;
 		}
+#ifdef CONFIG_XDP_SOCKETS
+		if (chan != ETHER_INVALID_CHAN_NUM)
+			ether_xdp_rxq_teardown_chan(pdata, chan);
+#endif /* CONFIG_XDP_SOCKETS */
 #ifdef ETHER_PAGE_POOL
 		if (chan != ETHER_INVALID_CHAN_NUM && pdata->page_pool[chan]) {
 			page_pool_destroy(pdata->page_pool[chan]);
@@ -2590,6 +2658,7 @@ static int ether_allocate_rx_buffers(struct ether_priv_data *pdata,
 #endif
 	struct osi_rx_swcx *rx_swcx = NULL;
 	unsigned int i = 0;
+	int ret = 0;
 
 	for (i = 0; i < pdata->osi_dma->rx_ring_sz; i++) {
 #ifndef ETHER_PAGE_POOL
@@ -2603,22 +2672,72 @@ static int ether_allocate_rx_buffers(struct ether_priv_data *pdata,
 
 #ifdef ETHER_PAGE_POOL
 		if (chan != ETHER_INVALID_CHAN_NUM) {
-			page = page_pool_dev_alloc_pages(pdata->page_pool[chan]);
-			if (!page) {
-				dev_err(pdata->dev,
-					"failed to allocate page pool buffer");
-				return -ENOMEM;
-			}
+#ifdef CONFIG_XDP_SOCKETS
+			if (pdata->rx_napi[chan]->xsk_pool) {
+				struct xsk_buff_pool *pool;
+				struct xdp_buff *xdp;
 
-			dma_addr = page_pool_get_dma_addr(page);
-			rx_swcx->buf_virt_addr = page;
+				pool = pdata->rx_napi[chan]->xsk_pool;
+				xdp = xsk_buff_alloc(pool);
+				if (xdp) {
+					if (xsk_uses_need_wakeup(pool))
+						xsk_clear_rx_need_wakeup(pool);
+					rx_swcx->buf_virt_addr = xdp;
+					dma_addr = xsk_buff_xdp_get_dma(xdp);
+					rx_swcx->flags |= OSI_RX_SWCX_XSK_BUFF;
+					goto rx_desc_done;
+				}
+				if (xsk_uses_need_wakeup(pool))
+					xsk_set_rx_need_wakeup(pool);
+				/* AF_XDP zero-copy requires every RX descriptor
+				 * on this queue to be backed by an XSK UMEM
+				 * frame. Mixing XSK buffers with page-pool
+				 * buffers would make some packets bypass the
+				 * AF_XDP socket, so fail attach instead of
+				 * silently falling back.
+				 */
+				netdev_err(pdata->ndev,
+					   "AF_XDP fill queue exhausted during RX init; need at least %u UMEM frames to cover the RX ring\n",
+					   pdata->osi_dma->rx_ring_sz);
+				rx_swcx->buf_virt_addr = NULL;
+				rx_swcx->buf_phy_addr = 0;
+				rx_swcx->flags &=
+					~(OSI_RX_SWCX_XSK_BUFF |
+					  OSI_RX_SWCX_BUF_VALID);
+				ret = -ENOBUFS;
+				goto err_unwind;
+			}
+#endif /* CONFIG_XDP_SOCKETS */
+			{
+				page = page_pool_dev_alloc_pages(pdata->page_pool[chan]);
+				if (!page) {
+					dev_err(pdata->dev,
+						"failed to allocate page pool buffer");
+					ret = -ENOMEM;
+					goto err_unwind;
+				}
+
+				/* page_pool stores the page-base DMA address. The
+				 * pool offset only scopes DMA sync, so program HW at
+				 * the packet start after XDP headroom.
+				 */
+				dma_addr = page_pool_get_dma_addr(page) +
+					   ETHER_XDP_RX_HEADROOM;
+				rx_swcx->buf_virt_addr = page;
+				rx_swcx->flags &= ~OSI_RX_SWCX_XSK_BUFF;
+			}
+#ifdef CONFIG_XDP_SOCKETS
+rx_desc_done:
+#endif /* CONFIG_XDP_SOCKETS */
+			;
 		}
 #else
 		skb = __netdev_alloc_skb_ip_align(pdata->ndev, rx_buf_len,
 						  GFP_KERNEL);
 		if (unlikely(skb == NULL)) {
 			dev_err(pdata->dev, "RX skb allocation failed\n");
-			return -ENOMEM;
+			ret = -ENOMEM;
+			goto err_unwind;
 		}
 
 		dma_addr = dma_map_single(pdata->dev, skb->data, rx_buf_len,
@@ -2626,15 +2745,23 @@ static int ether_allocate_rx_buffers(struct ether_priv_data *pdata,
 		if (unlikely(dma_mapping_error(pdata->dev, dma_addr) != 0)) {
 			dev_err(pdata->dev, "RX skb dma map failed\n");
 			dev_kfree_skb_any(skb);
-			return -ENOMEM;
+			ret = -ENOMEM;
+			goto err_unwind;
 		}
 
 		rx_swcx->buf_virt_addr = skb;
 #endif
 		rx_swcx->buf_phy_addr = dma_addr;
+		rx_swcx->flags |= OSI_RX_SWCX_BUF_VALID;
 	}
 
 	return 0;
+
+err_unwind:
+	ether_free_rx_skbs(rx_ring->rx_swcx, pdata,
+			   pdata->osi_dma->rx_buf_len,
+			   pdata->resv_buf_virt_addr, chan);
+	return ret;
 }
 
 #ifdef ETHER_PAGE_POOL
@@ -2658,20 +2785,35 @@ static int ether_page_pool_create_per_chan(struct ether_priv_data *pdata,
 	int ret = 0;
 
 	pp_params.flags = PP_FLAG_DMA_MAP;
+#ifdef CONFIG_XDP_SOCKETS
+	pp_params.flags |= PP_FLAG_DMA_SYNC_DEV;
+#endif
 	pp_params.pool_size = pool_size;
-	num_pages = DIV_ROUND_UP(osi_dma->rx_buf_len, PAGE_SIZE);
+	num_pages = DIV_ROUND_UP(osi_dma->rx_buf_len +
+				 ETHER_XDP_RX_HEADROOM, PAGE_SIZE);
+	if (num_pages == 0U) {
+		ret = -EINVAL;
+		goto fail;
+	}
 	pp_params.order = ilog2(roundup_pow_of_two(num_pages));
 	pp_params.nid = dev_to_node(pdata->dev);
 	pp_params.dev = pdata->dev;
+#ifdef CONFIG_XDP_SOCKETS
+	pp_params.dma_dir = DMA_BIDIRECTIONAL;
+	pp_params.offset = ETHER_XDP_RX_HEADROOM;
+	pp_params.max_len = osi_dma->rx_buf_len;
+#else
 	pp_params.dma_dir = DMA_FROM_DEVICE;
+#endif
 
 	pdata->page_pool[chan] = page_pool_create(&pp_params);
 	if (IS_ERR(pdata->page_pool[chan])) {
 		ret = PTR_ERR(pdata->page_pool[chan]);
 		pdata->page_pool[chan] = NULL;
-		return ret;
+		goto fail;
 	}
 
+fail:
 	return ret;
 }
 #endif
@@ -2753,6 +2895,35 @@ exit:
 	return ret;
 }
 
+#ifdef CONFIG_XDP_SOCKETS
+static bool ether_free_xdp_tx_resource(struct device *dev,
+				       const struct osi_tx_swcx *swcx)
+{
+	void *buf_virt_addr = swcx->buf_virt_addr;
+
+	if ((swcx->flags & ETHER_TX_SWCX_XSK_BUFF) == ETHER_TX_SWCX_XSK_BUFF) {
+		struct xsk_buff_pool *pool = buf_virt_addr;
+
+		if (pool)
+			xsk_tx_completed(pool, 1);
+		return true;
+	}
+
+	if (!buf_virt_addr ||
+	    (swcx->flags & ETHER_TX_SWCX_XDP_FRAME) != ETHER_TX_SWCX_XDP_FRAME)
+		return false;
+
+	if (swcx->buf_phy_addr &&
+	    !(swcx->flags & ETHER_TX_SWCX_XDP_TX_DMA_REUSE))
+		dma_unmap_single(dev, swcx->buf_phy_addr, swcx->len,
+				 DMA_TO_DEVICE);
+
+	xdp_return_frame((struct xdp_frame *)buf_virt_addr);
+
+	return true;
+}
+#endif
+
 /**
  * @brief Frees allocated DMA resources.
  *
@@ -2763,47 +2934,77 @@ exit:
  * @param[in] dev: device instance associated with driver.
  */
 static void free_tx_dma_resources(struct osi_dma_priv_data *osi_dma,
-				  struct device *dev)
+				  struct device *dev,
+				  struct ether_priv_data *pdata)
 {
-	unsigned long tx_desc_size = sizeof(struct osi_tx_desc) * osi_dma->tx_ring_sz;
+	unsigned long tx_desc_size;
 	struct osi_tx_ring *tx_ring = NULL;
 	void *buf_virt_addr = NULL;
 	unsigned int i;
 	unsigned int clean_idx, curr_idx;
-
 	const nveu32_t max_dma_chan[OSI_MAX_MAC_IP_TYPES] = {
 		OSI_EQOS_MAX_NUM_CHANS,
 		OSI_MGBE_T23X_MAX_NUM_CHANS,
 		OSI_MGBE_MAX_NUM_CHANS
 	};
 
-	for (i = 0; i <  max_dma_chan[osi_dma->mac]; i++) {
-		tx_ring = osi_dma->tx_ring[i];
+	tx_desc_size = sizeof(struct osi_tx_desc) * osi_dma->tx_ring_sz;
 
-		if (tx_ring != NULL) {
-			if (tx_ring->tx_swcx != NULL) {
-				/* Free Tx buffers lying in Tx DMA ring */
-				clean_idx = tx_ring->clean_idx;
-				curr_idx = tx_ring->cur_tx_idx;
-				while (clean_idx != curr_idx) {
-					buf_virt_addr = tx_ring->tx_swcx[clean_idx].buf_virt_addr;
-					if (buf_virt_addr != NULL) {
-						dev_kfree_skb_any(buf_virt_addr);
-					}
-					INCR_TX_DESC_INDEX(clean_idx, osi_dma->tx_ring_sz);
+	for (i = 0; i < max_dma_chan[osi_dma->mac]; i++) {
+		tx_ring = READ_ONCE(osi_dma->tx_ring[i]);
+
+		if (!tx_ring)
+			continue;
+
+		/* Normal close has already stopped TX queues, synchronized the
+		 * networking core and disabled NAPI. Withdraw the published ring
+		 * before releasing its storage so any defensive late lookup fails.
+		 * Allocation-error cleanup is not externally visible yet.
+		 */
+		WRITE_ONCE(osi_dma->tx_ring[i], NULL);
+
+		if (tx_ring->tx_swcx) {
+			/* Free Tx buffers lying in Tx DMA ring */
+			clean_idx = tx_ring->clean_idx;
+			curr_idx = tx_ring->cur_tx_idx;
+			while (clean_idx != curr_idx) {
+				struct osi_tx_swcx *swcx;
+				bool xdp_resource = false;
+
+				swcx = &tx_ring->tx_swcx[clean_idx];
+				buf_virt_addr = swcx->buf_virt_addr;
+#ifdef CONFIG_XDP_SOCKETS
+				xdp_resource =
+					ether_free_xdp_tx_resource(dev, swcx);
+				if (xdp_resource)
+					buf_virt_addr = NULL;
+#endif
+				if (!xdp_resource && swcx->buf_phy_addr) {
+					if (swcx->flags & OSI_PKT_CX_PAGED_BUF)
+						dma_unmap_page(dev,
+							       swcx->buf_phy_addr,
+							       swcx->len,
+							       DMA_TO_DEVICE);
+					else
+						dma_unmap_single(dev,
+								 swcx->buf_phy_addr,
+								 swcx->len,
+								 DMA_TO_DEVICE);
+					swcx->buf_phy_addr = 0;
 				}
-				kfree(tx_ring->tx_swcx);
+				if (buf_virt_addr)
+					dev_kfree_skb_any(buf_virt_addr);
+				INCR_TX_DESC_INDEX(clean_idx, osi_dma->tx_ring_sz);
 			}
-
-			if (tx_ring->tx_desc != NULL) {
-				dma_free_coherent(dev, tx_desc_size,
-						  tx_ring->tx_desc,
-						  tx_ring->tx_desc_phy_addr);
-			}
-
-			kfree(tx_ring);
-			osi_dma->tx_ring[i] = NULL;
+			kfree(tx_ring->tx_swcx);
 		}
+
+		if (tx_ring->tx_desc) {
+			dma_free_coherent(dev, tx_desc_size, tx_ring->tx_desc,
+					  tx_ring->tx_desc_phy_addr);
+		}
+
+		kfree(tx_ring);
 	}
 }
 
@@ -2908,7 +3109,7 @@ static int ether_allocate_tx_dma_resources(struct osi_dma_priv_data *osi_dma,
 
 	return 0;
 exit:
-	free_tx_dma_resources(osi_dma, dev);
+	free_tx_dma_resources(osi_dma, dev, NULL);
 	return ret;
 }
 
@@ -2963,7 +3164,7 @@ static void free_dma_resources(struct ether_priv_data *pdata)
 	struct osi_dma_priv_data *osi_dma = pdata->osi_dma;
 	struct device *dev = pdata->dev;
 
-	free_tx_dma_resources(osi_dma, dev);
+	free_tx_dma_resources(osi_dma, dev, pdata);
 	free_rx_dma_resources(osi_dma, pdata);
 
 	/* unmap reserved DMA*/
@@ -3023,23 +3224,27 @@ static int ether_allocate_dma_resources(struct ether_priv_data *pdata)
 
 	ret = ether_allocate_tx_dma_resources(osi_dma, pdata->dev);
 	if (ret != 0) {
-		goto error_alloc;
+		goto err_unmap_resv;
 	}
 
 	ret = ether_allocate_rx_dma_resources(osi_dma, pdata);
 	if (ret != 0) {
-		free_tx_dma_resources(osi_dma, pdata->dev);
-		goto error_alloc;
+		free_tx_dma_resources(osi_dma, pdata->dev, pdata);
+		goto err_unmap_resv;
 	}
 
 	pdata->resv_buf_virt_addr = (void *)skb;
 
-	return ret;
+	return 0;
+
+err_unmap_resv:
+	dma_unmap_single(pdata->dev, pdata->resv_buf_phy_addr,
+			 osi_dma->rx_buf_len, DMA_FROM_DEVICE);
+	pdata->resv_buf_phy_addr = 0;
 
 error_alloc:
-	if (skb != NULL) {
+	if (skb)
 		dev_kfree_skb_any(skb);
-	}
 	pdata->resv_buf_virt_addr = NULL;
 	pdata->resv_buf_phy_addr = 0;
 
@@ -3365,6 +3570,15 @@ int ether_open(struct net_device *dev)
 		return -EINVAL;
 	}
 
+	/* A previous close can leave carrier set until the PHY state machine
+	 * reports the physical link transition. Keep TX gated while hardware is
+	 * reinitialized; ether_adjust_link() turns carrier on after link-up.
+	 */
+	netif_carrier_off(dev);
+	pdata->oldlink = 0;
+
+	pdata->is_shutdown = 0;
+
 	/* Reset the PHY */
 	if (gpio_is_valid(pdata->phy_reset)) {
 		ret = ether_handle_phy_reset(pdata->dev, pdata, OSI_ENABLE);
@@ -3434,6 +3648,14 @@ int ether_open(struct net_device *dev)
 		dev_err(pdata->dev, "failed to allocate DMA resources\n");
 		goto err_alloc;
 	}
+
+#ifdef CONFIG_XDP_SOCKETS
+	ret = ether_xdp_rxq_setup(pdata);
+	if (ret < 0) {
+		dev_err(pdata->dev, "failed to setup XDP RX queues\n");
+		goto err_hw_init;
+	}
+#endif /* CONFIG_XDP_SOCKETS */
 
 	/* initialize MAC/MTL/DMA Common registers */
 	/** If COE is enabled, disable RIWT so that IOC is set for all desc. */
@@ -3634,6 +3856,19 @@ static inline void ether_reset_stats(struct ether_priv_data *pdata)
 	memset(&osi_core->mmc, 0U, sizeof(struct osi_mmc_counters));
 	memset(&pdata->xstats, 0U,
 	       sizeof(struct ether_xtra_stat_counters));
+#ifdef CONFIG_XDP_SOCKETS
+	{
+		unsigned int i;
+		struct osi_dma_priv_data *osi_dma = pdata->osi_dma;
+
+		for (i = 0; i < osi_dma->num_dma_chans; i++) {
+			unsigned int chan = osi_dma->dma_chans[i];
+
+			if (pdata->rx_napi[chan])
+				ether_xdp_stats_reset(pdata->rx_napi[chan]);
+		}
+	}
+#endif /* CONFIG_XDP_SOCKETS */
 #ifndef OSI_STRIPPED_LIB
 	memset(&osi_dma->dstats, 0U,
 	       sizeof(struct osi_xtra_dma_stat_counters));
@@ -3739,9 +3974,13 @@ int ether_close(struct net_device *ndev)
 	struct ether_priv_data *pdata = netdev_priv(ndev);
 	unsigned int chan = 0x0;
 	int i;
+	bool keep_phy_for_wol = pdata->phydev &&
+				 device_may_wakeup(&ndev->dev) &&
+				 pdata->is_shutdown;
 
 	if (pdata->sentrymode_state == ETHER_SENTRY_MODE_ENTERED) {
 		dev_err(pdata->dev, "%s: interface is in sentry mode\n", __func__);
+		pdata->is_shutdown = 0;
 		return -EINVAL;
 	}
 
@@ -3773,29 +4012,34 @@ int ether_close(struct net_device *ndev)
 #ifdef HSI_SUPPORT
 	cancel_delayed_work_sync(&pdata->ether_hsi_work);
 #endif
-	/* Stop and disconnect the PHY */
+	/**
+	 * Skip stopping and disconnecting the PHY only if WOL is enabled
+	 * and system is shutting down
+	 * If WOL is enabled, PHY should be active to detect magic packets
+	 * and send interrupt to wake from poweroff state.
+	 */
 	if (pdata->phydev != NULL) {
-		/* Check and clear WoL status */
-		if (device_may_wakeup(&ndev->dev)) {
-			if (disable_irq_wake(pdata->phydev->irq)) {
-				dev_warn(pdata->dev,
-					 "PHY disable irq wake fail\n");
-			}
-			device_init_wakeup(&ndev->dev, false);
-		}
+		if (!keep_phy_for_wol) {
+			/* Normal interface down OR shutdown without WoL - fully disconnect PHY */
 
-		phy_stop(pdata->phydev);
-		phy_disconnect(pdata->phydev);
+			phy_stop(pdata->phydev);
+			phy_disconnect(pdata->phydev);
 
-		if (gpio_is_valid(pdata->phy_reset)) {
-			ether_handle_phy_reset(pdata->dev, pdata, OSI_DISABLE);
+			if (gpio_is_valid(pdata->phy_reset))
+				ether_handle_phy_reset(pdata->dev, pdata, OSI_DISABLE);
+
+			pdata->phydev = NULL;
+
+			/* Clear shutdown flag after normal close */
+			pdata->is_shutdown = 0;
 		}
-		pdata->phydev = NULL;
 	}
 	cancel_delayed_work_sync(&pdata->set_speed_work);
 
 	/* turn off sources of data into dev */
 	netif_tx_disable(pdata->ndev);
+	netif_carrier_off(ndev);
+	pdata->oldlink = 0;
 
 	/* Drain in-flight TX from the network stack before freeing
 	 * hardware resources.
@@ -3845,7 +4089,7 @@ int ether_close(struct net_device *ndev)
 	}
 
 	/* All MDIO interfaces must be disabled before resetting the MAC */
-	if (pdata->mii)
+	if (pdata->mii && !keep_phy_for_wol)
 		mdiobus_unregister(pdata->mii);
 
 	/* Assert MAC RST gpio */
@@ -5028,6 +5272,13 @@ int ether_change_mtu(struct net_device *ndev, int new_mtu)
 		goto out;
 	}
 
+#ifdef CONFIG_XDP_SOCKETS
+	if (new_mtu > ETH_DATA_LEN && rtnl_dereference(pdata->xdp_prog)) {
+		netdev_err(pdata->ndev,
+			   "Jumbo frames not supported with XDP\n");
+		return -EOPNOTSUPP;
+	}
+#endif /* CONFIG_XDP_SOCKETS */
 	ioctl_data.cmd = OSI_CMD_MAC_MTU;
 	ioctl_data.arg1_u32 = set_mtu;
 	ret = osi_handle_ioctl(osi_core, &ioctl_data);
@@ -5186,6 +5437,11 @@ int ether_setup_tc(struct net_device *ndev, enum tc_setup_type type,
 static const struct net_device_ops ether_netdev_ops = {
 	.ndo_open = ether_open,
 	.ndo_stop = ether_close,
+#ifdef CONFIG_XDP_SOCKETS
+	.ndo_bpf = ether_bpf,
+	.ndo_xdp_xmit = ether_xdp_xmit,
+	.ndo_xsk_wakeup = ether_xsk_wakeup,
+#endif /* CONFIG_XDP_SOCKETS */
 	.ndo_start_xmit = ether_start_xmit,
 	.ndo_do_ioctl = ether_ioctl,
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)
@@ -5212,21 +5468,70 @@ int ether_napi_poll_rx(struct napi_struct *napi, int budget)
 	struct osi_dma_priv_data *osi_dma = pdata->osi_dma;
 	unsigned int chan = rx_napi->chan;
 	unsigned int more_data_avail;
+#ifdef CONFIG_XDP_SOCKETS
+	unsigned int xsk_tx_budget;
+	int xsk_done = 0;
+#endif
 	unsigned long flags;
 	int received = 0;
+	int work_done;
 
 	received = osi_process_rx_completions(osi_dma, chan, budget,
 					      &more_data_avail);
-	if (received < budget) {
-		napi_complete(napi);
-		raw_spin_lock_irqsave(&pdata->rlock, flags);
-		osi_handle_dma_intr(osi_dma, chan,
-				    OSI_DMA_CH_RX_INTR,
-				    OSI_DMA_INTR_ENABLE);
-		raw_spin_unlock_irqrestore(&pdata->rlock, flags);
+#ifdef CONFIG_XDP_SOCKETS
+	/* Flush redirects before doing refill or TX-drain work. xdp_do_redirect()
+	 * only stages frames; xdp_do_flush() makes them visible to AF_XDP user
+	 * space, so work placed before the flush is added to RX packet latency.
+	 */
+	if (rx_napi->xdp_redirect_pending) {
+		xdp_do_flush();
+		rx_napi->xdp_redirect_pending = false;
 	}
 
-	return received;
+	if (rx_napi->xsk_pool)
+		ether_xsk_rx_refill(pdata, chan);
+#endif
+#ifdef CONFIG_XDP_SOCKETS
+	/* AF_XDP exposes one napi_id to user space for the socket. For this
+	 * driver that napi_id is the RX NAPI instance because the XSK pool is
+	 * attached to the RX queue.
+	 *
+	 * In busy-poll mode, sendmsg()/poll() may drive only that RX NAPI and
+	 * may not call ndo_xsk_wakeup() for every TX kick. Therefore RX NAPI
+	 * must also drain the XSK TX ring; otherwise AF_XDP TX can stall or
+	 * make progress only after another wakeup or interrupt.
+	 *
+	 * TX completion still belongs to TX NAPI, so schedule TX NAPI after
+	 * submitting XSK TX descriptors.
+	 */
+	if (rx_napi->xsk_pool) {
+		/* Keep RX NAPI within its poll budget when it opportunistically
+		 * drains AF_XDP TX for busy-poll latency.
+		 */
+		xsk_tx_budget = (received < budget) ?
+				((unsigned int)budget - (unsigned int)received) :
+				0U;
+		if (xsk_tx_budget > 0U)
+			xsk_done = ether_xsk_tx(pdata, chan, xsk_tx_budget);
+		if (xsk_done > 0)
+			napi_schedule(&pdata->tx_napi[chan]->napi);
+	}
+#endif /* CONFIG_XDP_SOCKETS */
+	work_done = received;
+#ifdef CONFIG_XDP_SOCKETS
+	work_done += xsk_done;
+#endif
+	if (work_done < budget && napi_complete_done(napi, work_done)) {
+		raw_spin_lock_irqsave(&pdata->dma_ch_lock[chan], flags);
+		if (!ether_napi_is_scheduled(napi)) {
+			osi_handle_dma_intr(osi_dma, chan,
+					    OSI_DMA_CH_RX_INTR,
+					    OSI_DMA_INTR_ENABLE);
+		}
+		raw_spin_unlock_irqrestore(&pdata->dma_ch_lock[chan], flags);
+	}
+
+	return work_done;
 }
 
 int ether_napi_poll_tx(struct napi_struct *napi, int budget)
@@ -5238,8 +5543,16 @@ int ether_napi_poll_tx(struct napi_struct *napi, int budget)
 	unsigned int chan = tx_napi->chan;
 	unsigned long flags;
 	int processed;
+	int xsk_done = 0;
+	int work_done;
 
 	processed = osi_process_tx_completions(osi_dma, chan, budget);
+#ifdef CONFIG_XDP_SOCKETS
+	if (processed < budget && pdata->rx_napi[chan]->xsk_pool)
+		xsk_done = ether_xsk_tx(pdata, chan,
+					(unsigned int)(budget - processed));
+#endif
+	work_done = processed + xsk_done;
 
 	/* re-arm the timer if tx ring is not empty */
 	if (!osi_txring_empty(osi_dma, chan) &&
@@ -5251,16 +5564,17 @@ int ether_napi_poll_tx(struct napi_struct *napi, int budget)
 			      HRTIMER_MODE_REL);
 	}
 
-	if (processed < budget) {
-		napi_complete(napi);
-		raw_spin_lock_irqsave(&pdata->rlock, flags);
-		osi_handle_dma_intr(osi_dma, chan,
-				    OSI_DMA_CH_TX_INTR,
-				    OSI_DMA_INTR_ENABLE);
-		raw_spin_unlock_irqrestore(&pdata->rlock, flags);
+	if (work_done < budget && napi_complete_done(napi, work_done)) {
+		raw_spin_lock_irqsave(&pdata->dma_ch_lock[chan], flags);
+		if (!ether_napi_is_scheduled(napi)) {
+			osi_handle_dma_intr(osi_dma, chan,
+					    OSI_DMA_CH_TX_INTR,
+					    OSI_DMA_INTR_ENABLE);
+		}
+		raw_spin_unlock_irqrestore(&pdata->dma_ch_lock[chan], flags);
 	}
 
-	return processed;
+	return work_done;
 }
 
 enum hrtimer_restart ether_tx_usecs_hrtimer(struct hrtimer *data)
@@ -5268,14 +5582,20 @@ enum hrtimer_restart ether_tx_usecs_hrtimer(struct hrtimer *data)
 	struct ether_tx_napi *tx_napi = container_of(data, struct ether_tx_napi,
 						     tx_usecs_timer);
 	struct ether_priv_data *pdata = tx_napi->pdata;
+	unsigned int chan = tx_napi->chan;
 	unsigned long val;
+	unsigned long flags;
+	bool do_schedule;
 
-	val = pdata->xstats.tx_usecs_swtimer_n[tx_napi->chan];
-	pdata->xstats.tx_usecs_swtimer_n[tx_napi->chan] = update_stats_counter(val, 1U);
+	val = pdata->xstats.tx_usecs_swtimer_n[chan];
+	pdata->xstats.tx_usecs_swtimer_n[chan] = update_stats_counter(val, 1U);
 
-	atomic_set(&pdata->tx_napi[tx_napi->chan]->tx_usecs_timer_armed,
+	atomic_set(&pdata->tx_napi[chan]->tx_usecs_timer_armed,
 		   OSI_DISABLE);
-	if (likely(napi_schedule_prep(&tx_napi->napi)))
+	raw_spin_lock_irqsave(&pdata->dma_ch_lock[chan], flags);
+	do_schedule = napi_schedule_prep(&tx_napi->napi);
+	raw_spin_unlock_irqrestore(&pdata->dma_ch_lock[chan], flags);
+	if (likely(do_schedule))
 		__napi_schedule_irqoff(&tx_napi->napi);
 
 	return HRTIMER_NORESTART;
@@ -5315,6 +5635,7 @@ static int ether_alloc_napi(struct ether_priv_data *pdata)
 
 		pdata->tx_napi[chan]->pdata = pdata;
 		pdata->tx_napi[chan]->chan = chan;
+		pdata->tx_napi[chan]->ndev_queue_index = i;
 #if defined(NV_NETIF_NAPI_ADD_WEIGHT_PRESENT) /* Linux v6.1 */
 		netif_napi_add_weight(ndev, &pdata->tx_napi[chan]->napi,
 			       ether_napi_poll_tx, 64);
@@ -5333,6 +5654,10 @@ static int ether_alloc_napi(struct ether_priv_data *pdata)
 
 		pdata->rx_napi[chan]->pdata = pdata;
 		pdata->rx_napi[chan]->chan = chan;
+		pdata->rx_napi[chan]->ndev_queue_index = i;
+#ifdef CONFIG_XDP_SOCKETS
+		ether_xdp_stats_init(pdata->rx_napi[chan]);
+#endif /* CONFIG_XDP_SOCKETS */
 #if defined(NV_NETIF_NAPI_ADD_WEIGHT_PRESENT) /* Linux v6.1 */
 		netif_napi_add_weight(ndev, &pdata->rx_napi[chan]->napi,
 			       ether_napi_poll_rx, 64);
@@ -6547,8 +6872,8 @@ static int ether_configure_car(struct platform_device *pdev,
 			       struct ether_priv_data *pdata)
 {
 	struct device *dev = pdata->dev;
-	struct device_node *np = dev->of_node;
 	struct osi_core_priv_data *osi_core = pdata->osi_core;
+	struct gpio_desc *desc;
 	int ret = 0;
 
 
@@ -6577,13 +6902,18 @@ static int ether_configure_car(struct platform_device *pdev,
 	}
 
 	/* get PHY reset */
-	pdata->phy_reset = of_get_named_gpio(np, "nvidia,phy-reset-gpio", 0);
-	if (pdata->phy_reset < 0) {
+	desc = gpiod_get_index_optional(dev, "nvidia,phy-reset", 0, GPIOD_ASIS);
+	if (IS_ERR(desc)) {
+		pdata->phy_reset = PTR_ERR(desc);
 		if (pdata->phy_reset == -EPROBE_DEFER)
 			return pdata->phy_reset;
-		else
-			dev_info(dev, "failed to get phy reset gpio error: %d\n",
-				pdata->phy_reset);
+		dev_info(dev, "failed to get phy reset gpio error: %d\n",
+			 pdata->phy_reset);
+	} else if (desc) {
+		pdata->phy_reset = desc_to_gpio(desc);
+		gpiod_put(desc);
+	} else {
+		pdata->phy_reset = -ENOENT;
 	}
 
 	if (gpio_is_valid(pdata->phy_reset)) {
@@ -8053,6 +8383,29 @@ int ether_probe(struct platform_device *pdev)
 	ndev->netdev_ops = &ether_netdev_ops;
 	ether_set_ethtool_ops(ndev);
 
+#if defined(CONFIG_XDP_SOCKETS) && \
+	defined(NV_NET_DEVICE_STRUCT_HAS_XDP_FEATURES)
+	/* Keep xdp_features in sync with the XDP callbacks registered in
+	 * ether_netdev_ops. The feature bits are capability reporting; the
+	 * actual redirect transmit path still enters through .ndo_xdp_xmit.
+	 */
+	ndev->xdp_features = NETDEV_XDP_ACT_BASIC |
+			      NETDEV_XDP_ACT_NDO_XMIT;
+#ifdef ETHER_PAGE_POOL
+	ndev->xdp_features |= NETDEV_XDP_ACT_REDIRECT;
+#ifdef NV_NETDEV_XDP_ACT_XSK_ZEROCOPY_PRESENT
+	ndev->xdp_features |= NETDEV_XDP_ACT_XSK_ZEROCOPY;
+#endif
+#endif /* ETHER_PAGE_POOL */
+#ifdef NV_NET_DEVICE_STRUCT_HAS_XDP_ZC_MAX_SEGS
+	/* AF_XDP zero-copy uses one UMEM frame per packet in this driver.
+	 * Do not advertise multi-segment AF_XDP packets unless the TX/RX
+	 * paths are extended to consume or produce chained AF_XDP descriptors.
+	 */
+	ndev->xdp_zc_max_segs = 1;
+#endif /* NV_NET_DEVICE_STRUCT_HAS_XDP_ZC_MAX_SEGS */
+#endif /* CONFIG_XDP_SOCKETS && xdp_features */
+
 	ret = ether_alloc_napi(pdata);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "failed to allocate NAPI\n");
@@ -8106,8 +8459,20 @@ int ether_probe(struct platform_device *pdev)
 		goto err_sysfs;
 	}
 
+#if defined(CONFIG_PM) && !defined(OSI_STRIPPED_LIB)
+	pdata->reboot_notifier.notifier_call = ether_reboot_notifier;
+	ret = register_reboot_notifier(&pdata->reboot_notifier);
+	if (ret) {
+		dev_warn(&pdev->dev, "failed to register reboot notifier: %d\n",
+			 ret);
+		ret = 0;
+	} else {
+		pdata->reboot_notifier_registered = true;
+	}
+#endif
 
-	raw_spin_lock_init(&pdata->rlock);
+	for (i = 0U; i < OSI_MGBE_MAX_NUM_CHANS; i++)
+		raw_spin_lock_init(&pdata->dma_ch_lock[i]);
 	raw_spin_lock_init(&pdata->txts_lock);
 	init_filter_values(pdata);
 
@@ -8194,6 +8559,11 @@ int ether_remove(struct platform_device *pdev)
 	macsec_remove(pdata);
 #endif /* MACSEC_SUPPORT */
 
+#if defined(CONFIG_PM) && !defined(OSI_STRIPPED_LIB)
+	if (pdata->reboot_notifier_registered)
+		unregister_reboot_notifier(&pdata->reboot_notifier);
+#endif
+
 	unregister_netdev(ndev);
 
 	/* remove nvethernet sysfs group under /sys/devices/<ether_device>/ */
@@ -8234,6 +8604,8 @@ void ether_shutdown(struct platform_device *pdev)
 
 	if (!netif_running(ndev))
 		return;
+
+	pdata->is_shutdown = 1;
 
 	ret = ether_close(ndev);
 	if (ret)
@@ -8617,6 +8989,61 @@ static inline int ether_revert_wol(struct device *dev)
 	return ret;
 }
 
+static int ether_configure_wol(struct device *dev)
+{
+	int ret = 0;
+	struct net_device *ndev = dev_get_drvdata(dev);
+	struct ether_priv_data *pdata = netdev_priv(ndev);
+	struct phy_device *phydev = pdata->phydev;
+
+	if (pdata->wol.wolopts) {
+		ret = ether_set_wol_impl(ndev, &pdata->wol);
+		if (ret)
+			goto ether_configure_wol_fail;
+
+		ret = enable_irq_wake(phydev->irq);
+		if (ret) {
+			dev_err(pdata->dev, "PHY enable irq wake failed, %d\n",
+				ret);
+			goto ether_configure_wol_fail;
+		}
+		/* enable device wake on WoL set */
+		device_init_wakeup(&ndev->dev, true);
+	}
+
+ether_configure_wol_fail:
+	if (unlikely(ret))
+		ether_revert_wol(dev);
+
+	return ret;
+}
+
+static int ether_reboot_notifier(struct notifier_block *nb,
+				 unsigned long event, void *unused)
+{
+	struct ether_priv_data *pdata =
+		container_of(nb, struct ether_priv_data, reboot_notifier);
+	int ret = 0;
+
+	switch (event) {
+	case SYS_HALT:
+	case SYS_POWER_OFF:
+		break;
+	default:
+		return NOTIFY_DONE;
+	}
+
+	if (!netif_running(pdata->ndev))
+		return NOTIFY_DONE;
+
+	ret = ether_configure_wol(pdata->dev);
+	if (ret)
+		dev_err(pdata->dev, "Failed to configure WoL before shutdown: %d\n",
+			ret);
+
+	return NOTIFY_DONE;
+}
+
 /**
  * @brief Ethernet platform driver prepare callback.
  *
@@ -8629,31 +9056,7 @@ static inline int ether_revert_wol(struct device *dev)
  */
 static int ether_prepare(struct device *dev)
 {
-	int ret = 0;
-	struct net_device *ndev = dev_get_drvdata(dev);
-	struct ether_priv_data *pdata = netdev_priv(ndev);
-	struct phy_device *phydev = pdata->phydev;
-
-	if (pdata->wol.wolopts) {
-		ret = ether_set_wol_impl(ndev, &pdata->wol);
-		if (ret)
-			goto ether_prepare_fail;
-
-		ret = enable_irq_wake(phydev->irq);
-		if (ret) {
-			dev_err(pdata->dev, "PHY enable irq wake failed, %d\n",
-				ret);
-			goto ether_prepare_fail;
-		}
-		/* enable device wake on WoL set */
-		device_init_wakeup(&ndev->dev, true);
-	}
-
-ether_prepare_fail:
-	if (unlikely(ret))
-		ether_revert_wol(dev);
-
-	return ret;
+	return ether_configure_wol(dev);
 }
 
 /**

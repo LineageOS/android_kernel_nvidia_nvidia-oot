@@ -12,18 +12,16 @@
 
 #include <linux/slab.h>
 #include <linux/uaccess.h>
-#include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/module.h>
 #include <linux/seq_file.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
-#include <linux/of_gpio.h>
 
 #include <media/tegra_v4l2_camera.h>
 #include <media/tegracam_core.h>
 #include <media/imx477.h>
 
-#include "../platform/tegra/camera/camera_gpio.h"
 #include "imx477_mode_tbls.h"
 
 #define IMX477_SENSOR_INTERNAL_CLK_FREQ   840000000
@@ -342,11 +340,11 @@ static int imx477_power_on(struct camera_common_data *s_data)
 		return err;
 	}
 
-	if (pw->reset_gpio) {
-		if (gpiod_cansleep(gpio_to_desc(pw->reset_gpio)))
-			gpio_set_value_cansleep(pw->reset_gpio, 0);
+	if (pw->reset_gpiod) {
+		if (gpiod_cansleep(pw->reset_gpiod))
+			gpiod_set_value_cansleep(pw->reset_gpiod, 0);
 		else
-			gpio_set_value(pw->reset_gpio, 0);
+			gpiod_set_value(pw->reset_gpiod, 0);
 	}
 
 	if (unlikely(!(pw->avdd || pw->iovdd || pw->dvdd)))
@@ -375,11 +373,11 @@ static int imx477_power_on(struct camera_common_data *s_data)
 	usleep_range(10, 20);
 
 skip_power_seqn:
-	if (pw->reset_gpio) {
-		if (gpiod_cansleep(gpio_to_desc(pw->reset_gpio)))
-			gpio_set_value_cansleep(pw->reset_gpio, 1);
+	if (pw->reset_gpiod) {
+		if (gpiod_cansleep(pw->reset_gpiod))
+			gpiod_set_value_cansleep(pw->reset_gpiod, 1);
 		else
-			gpio_set_value(pw->reset_gpio, 1);
+			gpiod_set_value(pw->reset_gpiod, 1);
 	}
 
 	/* Need to wait for t4 + t5 + t9 + t10 time as per the data sheet */
@@ -418,11 +416,11 @@ static int imx477_power_off(struct camera_common_data *s_data)
 			return err;
 		}
 	} else {
-		if (pw->reset_gpio) {
-			if (gpiod_cansleep(gpio_to_desc(pw->reset_gpio)))
-				gpio_set_value_cansleep(pw->reset_gpio, 0);
+		if (pw->reset_gpiod) {
+			if (gpiod_cansleep(pw->reset_gpiod))
+				gpiod_set_value_cansleep(pw->reset_gpiod, 0);
 			else
-				gpio_set_value(pw->reset_gpio, 0);
+				gpiod_set_value(pw->reset_gpiod, 0);
 		}
 
 		usleep_range(10, 10);
@@ -461,8 +459,8 @@ static int imx477_power_put(struct tegracam_device *tc_dev)
 	pw->avdd = NULL;
 	pw->iovdd = NULL;
 
-	if (likely(pw->reset_gpio))
-		gpio_free(pw->reset_gpio);
+	if (likely(pw->reset_gpiod))
+		gpiod_put(pw->reset_gpiod);
 
 	return 0;
 }
@@ -521,9 +519,9 @@ static int imx477_power_get(struct tegracam_device *tc_dev)
 	}
 
 	/* Reset or ENABLE GPIO */
-	pw->reset_gpio = pdata->reset_gpio;
-	err = gpio_request(pw->reset_gpio, "cam_reset_gpio");
-	if (err < 0) {
+	pw->reset_gpiod = gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
+	if (IS_ERR(pw->reset_gpiod)) {
+		err = PTR_ERR(pw->reset_gpiod);
 		dev_err(dev, "%s: unable to request reset_gpio (%d)\n",
 			__func__, err);
 		goto done;
@@ -542,9 +540,7 @@ static struct camera_common_pdata *imx477_parse_dt(struct tegracam_device
 	struct device_node *np = dev->of_node;
 	struct camera_common_pdata *board_priv_pdata;
 	const struct of_device_id *match;
-	struct camera_common_pdata *ret = NULL;
 	int err = 0;
-	int gpio;
 
 	if (!np)
 		return NULL;
@@ -559,15 +555,6 @@ static struct camera_common_pdata *imx477_parse_dt(struct tegracam_device
 					sizeof(*board_priv_pdata), GFP_KERNEL);
 	if (!board_priv_pdata)
 		return NULL;
-
-	gpio = of_get_named_gpio(np, "reset-gpios", 0);
-	if (gpio < 0) {
-		if (gpio == -EPROBE_DEFER)
-			ret = ERR_PTR(-EPROBE_DEFER);
-		dev_err(dev, "reset-gpios not found\n");
-		goto error;
-	}
-	board_priv_pdata->reset_gpio = (unsigned int)gpio;
 
 	err = of_property_read_string(np, "mclk", &board_priv_pdata->mclk_name);
 	if (err)
@@ -587,11 +574,6 @@ static struct camera_common_pdata *imx477_parse_dt(struct tegracam_device
 	board_priv_pdata->has_eeprom = of_property_read_bool(np, "has-eeprom");
 
 	return board_priv_pdata;
-
-error:
-	devm_kfree(dev, board_priv_pdata);
-
-	return ret;
 }
 
 static int imx477_set_mode(struct tegracam_device *tc_dev)
@@ -751,7 +733,7 @@ static int imx477_probe(struct i2c_client *client,
 
 	priv->i2c_client = tc_dev->client = client;
 	tc_dev->dev = dev;
-	strncpy(tc_dev->name, "imx477", sizeof(tc_dev->name));
+	strscpy(tc_dev->name, "imx477", sizeof(tc_dev->name));
 	tc_dev->dev_regmap_config = &sensor_regmap_config;
 	tc_dev->sensor_ops = &imx477_common_ops;
 	tc_dev->v4l2sd_internal_ops = &imx477_subdev_internal_ops;

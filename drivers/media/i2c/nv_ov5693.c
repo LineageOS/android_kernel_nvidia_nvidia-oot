@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2013-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2013-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 /*
  * nv_ov5693.c - ov5693 sensor driver
  */
@@ -8,19 +8,17 @@
 
 #include <linux/slab.h>
 #include <linux/uaccess.h>
-#include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/module.h>
 #include <linux/debugfs.h>
 
 #include <linux/seq_file.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
-#include <linux/of_gpio.h>
 #include <media/tegra-v4l2-camera.h>
 #include <media/tegracam_core.h>
 #include <media/ov5693.h>
 
-#include "../platform/tegra/camera/camera_gpio.h"
 #include "ov5693_mode_tbls.h"
 #define CREATE_TRACE_POINTS
 #include <trace/events/ov5693.h>
@@ -154,19 +152,15 @@ static int ov5693_write_table(struct ov5693 *priv,
 					 OV5693_TABLE_END);
 }
 
-static void ov5693_gpio_set(struct camera_common_data *s_data,
-			    unsigned int gpio, int val)
+static void ov5693_gpio_set(struct gpio_desc *desc, int val)
 {
-	struct camera_common_pdata *pdata = s_data->pdata;
+	if (!desc)
+		return;
 
-	if (pdata && pdata->use_cam_gpio)
-		cam_gpio_ctrl(s_data->dev, gpio, val, 1);
-	else {
-		if (gpiod_cansleep(gpio_to_desc(gpio)))
-			gpio_set_value_cansleep(gpio, val);
-		else
-			gpio_set_value(gpio, val);
-	}
+	if (gpiod_cansleep(desc))
+		gpiod_set_value_cansleep(desc, val);
+	else
+		gpiod_set_value(desc, val);
 }
 
 static int ov5693_power_on(struct camera_common_data *s_data)
@@ -202,8 +196,8 @@ static int ov5693_power_on(struct camera_common_data *s_data)
 		goto ov5693_iovdd_fail;
 
 	usleep_range(1, 2);
-	if (gpio_is_valid(pw->pwdn_gpio))
-		ov5693_gpio_set(s_data, pw->pwdn_gpio, 1);
+	if (pw->pwdn_gpiod)
+		ov5693_gpio_set(pw->pwdn_gpiod, 1);
 
 	/*
 	 * datasheet 2.9: reset requires ~2ms settling time
@@ -211,8 +205,8 @@ static int ov5693_power_on(struct camera_common_data *s_data)
 	 */
 	usleep_range(2000, 2010);
 
-	if (gpio_is_valid(pw->reset_gpio))
-		ov5693_gpio_set(s_data, pw->reset_gpio, 1);
+	if (pw->reset_gpiod)
+		ov5693_gpio_set(pw->reset_gpiod, 1);
 
 	/* datasheet fig 2-9: t3 */
 	usleep_range(2000, 2010);
@@ -253,11 +247,11 @@ static int ov5693_power_off(struct camera_common_data *s_data)
 	 * signal propagation as specified by sensor vendor
 	 */
 	usleep_range(21, 25);
-	if (gpio_is_valid(pw->pwdn_gpio))
-		ov5693_gpio_set(s_data, pw->pwdn_gpio, 0);
+	if (pw->pwdn_gpiod)
+		ov5693_gpio_set(pw->pwdn_gpiod, 0);
 	usleep_range(1, 2);
-	if (gpio_is_valid(pw->reset_gpio))
-		ov5693_gpio_set(s_data, pw->reset_gpio, 0);
+	if (pw->reset_gpiod)
+		ov5693_gpio_set(pw->reset_gpiod, 0);
 
 	/* datasheet 2.9: reset requires ~2ms settling time*/
 	usleep_range(2000, 2010);
@@ -276,20 +270,14 @@ static int ov5693_power_put(struct tegracam_device *tc_dev)
 {
 	struct camera_common_data *s_data = tc_dev->s_data;
 	struct camera_common_power_rail *pw = s_data->power;
-	struct camera_common_pdata *pdata = s_data->pdata;
-	struct device *dev = tc_dev->dev;
 
 	if (unlikely(!pw))
 		return -EFAULT;
 
-	if (pdata && pdata->use_cam_gpio)
-		cam_gpio_deregister(dev, pw->pwdn_gpio);
-	else {
-		if (gpio_is_valid(pw->pwdn_gpio))
-			gpio_free(pw->pwdn_gpio);
-		if (gpio_is_valid(pw->reset_gpio))
-			gpio_free(pw->reset_gpio);
-	}
+	if (pw->pwdn_gpiod)
+		gpiod_put(pw->pwdn_gpiod);
+	if (pw->reset_gpiod)
+		gpiod_put(pw->reset_gpiod);
 
 	return 0;
 }
@@ -336,36 +324,26 @@ static int ov5693_power_get(struct tegracam_device *tc_dev)
 	/* IO 1.8v */
 	err |= camera_common_regulator_get(dev,
 			&pw->iovdd, pdata->regulators.iovdd);
+	if (err)
+		return err;
 
-	if (!err) {
-		pw->reset_gpio = pdata->reset_gpio;
-		pw->pwdn_gpio = pdata->pwdn_gpio;
+	pw->pwdn_gpiod = gpiod_get(dev, "pwdn", GPIOD_OUT_HIGH);
+	if (IS_ERR(pw->pwdn_gpiod)) {
+		dev_dbg(dev, "%s can't request pwdn_gpio %ld\n",
+			__func__, PTR_ERR(pw->pwdn_gpiod));
+		pw->pwdn_gpiod = NULL;
 	}
-	if (pdata->use_cam_gpio) {
-		if (cam_gpio_register(dev, pw->pwdn_gpio))
-			dev_err(dev, "%s ERR can't register cam gpio %u!\n",
-				 __func__, pw->pwdn_gpio);
-	} else {
-		if (gpio_is_valid(pw->pwdn_gpio)) {
-			ret = gpio_request(pw->pwdn_gpio, "cam_pwdn_gpio");
-			if (ret < 0) {
-				dev_dbg(dev, "%s can't request pwdn_gpio %d\n",
-					__func__, ret);
-			}
-			gpio_direction_output(pw->pwdn_gpio, 1);
-		}
-		if (gpio_is_valid(pw->reset_gpio)) {
-			ret = gpio_request(pw->reset_gpio, "cam_reset_gpio");
-			if (ret < 0) {
-				dev_dbg(dev, "%s can't request reset_gpio %d\n",
-					__func__, ret);
-			}
-			gpio_direction_output(pw->reset_gpio, 1);
-		}
+
+	pw->reset_gpiod = gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
+	if (IS_ERR(pw->reset_gpiod)) {
+		dev_dbg(dev, "%s can't request reset_gpio %ld\n",
+			__func__, PTR_ERR(pw->reset_gpiod));
+		pw->reset_gpiod = NULL;
 	}
 
 	pw->state = SWITCH_OFF;
-	return err;
+
+	return 0;
 }
 
 static const struct of_device_id ov5693_of_match[] = {
@@ -782,7 +760,6 @@ static struct camera_common_pdata *ov5693_parse_dt(struct tegracam_device
 	struct device_node *node = dev->of_node;
 	struct camera_common_pdata *board_priv_pdata;
 	const struct of_device_id *match;
-	int gpio;
 	int err;
 	struct camera_common_pdata *ret = NULL;
 
@@ -806,31 +783,6 @@ static struct camera_common_pdata *ov5693_parse_dt(struct tegracam_device
 		dev_err(dev, "Failed to find clocks\n");
 		goto error;
 	}
-
-	gpio = of_get_named_gpio(node, "pwdn-gpios", 0);
-	if (gpio < 0) {
-		if (gpio == -EPROBE_DEFER) {
-			ret = ERR_PTR(-EPROBE_DEFER);
-			goto error;
-		}
-		gpio = 0;
-	}
-	board_priv_pdata->pwdn_gpio = (unsigned int)gpio;
-
-	gpio = of_get_named_gpio(node, "reset-gpios", 0);
-	if (gpio < 0) {
-		/* reset-gpio is not absolutely needed */
-		if (gpio == -EPROBE_DEFER) {
-			ret = ERR_PTR(-EPROBE_DEFER);
-			goto error;
-		}
-		dev_dbg(dev, "reset gpios not in DT\n");
-		gpio = 0;
-	}
-	board_priv_pdata->reset_gpio = (unsigned int)gpio;
-
-	board_priv_pdata->use_cam_gpio =
-		of_property_read_bool(node, "cam, use-cam-gpio");
 
 	err = of_property_read_string(node, "avdd-reg",
 			&board_priv_pdata->regulators.avdd);
@@ -1183,7 +1135,7 @@ static int ov5693_probe(struct i2c_client *client,
 
 	priv->i2c_client = tc_dev->client = client;
 	tc_dev->dev = dev;
-	strncpy(tc_dev->name, "ov5693", sizeof(tc_dev->name));
+	strscpy(tc_dev->name, "ov5693", sizeof(tc_dev->name));
 	tc_dev->dev_regmap_config = &ov5693_regmap_config;
 	tc_dev->sensor_ops = &ov5693_common_ops;
 	tc_dev->v4l2sd_internal_ops = &ov5693_subdev_internal_ops;

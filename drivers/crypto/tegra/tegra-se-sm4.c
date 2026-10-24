@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2023-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2023-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 /*
  * Crypto driver to handle SM4 block cipher algorithms using NVIDIA Security Engine.
  */
@@ -18,6 +18,7 @@
 #include <crypto/engine.h>
 #include <crypto/gcm.h>
 #include <crypto/scatterwalk.h>
+#include <crypto/sm4.h>
 #include <crypto/xts.h>
 #include <crypto/internal/aead.h>
 #include <crypto/internal/hash.h>
@@ -35,8 +36,8 @@ struct tegra_sm4_ctx {
 	u32 ivsize;
 	u32 key1_id;
 	u32 key2_id;
-	u8 key1[AES_MAX_KEY_SIZE];
-	u8 key2[AES_MAX_KEY_SIZE];
+	u8 key1[SM4_KEY_SIZE];
+	u8 key2[SM4_KEY_SIZE];
 };
 
 struct tegra_sm4_reqctx {
@@ -62,7 +63,7 @@ struct tegra_sm4_gcm_ctx {
 	u32 verify_alg;
 	u32 keylen;
 	u32 key_id;
-	u8 key[AES_MAX_KEY_SIZE];
+	u8 key[SM4_KEY_SIZE];
 };
 
 struct tegra_sm4_gcm_reqctx {
@@ -90,7 +91,7 @@ struct tegra_sm4_cmac_ctx {
 	u32 final_alg;
 	u32 key_id;
 	u32 keylen;
-	u8 key[AES_MAX_KEY_SIZE];
+	u8 key[SM4_KEY_SIZE];
 	struct crypto_shash *fallback_tfm;
 };
 
@@ -344,8 +345,8 @@ static int tegra_sm4_setkey(struct crypto_skcipher *tfm,
 	struct tegra_sm4_ctx *ctx = crypto_skcipher_ctx(tfm);
 	int ret;
 
-	if (aes_check_keylen(keylen)) {
-		dev_err(ctx->se->dev, "key length validation failed\n");
+	if (keylen != SM4_KEY_SIZE) {
+		dev_dbg(ctx->se->dev, "invalid key length (%d)\n", keylen);
 		return -EINVAL;
 	}
 
@@ -365,8 +366,7 @@ static int tegra_sm4_xts_setkey(struct crypto_skcipher *tfm,
 	u32 len = keylen / 2;
 	int ret;
 
-	ret = xts_verify_key(tfm, key, keylen);
-	if (ret || aes_check_keylen(len)) {
+	if (keylen != 2 * SM4_KEY_SIZE) {
 		dev_dbg(ctx->se->dev, "invalid key length (%d)\n", keylen);
 		return -EINVAL;
 	}
@@ -417,19 +417,7 @@ static int tegra_sm4_kac2_manifest(u32 user, u32 alg, u32 keylen)
 		return -EINVAL;
 	}
 
-	switch (keylen) {
-	case AES_KEYSIZE_128:
-		manifest |= SE_KAC2_SIZE_128;
-		break;
-	case AES_KEYSIZE_192:
-		manifest |= SE_KAC2_SIZE_192;
-		break;
-	case AES_KEYSIZE_256:
-		manifest |= SE_KAC2_SIZE_256;
-		break;
-	default:
-		return -EINVAL;
-	}
+	manifest |= SE_KAC2_SIZE_128;
 
 	return manifest;
 }
@@ -573,15 +561,14 @@ static struct tegra_se_alg tegra_sm4_algs[] = {
 			.setkey			= tegra_sm4_xts_setkey,
 			.encrypt		= tegra_sm4_encrypt,
 			.decrypt		= tegra_sm4_decrypt,
-			.min_keysize		= 2 * AES_MIN_KEY_SIZE,
-			.max_keysize		= 2 * AES_MAX_KEY_SIZE,
-			.ivsize			= AES_BLOCK_SIZE,
+			.min_keysize		= 2 * SM4_KEY_SIZE,
+			.max_keysize		= 2 * SM4_KEY_SIZE,
+			.ivsize			= SM4_BLOCK_SIZE,
 			.base = {
 				.cra_name	   = "xts(sm4)",
 				.cra_driver_name   = "xts-sm4-tegra",
 				.cra_priority	   = 500,
-				.cra_flags	   = CRYPTO_ALG_TYPE_SKCIPHER |
-						    CRYPTO_ALG_ASYNC,
+				.cra_flags	   = TEGRA_SE_SKCIPHER_FLAGS,
 				.cra_blocksize	   = AES_BLOCK_SIZE,
 				.cra_ctxsize	   = sizeof(struct tegra_sm4_ctx),
 				.cra_alignmask	   = 0,
@@ -602,15 +589,14 @@ static struct tegra_se_alg tegra_sm4_algs[] = {
 			.setkey			= tegra_sm4_setkey,
 			.encrypt		= tegra_sm4_encrypt,
 			.decrypt		= tegra_sm4_decrypt,
-			.min_keysize		= AES_MIN_KEY_SIZE,
-			.max_keysize		= AES_MAX_KEY_SIZE,
-			.ivsize			= AES_BLOCK_SIZE,
+			.min_keysize		= SM4_KEY_SIZE,
+			.max_keysize		= SM4_KEY_SIZE,
+			.ivsize			= SM4_BLOCK_SIZE,
 			.base = {
 				.cra_name	   = "cbc(sm4)",
 				.cra_driver_name   = "cbc-sm4-tegra",
 				.cra_priority	   = 500,
-				.cra_flags	   = CRYPTO_ALG_TYPE_SKCIPHER |
-						    CRYPTO_ALG_ASYNC,
+				.cra_flags	   = TEGRA_SE_SKCIPHER_FLAGS,
 				.cra_blocksize	   = AES_BLOCK_SIZE,
 				.cra_ctxsize	   = sizeof(struct tegra_sm4_ctx),
 				.cra_alignmask	   = 0,
@@ -631,15 +617,14 @@ static struct tegra_se_alg tegra_sm4_algs[] = {
 			.setkey			= tegra_sm4_setkey,
 			.encrypt		= tegra_sm4_encrypt,
 			.decrypt		= tegra_sm4_decrypt,
-			.min_keysize		= AES_MIN_KEY_SIZE,
-			.max_keysize		= AES_MAX_KEY_SIZE,
-			.ivsize			= AES_BLOCK_SIZE,
+			.min_keysize		= SM4_KEY_SIZE,
+			.max_keysize		= SM4_KEY_SIZE,
+			.ivsize			= SM4_BLOCK_SIZE,
 			.base = {
 				.cra_name	   = "ecb(sm4)",
 				.cra_driver_name   = "ecb-sm4-tegra",
 				.cra_priority	   = 500,
-				.cra_flags	   = CRYPTO_ALG_TYPE_SKCIPHER |
-						    CRYPTO_ALG_ASYNC,
+				.cra_flags	   = TEGRA_SE_SKCIPHER_FLAGS,
 				.cra_blocksize	   = AES_BLOCK_SIZE,
 				.cra_ctxsize	   = sizeof(struct tegra_sm4_ctx),
 				.cra_alignmask	   = 0,
@@ -660,15 +645,14 @@ static struct tegra_se_alg tegra_sm4_algs[] = {
 			.setkey			= tegra_sm4_setkey,
 			.encrypt		= tegra_sm4_encrypt,
 			.decrypt		= tegra_sm4_decrypt,
-			.min_keysize		= AES_MIN_KEY_SIZE,
-			.max_keysize		= AES_MAX_KEY_SIZE,
-			.ivsize			= AES_BLOCK_SIZE,
+			.min_keysize		= SM4_KEY_SIZE,
+			.max_keysize		= SM4_KEY_SIZE,
+			.ivsize			= SM4_BLOCK_SIZE,
 			.base = {
 				.cra_name	   = "ctr(sm4)",
 				.cra_driver_name   = "ctr-sm4-tegra",
 				.cra_priority	   = 500,
-				.cra_flags	   = CRYPTO_ALG_TYPE_SKCIPHER |
-						    CRYPTO_ALG_ASYNC,
+				.cra_flags	   = TEGRA_SE_SKCIPHER_FLAGS,
 				.cra_blocksize	   = AES_BLOCK_SIZE,
 				.cra_ctxsize	   = sizeof(struct tegra_sm4_ctx),
 				.cra_alignmask	   = 0,
@@ -689,15 +673,14 @@ static struct tegra_se_alg tegra_sm4_algs[] = {
 			.setkey			= tegra_sm4_setkey,
 			.encrypt		= tegra_sm4_encrypt,
 			.decrypt		= tegra_sm4_decrypt,
-			.min_keysize		= AES_MIN_KEY_SIZE,
-			.max_keysize		= AES_MAX_KEY_SIZE,
-			.ivsize			= AES_BLOCK_SIZE,
+			.min_keysize		= SM4_KEY_SIZE,
+			.max_keysize		= SM4_KEY_SIZE,
+			.ivsize			= SM4_BLOCK_SIZE,
 			.base = {
 				.cra_name	   = "ofb(sm4)",
 				.cra_driver_name   = "ofb-sm4-tegra",
 				.cra_priority	   = 500,
-				.cra_flags	   = CRYPTO_ALG_TYPE_SKCIPHER |
-						    CRYPTO_ALG_ASYNC,
+				.cra_flags	   = TEGRA_SE_SKCIPHER_FLAGS,
 				.cra_blocksize	   = AES_BLOCK_SIZE,
 				.cra_ctxsize	   = sizeof(struct tegra_sm4_ctx),
 				.cra_alignmask	   = 0,
@@ -814,7 +797,7 @@ static int tegra_sm4_gcm_crypt_prep_cmd(struct tegra_se *se, u32 *cpuvaddr,
 	cpuvaddr[i++] = host1x_uclass_incr_syncpt_cond_f(1) |
 			host1x_uclass_incr_syncpt_indx_f(se->syncpt_id);
 
-	dev_err(se->dev, "cfg %#x crypto cfg %#x\n", rctx->config, rctx->crypto_config);
+	dev_dbg(se->dev, "cfg %#x crypto cfg %#x\n", rctx->config, rctx->crypto_config);
 
 	return i;
 }
@@ -1007,7 +990,7 @@ static int tegra_sm4_gcm_do_one_req(struct crypto_engine *engine, void *areq)
 	if (rctx->encrypt)
 		rctx->cryptlen = req->cryptlen;
 	else
-		rctx->cryptlen = req->cryptlen - ctx->authsize;
+		rctx->cryptlen = req->cryptlen - rctx->authsize;
 
 	/* Keys in ctx might be stored in KDS. Copy it to local keyslot */
 	if (ctx->key_id)
@@ -1154,13 +1137,20 @@ static int tegra_sm4_gcm_setkey(struct crypto_aead *tfm,
 			       const u8 *key, u32 keylen)
 {
 	struct tegra_sm4_gcm_ctx *ctx = crypto_aead_ctx(tfm);
+	int ret;
 
-	if (aes_check_keylen(keylen)) {
-		dev_err(ctx->se->dev, "key length validation failed\n");
+	if (keylen != SM4_KEY_SIZE) {
+		dev_dbg(ctx->se->dev, "invalid key length (%d)\n", keylen);
 		return -EINVAL;
 	}
 
-	return tegra_key_submit(ctx->se, key, keylen, ctx->alg, &ctx->key_id);
+	ret = tegra_key_submit(ctx->se, key, keylen, ctx->alg, &ctx->key_id);
+	if (ret) {
+		ctx->keylen = keylen;
+		memcpy(ctx->key, key, keylen);
+	}
+
+	return 0;
 }
 
 static int tegra_sm4_cmac_prep_cmd(struct tegra_se *se, u32 *cpuvaddr, struct tegra_sm4_cmac_reqctx *rctx)
@@ -1506,8 +1496,8 @@ static int tegra_sm4_cmac_setkey(struct crypto_ahash *tfm, const u8 *key,
 	struct tegra_sm4_cmac_ctx *ctx = crypto_ahash_ctx(tfm);
 	int ret;
 
-	if (aes_check_keylen(keylen)) {
-		dev_err(ctx->se->dev, "key length validation failed\n");
+	if (keylen != SM4_KEY_SIZE) {
+		dev_dbg(ctx->se->dev, "invalid key length (%d)\n", keylen);
 		return -EINVAL;
 	}
 
@@ -1612,6 +1602,7 @@ static struct tegra_se_alg tegra_sm4_gcm_algs[] = {
 				.cra_name	   = "gcm(sm4)",
 				.cra_driver_name   = "gcm-sm4-tegra",
 				.cra_priority	   = 500,
+				.cra_flags	   = TEGRA_SE_AEAD_FLAGS,
 				.cra_blocksize	   = AES_BLOCK_SIZE,
 				.cra_ctxsize	   = sizeof(struct tegra_sm4_gcm_ctx),
 				.cra_alignmask	   = 0,
@@ -1646,7 +1637,7 @@ static struct tegra_se_alg tegra_sm4_cmac_algs[] = {
 				.cra_name = "cmac(sm4)",
 				.cra_driver_name = "cmac-sm4-tegra",
 				.cra_priority = 300,
-				.cra_flags = CRYPTO_ALG_TYPE_AHASH,
+				.cra_flags = TEGRA_SE_AHASH_FLAGS,
 				.cra_blocksize = AES_BLOCK_SIZE,
 				.cra_ctxsize = sizeof(struct tegra_sm4_cmac_ctx),
 				.cra_alignmask = 0,

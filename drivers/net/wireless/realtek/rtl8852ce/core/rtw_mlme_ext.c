@@ -4578,6 +4578,13 @@ unsigned int OnAction_ft(_adapter *padapter, union recv_frame *precv_frame)
 		if (!psta)
 			goto exit;
 
+		/* btm_del_obj() may have already set psta->btm to NULL before
+		 * this FT action response frame arrives.  Guard against NULL
+		 * deref since there is no lock protecting the read here.
+		 */
+		if (!psta->btm)
+			goto exit;
+
 		rtw_btm_notify_action_resp(psta->btm);
 #else
 		rtw_ft_set_status(padapter, RTW_FT_REQUESTED_STA);
@@ -5319,7 +5326,7 @@ s32 dump_mgntframe_and_wait_ack_timeout(_adapter *padapter, struct xmit_frame *p
 		return -1;
 	}
 
-	_rtw_mutex_lock_interruptible(&pxmitpriv->ack_tx_mutex);
+	_rtw_mutex_lock(&pxmitpriv->ack_tx_mutex);
 	pxmitpriv->ack_tx = _TRUE;
 	pxmitpriv->ack_tx_seq_no = seq_no++;
 	pmgntframe->ack_report = 1;
@@ -12723,7 +12730,7 @@ void rtw_back_opch(_adapter *adapter)
 {
 	struct rf_ctl_t *rfctl = adapter_to_rfctl(adapter);
 
-	_rtw_mutex_lock_interruptible(&rfctl->offch_mutex);
+	_rtw_mutex_lock(&rfctl->offch_mutex);
 
 	if (rfctl->offch_state != OFFCHS_NONE) {
 		rfctl->offch_state = OFFCHS_BACKING_OP;
@@ -12741,7 +12748,7 @@ void rtw_leave_opch(_adapter *adapter)
 {
 	struct rf_ctl_t *rfctl = adapter_to_rfctl(adapter);
 
-	_rtw_mutex_lock_interruptible(&rfctl->offch_mutex);
+	_rtw_mutex_lock(&rfctl->offch_mutex);
 
 	if (rfctl->offch_state == OFFCHS_NONE) {
 		/* prepare to leave operating channel */
@@ -13218,7 +13225,7 @@ u8 set_tx_beacon_cmd(_adapter *padapter, struct _ADAPTER_LINK *padapter_link, u8
 
 	if (res == _SUCCESS && (flags & RTW_CMDF_WAIT_ACK)) {
 		rtw_sctx_wait(&sctx, __func__);
-		_rtw_mutex_lock_interruptible(&pcmdpriv->sctx_mutex);
+		_rtw_mutex_lock(&pcmdpriv->sctx_mutex);
 		if (sctx.status == RTW_SCTX_SUBMITTED)
 			cmd->sctx = NULL;
 		_rtw_mutex_unlock(&pcmdpriv->sctx_mutex);

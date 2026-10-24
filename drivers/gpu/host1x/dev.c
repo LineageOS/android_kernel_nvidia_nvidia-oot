@@ -1181,7 +1181,7 @@ static int host1x_probe(struct platform_device *pdev)
 	host1x_bo_cache_init(&host->cache);
 
 	/* Create dedicated workqueue for CDMA operations */
-	host->cdma_wq = alloc_workqueue("host1x_cdma", 0, 0);
+	host->cdma_wq = alloc_workqueue("host1x_cdma", WQ_UNBOUND, 0);
 	if (!host->cdma_wq) {
 		err = -ENOMEM;
 		goto destroy_cache;

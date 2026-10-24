@@ -749,7 +749,7 @@ static void rtw_hal_mcc_rqt_tsf(PADAPTER padapter, u64 *out_tsf)
 	enum _hw_port tsfy = MAX_HW_PORT;
 	u8 cmd[H2C_MCC_RQT_TSF_LEN] = {0};
 
-	_enter_critical_mutex(&mccobjpriv->mcc_tsf_req_mutex, NULL);
+	_enter_critical_mutex_lock(&mccobjpriv->mcc_tsf_req_mutex, NULL);
 
 	order0_iface = mccobjpriv->iface[0];
 	order1_iface = mccobjpriv->iface[1];
@@ -2802,7 +2802,7 @@ static u8 mcc_get_reg_hdl(PADAPTER adapter, const u8 *val)
 		goto exit;
 	}
 
-	_enter_critical_mutex(&mccobjpriv->mcc_dbg_reg_mutex, NULL);
+	_enter_critical_mutex_lock(&mccobjpriv->mcc_dbg_reg_mutex, NULL);
 	if (!RTW_CANNOT_IO(adapter)) {
 		/* RTW_INFO("=================================\n");
 		RTW_INFO(ADPT_FMT": cur_order:%d\n", ADPT_ARG(cur_iface), cur_order); */
@@ -3094,7 +3094,7 @@ void rtw_hal_mcc_sw_status_check(PADAPTER padapter)
 	if (!MCC_EN(padapter))
 		return;
 
-	_enter_critical_mutex(&pmccobjpriv->mcc_mutex, NULL);
+	_enter_critical_mutex_lock(&pmccobjpriv->mcc_mutex, NULL);
 
 	if (rtw_hal_check_mcc_status(padapter, MCC_STATUS_DOING_MCC)) {
 
@@ -3351,7 +3351,7 @@ u8 rtw_hal_set_mcc_setting_scan_start(PADAPTER padapter)
 	if (MCC_EN(padapter)) {
 		struct mcc_obj_priv *pmccobjpriv = &(adapter_to_dvobj(padapter)->mcc_objpriv);
 
-		_enter_critical_mutex(&pmccobjpriv->mcc_mutex, NULL);
+		_enter_critical_mutex_lock(&pmccobjpriv->mcc_mutex, NULL);
 		if (rtw_hal_check_mcc_status(padapter, MCC_STATUS_NEED_MCC)) {
 			if (rtw_hal_check_mcc_status(padapter, MCC_STATUS_DOING_MCC)) {
 				ret = rtw_hal_set_mcc_setting(padapter,  MCC_SETCMD_STATUS_STOP_SCAN_START);
@@ -3376,7 +3376,7 @@ u8 rtw_hal_set_mcc_setting_scan_complete(PADAPTER padapter)
 	if (MCC_EN(padapter)) {
 		struct mcc_obj_priv *pmccobjpriv = &(adapter_to_dvobj(padapter)->mcc_objpriv);
 
-		_enter_critical_mutex(&pmccobjpriv->mcc_mutex, NULL);
+		_enter_critical_mutex_lock(&pmccobjpriv->mcc_mutex, NULL);
 
 		if (rtw_hal_check_mcc_status(padapter, MCC_STATUS_NEED_MCC)) {
 				rtw_hal_mcc_assign_scan_flag(padapter, 1);
@@ -3404,7 +3404,7 @@ u8 rtw_hal_set_mcc_setting_start_bss_network(PADAPTER padapter, u8 chbw_allow)
 			struct mcc_obj_priv *pmccobjpriv = &(adapter_to_dvobj(padapter)->mcc_objpriv);
 
 			//rtw_hal_mcc_restore_iqk_val(padapter);
-			_enter_critical_mutex(&pmccobjpriv->mcc_mutex, NULL);
+			_enter_critical_mutex_lock(&pmccobjpriv->mcc_mutex, NULL);
 			ret = rtw_hal_set_mcc_setting(padapter, MCC_SETCMD_STATUS_START_CONNECT);
 			_exit_critical_mutex(&pmccobjpriv->mcc_mutex, NULL);
 
@@ -3444,7 +3444,7 @@ u8 rtw_hal_set_mcc_setting_disconnect(PADAPTER padapter)
 	if (MCC_EN(padapter)) {
 		struct mcc_obj_priv *pmccobjpriv = &(adapter_to_dvobj(padapter)->mcc_objpriv);
 
-		_enter_critical_mutex(&pmccobjpriv->mcc_mutex, NULL);
+		_enter_critical_mutex_lock(&pmccobjpriv->mcc_mutex, NULL);
 		if (rtw_hal_check_mcc_status(padapter, MCC_STATUS_NEED_MCC)) {
 			if (rtw_hal_check_mcc_status(padapter, MCC_STATUS_DOING_MCC))
 				ret = rtw_hal_set_mcc_setting(padapter,  MCC_SETCMD_STATUS_STOP_DISCONNECT);
@@ -3495,7 +3495,7 @@ u8 rtw_hal_set_mcc_setting_join_done_chk_ch(PADAPTER padapter)
 				struct mcc_obj_priv *pmccobjpriv = &dvobj->mcc_objpriv;
 
 				rtw_hal_mcc_restore_iqk_val(padapter);
-				_enter_critical_mutex(&pmccobjpriv->mcc_mutex, NULL);
+				_enter_critical_mutex_lock(&pmccobjpriv->mcc_mutex, NULL);
 				ret = rtw_hal_set_mcc_setting(padapter, MCC_SETCMD_STATUS_START_CONNECT);
 				_exit_critical_mutex(&pmccobjpriv->mcc_mutex, NULL);
 
@@ -3576,7 +3576,7 @@ static void mcc_dump_dbg_reg(void *sel, _adapter *adapter)
 	RTW_PRINT_SEL(sel, "current order=%d\n", mccobjpriv->current_order);
 	_exit_critical_bh(&mccobjpriv->mcc_lock, &irqL);
 
-	_enter_critical_mutex(&mccobjpriv->mcc_dbg_reg_mutex, NULL);
+	_enter_critical_mutex_lock(&mccobjpriv->mcc_dbg_reg_mutex, NULL);
 	for (i = 0; i < ARRAY_SIZE(mccobjpriv->dbg_reg); i++)
 			RTW_PRINT_SEL(sel, "REG_0x%X:0x%08x\n", mccobjpriv->dbg_reg[i], mccobjpriv->dbg_reg_val[i]);
 

@@ -7292,7 +7292,7 @@ rtl8168_get_ethtool_stats(struct net_device *dev,
 
         counters = tp->tally_vaddr;
         paddr = tp->tally_paddr;
-        if (!counters)
+	if (!counters || test_bit(R8168_FLAG_SHUTDOWN, tp->task_flags))
                 return;
 
         rtl8168_dump_tally_counter(tp, paddr);
@@ -28698,11 +28698,6 @@ rtl8168_remove_one(struct pci_dev *pdev)
 
         set_bit(R8168_FLAG_DOWN, tp->task_flags);
 
-        rtl8168_cancel_all_schedule_work(tp);
-
-#ifdef  CONFIG_R8168_NAPI
-        rtl8168_del_napi(tp);
-#endif
         if (HW_DASH_SUPPORT_DASH(tp))
                 rtl8168_driver_stop(tp);
 
@@ -28711,6 +28706,13 @@ rtl8168_remove_one(struct pci_dev *pdev)
 #endif //ENABLE_R8168_SYSFS
 
         unregister_netdev(dev);
+
+	rtl8168_cancel_all_schedule_work(tp);
+
+#ifdef CONFIG_R8168_NAPI
+	rtl8168_del_napi(tp);
+#endif
+
         rtl8168_disable_msi(pdev, tp);
 #ifdef ENABLE_R8168_PROCFS
         rtl8168_proc_remove(dev);
@@ -32063,6 +32065,8 @@ static void rtl8168_shutdown(struct pci_dev *pdev)
         struct rtl8168_private *tp = netdev_priv(dev);
 
         rtnl_lock();
+
+	set_bit(R8168_FLAG_SHUTDOWN, tp->task_flags);
 
         if (HW_DASH_SUPPORT_DASH(tp))
                 rtl8168_driver_stop(tp);

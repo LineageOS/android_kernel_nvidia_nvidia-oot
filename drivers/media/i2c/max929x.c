@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2024, NVIDIA CORPORATION & AFFILIATES.
+// SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // All rights reserved.
 /*
  * max929x.c - max929x IO Expander driver
@@ -12,19 +12,17 @@
 #include <media/camera_common.h>
 #include <linux/module.h>
 #include <linux/gpio/consumer.h>
-#include <linux/gpio.h>
 #include <linux/module.h>
 #include <linux/seq_file.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
-#include <linux/of_gpio.h>
 
 #include "max929x.h"
 
 struct max929x {
 	struct i2c_client *i2c_client;
 	struct regmap *regmap;
-	unsigned int pwdn_gpio;
+	struct gpio_desc *pwdn_gpiod;
 	unsigned short ser_addr;
 };
 struct max929x *priv;
@@ -93,7 +91,6 @@ static int max929x_probe(struct i2c_client *client,
 #endif
 {
 	struct device dev = client->dev;
-	struct device_node *np = (&dev)->of_node;
 	unsigned short ser_addr = SER_SLAVE2;
 	int err;
 
@@ -108,17 +105,13 @@ static int max929x_probe(struct i2c_client *client,
 		return -ENODEV;
 	}
 
-	priv->pwdn_gpio = of_get_named_gpio(np, "pwdn-gpios", 0);
-	if (priv->pwdn_gpio < 0) {
-		dev_err(&dev, "pwdn-gpios not found\n");
-		return -EINVAL;
+	priv->pwdn_gpiod = devm_gpiod_get(&client->dev, "pwdn", GPIOD_OUT_HIGH);
+	if (IS_ERR(priv->pwdn_gpiod)) {
+		err = PTR_ERR(priv->pwdn_gpiod);
+		dev_err(&dev, "failed to get pwdn GPIO: %d\n", err);
+		return err;
 	}
-
-	if (priv->pwdn_gpio) {
-		gpio_direction_output(priv->pwdn_gpio, 1);
-		gpio_set_value(priv->pwdn_gpio, 1);
-		msleep(100);
-	}
+	msleep(100);
 
 	/*
 	 * Try to find the I2C address of serializer by writing to register
@@ -157,7 +150,7 @@ static void max929x_remove(struct i2c_client *client)
 {
 	struct device dev = client->dev;
 
-	gpio_set_value(priv->pwdn_gpio, 0);
+	gpiod_set_value(priv->pwdn_gpiod, 0);
 	dev_dbg(&dev, "%s: \n", __func__);
 
 #if defined(NV_I2C_DRIVER_STRUCT_REMOVE_RETURN_TYPE_INT) /* Linux 6.1 */

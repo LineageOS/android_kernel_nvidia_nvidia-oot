@@ -1101,33 +1101,36 @@ ssize_t proc_set_roam_flags(struct file *file, const char __user *buffer, size_t
 	struct net_device *dev = data;
 	_adapter *adapter = (_adapter *)rtw_netdev_priv(dev);
 
-	char tmp[32], str[8];
+	char tmp[32], str[8] = {0};
+	ssize_t ret;
 	int num, i = 0;
 	u16 flags;
 
-	if (count < 1)
-		return -EFAULT;
+	ret = rtw_proc_require_net_admin();
+	if (ret)
+		return ret;
 
-	if (count > sizeof(tmp)) {
+	if (count >= sizeof(tmp)) {
 		rtw_warn_on(1);
 		return -EFAULT;
 	}
 
-	if (buffer && !copy_from_user(tmp, buffer, count)) {
+	ret = rtw_proc_copy_from_user(tmp, sizeof(tmp), buffer, count);
+	if (ret < 0)
+		return ret;
 
-		num = sscanf(tmp, "%hx %d", &flags, &i);
+	num = sscanf(tmp, "%hx %d", &flags, &i);
 
-		if (num >= 1)
-			rtw_assign_roam_flags(adapter, flags);
+	if (num >= 1)
+		rtw_assign_roam_flags(adapter, flags);
 
-		if (num >= 2 && i > 0) {
-			sprintf(str, "%d", i);
-			for (i = 0; i < sizeof(adapter->mlmepriv.roam_scan_order); i++)
-				adapter->mlmepriv.roam_scan_order[i] = \
-					(str[i]=='2') ? BAND_ON_24G: \
-					(str[i]=='5') ? BAND_ON_5G: \
-					(str[i]=='6') ? BAND_ON_6G:BAND_MAX;
-		}
+	if (num >= 2 && i > 0) {
+		snprintf(str, sizeof(str), "%d", i);
+		for (i = 0; i < sizeof(adapter->mlmepriv.roam_scan_order); i++)
+			adapter->mlmepriv.roam_scan_order[i] = \
+				(str[i]=='2') ? BAND_ON_24G: \
+				(str[i]=='5') ? BAND_ON_5G: \
+				(str[i]=='6') ? BAND_ON_6G:BAND_MAX;
 	}
 	return count;
 }
@@ -1165,6 +1168,8 @@ ssize_t proc_set_roam_param(struct file *file, const char __user *buffer, size_t
 	struct mlme_priv *mlme = &adapter->mlmepriv;
 
 	char tmp[32];
+	ssize_t ret;
+	int num;
 	u8 idle_rssi_delta;
 	u8 busy_rssi_delta;
 	u32 scanr_exp_ms;
@@ -1172,37 +1177,39 @@ ssize_t proc_set_roam_param(struct file *file, const char __user *buffer, size_t
 	u8 idle_rssi_th;
 	u8 busy_rssi_th;
 
-	if (count < 1)
-		return -EFAULT;
+	ret = rtw_proc_require_net_admin();
+	if (ret)
+		return ret;
 
-	if (count > sizeof(tmp)) {
+	if (count >= sizeof(tmp)) {
 		rtw_warn_on(1);
 		return -EFAULT;
 	}
 
-	if (buffer && !copy_from_user(tmp, buffer, count)) {
+	ret = rtw_proc_copy_from_user(tmp, sizeof(tmp), buffer, count);
+	if (ret < 0)
+		return ret;
 
-		int num = sscanf(tmp, "%hhu %hhu %u %u %hhu %hhu"
-			, &idle_rssi_delta
-			, &busy_rssi_delta
-			, &scanr_exp_ms
-			, &scan_int
-			, &idle_rssi_th
-			, &busy_rssi_th);
+	num = sscanf(tmp, "%hhu %hhu %u %u %hhu %hhu"
+		, &idle_rssi_delta
+		, &busy_rssi_delta
+		, &scanr_exp_ms
+		, &scan_int
+		, &idle_rssi_th
+		, &busy_rssi_th);
 
-		if (num >= 1)
-			mlme->roam_idle_rssi_delta = idle_rssi_delta;
-		if (num >= 2)
-			mlme->roam_busy_rssi_delta = busy_rssi_delta;
-		if (num >= 3)
-			mlme->roam_scanr_exp_ms = scanr_exp_ms;
-		if (num >= 4)
-			mlme->roam_scan_int = scan_int;
-		if (num >= 5)
-			mlme->roam_idle_rssi_th = idle_rssi_th;
-		if (num >= 6)
-			mlme->roam_busy_rssi_th = busy_rssi_th;
-	}
+	if (num >= 1)
+		mlme->roam_idle_rssi_delta = idle_rssi_delta;
+	if (num >= 2)
+		mlme->roam_busy_rssi_delta = busy_rssi_delta;
+	if (num >= 3)
+		mlme->roam_scanr_exp_ms = scanr_exp_ms;
+	if (num >= 4)
+		mlme->roam_scan_int = scan_int;
+	if (num >= 5)
+		mlme->roam_idle_rssi_th = idle_rssi_th;
+	if (num >= 6)
+		mlme->roam_busy_rssi_th = busy_rssi_th;
 
 	return count;
 
@@ -1232,32 +1239,36 @@ ssize_t proc_set_roam_param(struct file *file, const char __user *buffer, size_t
 	struct mlme_priv *mlme = &adapter->mlmepriv;
 
 	char tmp[32];
+	ssize_t ret;
+	int num;
 	u8 rssi_delta;
 	u32 scanr_exp_ms;
 	u32 scan_int;
 	u8 rssi_threshold;
 
-	if (count < 1)
-		return -EFAULT;
+	ret = rtw_proc_require_net_admin();
+	if (ret)
+		return ret;
 
-	if (count > sizeof(tmp)) {
+	if (count >= sizeof(tmp)) {
 		rtw_warn_on(1);
 		return -EFAULT;
 	}
 
-	if (buffer && !copy_from_user(tmp, buffer, count)) {
+	ret = rtw_proc_copy_from_user(tmp, sizeof(tmp), buffer, count);
+	if (ret < 0)
+		return ret;
 
-		int num = sscanf(tmp, "%hhu %u %u %hhu", &rssi_delta, &scanr_exp_ms, &scan_int, &rssi_threshold);
+	num = sscanf(tmp, "%hhu %u %u %hhu", &rssi_delta, &scanr_exp_ms, &scan_int, &rssi_threshold);
 
-		if (num >= 1)
-			mlme->roam_rssi_delta = rssi_delta;
-		if (num >= 2)
-			mlme->roam_scanr_exp_ms = scanr_exp_ms;
-		if (num >= 3)
-			mlme->roam_scan_int = scan_int;
-		if (num >= 4)
-			mlme->roam_rssi_th = rssi_threshold;
-	}
+	if (num >= 1)
+		mlme->roam_rssi_delta = rssi_delta;
+	if (num >= 2)
+		mlme->roam_scanr_exp_ms = scanr_exp_ms;
+	if (num >= 3)
+		mlme->roam_scan_int = scan_int;
+	if (num >= 4)
+		mlme->roam_rssi_th = rssi_threshold;
 
 	return count;
 
@@ -1270,22 +1281,26 @@ ssize_t proc_set_roam_tgt_addr(struct file *file, const char __user *buffer, siz
 	_adapter *adapter = (_adapter *)rtw_netdev_priv(dev);
 
 	char tmp[32];
+	ssize_t ret;
+	int num;
 	u8 addr[ETH_ALEN];
 
-	if (count < 1)
-		return -EFAULT;
+	ret = rtw_proc_require_net_admin();
+	if (ret)
+		return ret;
 
-	if (count > sizeof(tmp)) {
+	if (count >= sizeof(tmp)) {
 		rtw_warn_on(1);
 		return -EFAULT;
 	}
 
-	if (buffer && !copy_from_user(tmp, buffer, count)) {
+	ret = rtw_proc_copy_from_user(tmp, sizeof(tmp), buffer, count);
+	if (ret < 0)
+		return ret;
 
-		int num = sscanf(tmp, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", addr, addr + 1, addr + 2, addr + 3, addr + 4, addr + 5);
-		if (num == 6)
-			_rtw_memcpy(adapter->mlmepriv.roam_tgt_addr, addr, ETH_ALEN);
-
+	num = sscanf(tmp, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", addr, addr + 1, addr + 2, addr + 3, addr + 4, addr + 5);
+	if (num == 6) {
+		_rtw_memcpy(adapter->mlmepriv.roam_tgt_addr, addr, ETH_ALEN);
 		RTW_INFO("set roam_tgt_addr to "MAC_FMT"\n", MAC_ARG(adapter->mlmepriv.roam_tgt_addr));
 	}
 
@@ -1540,24 +1555,28 @@ ssize_t proc_set_survey_info(struct file *file, const char __user *buffer, size_
 	char tmp[32] = {0};
 	char cmd[8] = {0};
 	bool acs = 0;
+	ssize_t ret;
+	int num;
 
-	if (count < 1)
-		return -EFAULT;
+	ret = rtw_proc_require_net_admin();
+	if (ret)
+		return ret;
 
-	if (count > sizeof(tmp)) {
+	if (count >= sizeof(tmp)) {
 		rtw_warn_on(1);
 		return -EFAULT;
 	}
 
-	if (buffer && !copy_from_user(tmp, buffer, count)) {
-		int num = sscanf(tmp, "%s", cmd);
+	ret = rtw_proc_copy_from_user(tmp, sizeof(tmp), buffer, count);
+	if (ret < 0)
+		return ret;
 
-		if (num < 1)
-			return count;
+	num = sscanf(tmp, "%7s", cmd);
+	if (num < 1)
+		return count;
 
-		if (strcmp("acs", cmd) == 0)
-			acs = 1;
-	}
+	if (strcmp("acs", cmd) == 0)
+		acs = 1;
 
 	ssc_chk = rtw_sitesurvey_condition_check(padapter, _FALSE);
 	if (ssc_chk != SS_ALLOW)
@@ -1816,25 +1835,32 @@ ssize_t proc_reset_trx_info(struct file *file, const char __user *buffer, size_t
 	_adapter *padapter = (_adapter *)rtw_netdev_priv(dev);
 	struct recv_info  *precvinfo = &padapter->recvinfo;
 	char cmd[32] = {0};
+	ssize_t ret;
+	int num;
 	u8 cnt = 0;
 
-	if (count > sizeof(cmd)) {
+	ret = rtw_proc_require_net_admin();
+	if (ret)
+		return ret;
+
+	if (count >= sizeof(cmd)) {
 		rtw_warn_on(1);
 		return -EFAULT;
 	}
 
-	if (buffer && !copy_from_user(cmd, buffer, count)) {
-		int num = sscanf(cmd, "%hhx", &cnt);
+	ret = rtw_proc_copy_from_user(cmd, sizeof(cmd), buffer, count);
+	if (ret < 0)
+		return ret;
 
-		if (num == 1 && cnt == 0) {
-			precvinfo->dbg_rx_ampdu_drop_count = 0;
-			precvinfo->dbg_rx_ampdu_forced_indicate_count = 0;
-			precvinfo->dbg_rx_ampdu_loss_count = 0;
-			precvinfo->dbg_rx_dup_mgt_frame_drop_count = 0;
-			precvinfo->dbg_rx_ampdu_window_shift_cnt = 0;
-			precvinfo->dbg_rx_conflic_mac_addr_cnt = 0;
-			precvinfo->dbg_rx_drop_count = 0;
-		}
+	num = sscanf(cmd, "%hhx", &cnt);
+	if (num == 1 && cnt == 0) {
+		precvinfo->dbg_rx_ampdu_drop_count = 0;
+		precvinfo->dbg_rx_ampdu_forced_indicate_count = 0;
+		precvinfo->dbg_rx_ampdu_loss_count = 0;
+		precvinfo->dbg_rx_dup_mgt_frame_drop_count = 0;
+		precvinfo->dbg_rx_ampdu_window_shift_cnt = 0;
+		precvinfo->dbg_rx_conflic_mac_addr_cnt = 0;
+		precvinfo->dbg_rx_drop_count = 0;
 	}
 
 	return count;
@@ -3517,35 +3543,38 @@ ssize_t proc_set_tx_amsdu(struct file *file, const char __user *buffer, size_t c
 	struct xmit_priv *pxmitpriv = &padapter->xmitpriv;
 	struct registry_priv *regpriv = &padapter->registrypriv;
 	char tmp[32];
+	ssize_t ret;
+	int num;
 	u32 i, amsdu;
 
-	if (count < 1)
-		return -EFAULT;
+	ret = rtw_proc_require_net_admin();
+	if (ret)
+		return ret;
 
-	if (count > sizeof(tmp)) {
+	if (count >= sizeof(tmp)) {
 		rtw_warn_on(1);
 		return -EFAULT;
 	}
 
-	if (buffer && !copy_from_user(tmp, buffer, count)) {
+	ret = rtw_proc_copy_from_user(tmp, sizeof(tmp), buffer, count);
+	if (ret < 0)
+		return ret;
 
-		int num = sscanf(tmp, "%d ", &amsdu);
+	num = sscanf(tmp, "%u ", &amsdu);
+	if (padapter && (num == 1)) {
+		RTW_INFO("padapter->tx_amsdu = %x\n", amsdu);
 
-		if (padapter && (num == 1)) {
-			RTW_INFO("padapter->tx_amsdu = %x\n", amsdu);
-
-			if (amsdu == 255) {
-				pxmitpriv->amsdu_debug_set_timer = 0;
-				pxmitpriv->amsdu_debug_timeout = 0;
-				pxmitpriv->amsdu_debug_tasklet = 0;
-				pxmitpriv->amsdu_debug_enqueue = 0;
-				pxmitpriv->amsdu_debug_dequeue = 0;
-				for (i = 0; i < AMSDU_DEBUG_MAX_COUNT; i++)
-					pxmitpriv->amsdu_debug_coalesce[i] = 0;
-			} else {
-				padapter->tx_amsdu = amsdu;
-				regpriv->tx_amsdu_aggnum = amsdu;
-			}
+		if (amsdu == 255) {
+			pxmitpriv->amsdu_debug_set_timer = 0;
+			pxmitpriv->amsdu_debug_timeout = 0;
+			pxmitpriv->amsdu_debug_tasklet = 0;
+			pxmitpriv->amsdu_debug_enqueue = 0;
+			pxmitpriv->amsdu_debug_dequeue = 0;
+			for (i = 0; i < AMSDU_DEBUG_MAX_COUNT; i++)
+				pxmitpriv->amsdu_debug_coalesce[i] = 0;
+		} else {
+			padapter->tx_amsdu = amsdu;
+			regpriv->tx_amsdu_aggnum = amsdu;
 		}
 	}
 
@@ -3568,24 +3597,27 @@ ssize_t proc_set_tx_amsdu_rate(struct file *file, const char __user *buffer, siz
 	struct net_device *dev = data;
 	_adapter *padapter = (_adapter *)rtw_netdev_priv(dev);
 	char tmp[32];
+	ssize_t ret;
+	int num;
 	u32 amsdu_rate;
 
-	if (count < 1)
-		return -EFAULT;
+	ret = rtw_proc_require_net_admin();
+	if (ret)
+		return ret;
 
-	if (count > sizeof(tmp)) {
+	if (count >= sizeof(tmp)) {
 		rtw_warn_on(1);
 		return -EFAULT;
 	}
 
-	if (buffer && !copy_from_user(tmp, buffer, count)) {
+	ret = rtw_proc_copy_from_user(tmp, sizeof(tmp), buffer, count);
+	if (ret < 0)
+		return ret;
 
-		int num = sscanf(tmp, "%d ", &amsdu_rate);
-
-		if (padapter && (num == 1)) {
-			RTW_INFO("padapter->tx_amsdu_rate = %x\n", amsdu_rate);
-			padapter->tx_amsdu_rate = amsdu_rate;
-		}
+	num = sscanf(tmp, "%u ", &amsdu_rate);
+	if (padapter && (num == 1)) {
+		RTW_INFO("padapter->tx_amsdu_rate = %x\n", amsdu_rate);
+		padapter->tx_amsdu_rate = amsdu_rate;
 	}
 
 	return count;

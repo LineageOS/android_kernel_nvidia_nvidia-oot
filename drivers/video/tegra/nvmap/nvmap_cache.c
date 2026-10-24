@@ -160,7 +160,11 @@ int nvmap_cache_maint_phys_range(unsigned int op, phys_addr_t pstart,
 		next = min(next, pend);
 #if defined(CONFIG_GENERIC_IOREMAP)
 #if defined(NV_IOREMAP_PROT_HAS_PGPROT_T_ARG) /* Linux v6.15 */
+#if defined(NV___IOREMAP_PROT_PRESENT) /* Linux v7.0 */
+		io_addr = __ioremap_prot(loop, PAGE_SIZE, PAGE_KERNEL);
+#else
 		io_addr = ioremap_prot(loop, PAGE_SIZE, PAGE_KERNEL);
+#endif /* NV___IOREMAP_PROT_PRESENT */
 #else
 		io_addr = ioremap_prot(loop, PAGE_SIZE, pgprot_val(PAGE_KERNEL));
 #endif /* NV_IOREMAP_PROT_HAS_PGPROT_T_ARG */

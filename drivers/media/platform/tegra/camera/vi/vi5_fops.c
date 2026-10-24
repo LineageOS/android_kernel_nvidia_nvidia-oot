@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2016-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+/* SPDX-FileCopyrightText: Copyright (c) 2016-2026 NVIDIA CORPORATION & AFFILIATES.
+ * All rights reserved.
+ */
 // Tegra Video Input 5 device common APIs.
 
 #include <linux/errno.h>
@@ -480,6 +482,14 @@ static void vi5_release_buffer(struct tegra_channel *chan,
 	vb2_buffer_done(&vbuf->vb2_buf, buf->vb2_state);
 }
 
+static void vi5_requeue_capture_buffer(struct tegra_channel *chan,
+	struct tegra_channel_buffer *buf)
+{
+	spin_lock(&chan->start_lock);
+	list_add_tail(&buf->queue, &chan->capture);
+	spin_unlock(&chan->start_lock);
+}
+
 static void vi5_capture_enqueue(struct tegra_channel *chan,
 	struct tegra_channel_buffer *buf)
 {
@@ -507,6 +517,7 @@ static void vi5_capture_enqueue(struct tegra_channel *chan,
 		spin_lock_irqsave(&chan->capture_state_lock, flags);
 		if (chan->capture_state != CAPTURE_ERROR) {
 			chan->capture_state = CAPTURE_GOOD;
+			chan->capture_timeout_recover = false;
 			chan->capture_reqs_enqueued += 1;
 		}
 		spin_unlock_irqrestore(&chan->capture_state_lock, flags);
@@ -526,6 +537,7 @@ static void vi5_capture_enqueue(struct tegra_channel *chan,
 uncorr_err:
 	spin_lock_irqsave(&chan->capture_state_lock, flags);
 	chan->capture_state = CAPTURE_ERROR;
+	chan->capture_timeout_recover = false;
 	spin_unlock_irqrestore(&chan->capture_state_lock, flags);
 }
 
@@ -557,6 +569,7 @@ static void vi5_capture_dequeue(struct tegra_channel *chan,
 				if (timeout_ms < 0) {
 					spin_lock_irqsave(&chan->capture_state_lock, flags);
 					chan->capture_state = CAPTURE_ERROR_TIMEOUT;
+					chan->capture_timeout_recover = false;
 					spin_unlock_irqrestore(&chan->capture_state_lock, flags);
 					buf->vb2_state = VB2_BUF_STATE_ERROR;
 					goto rel_buf;
@@ -595,6 +608,7 @@ static void vi5_capture_dequeue(struct tegra_channel *chan,
 		if (chan->capture_state != CAPTURE_ERROR) {
 			chan->capture_reqs_enqueued -= 1;
 			chan->capture_state = CAPTURE_GOOD;
+			chan->capture_timeout_recover = false;
 		}
 		spin_unlock_irqrestore(&chan->capture_state_lock, flags);
 	}
@@ -617,11 +631,13 @@ static void vi5_capture_dequeue(struct tegra_channel *chan,
 
 uncorr_err:
 	spin_lock_irqsave(&chan->capture_state_lock, flags);
+	chan->capture_state = CAPTURE_ERROR;
+	chan->capture_timeout_recover = (err == -ETIMEDOUT);
 	if (err == -ETIMEDOUT) {
-		chan->capture_state = CAPTURE_TIMEOUT;
-		buf->vb2_state = VB2_BUF_STATE_QUEUED;
+		spin_unlock_irqrestore(&chan->capture_state_lock, flags);
+		vi5_requeue_capture_buffer(chan, buf);
+		return;
 	} else {
-		chan->capture_state = CAPTURE_ERROR;
 		buf->vb2_state = VB2_BUF_STATE_ERROR;
 	}
 	spin_unlock_irqrestore(&chan->capture_state_lock, flags);
@@ -637,11 +653,17 @@ static int vi5_channel_error_recover(struct tegra_channel *chan,
 	bool queue_error)
 {
 	int err = 0;
+	int stop_err = 0;
 	unsigned int vi_port = 0;
 	unsigned long flags = 0;
+	bool timeout_recover;
 	struct tegra_channel_buffer *buf;
 	struct tegra_mc_vi *vi = chan->vi;
 	struct v4l2_subdev *csi_subdev;
+
+	spin_lock_irqsave(&chan->capture_state_lock, flags);
+	timeout_recover = chan->capture_timeout_recover;
+	spin_unlock_irqrestore(&chan->capture_state_lock, flags);
 
 	/* stop vi channel */
 	for (vi_port = 0; vi_port < chan->valid_ports; vi_port++) {
@@ -649,7 +671,8 @@ static int vi5_channel_error_recover(struct tegra_channel *chan,
 			CAPTURE_CHANNEL_RESET_FLAG_IMMEDIATE);
 		if (err) {
 			dev_err(&chan->video->dev, "vi capture release failed\n");
-			goto done;
+			if (!stop_err)
+				stop_err = err;
 		}
 
 		/* Release capture requests */
@@ -671,26 +694,32 @@ static int vi5_channel_error_recover(struct tegra_channel *chan,
 		}
 
 		vi_channel_close_ex(chan->vi_channel_id[vi_port],
-					chan->tegra_vi_channel[vi_port]);
+			chan->tegra_vi_channel[vi_port]);
 		chan->tegra_vi_channel[vi_port] = NULL;
 	}
+	if (stop_err) {
+		err = stop_err;
+		goto done;
+	}
 
-
-	/* release all previously-enqueued capture buffers to v4l2 */
-	while (!list_empty(&chan->capture)) {
-		buf = dequeue_buffer(chan, false);
-		if (!buf)
-			break;
-		vb2_buffer_done(&buf->buf.vb2_buf, VB2_BUF_STATE_ERROR);
+	/* keep timeout recovery buffers queued for capture after VI reset */
+	if (!timeout_recover) {
+		while (!list_empty(&chan->capture)) {
+			buf = dequeue_buffer(chan, false);
+			if (!buf)
+				break;
+			vb2_buffer_done(&buf->buf.vb2_buf, VB2_BUF_STATE_ERROR);
+		}
 	}
 	while (!list_empty(&chan->dequeue)) {
 		buf = dequeue_dequeue_buffer(chan);
 		if (!buf)
 			break;
-		if (chan->capture_state == CAPTURE_TIMEOUT)
-			buf->vb2_state = VB2_BUF_STATE_QUEUED;
-		else
-			buf->vb2_state = VB2_BUF_STATE_ERROR;
+		if (timeout_recover) {
+			vi5_requeue_capture_buffer(chan, buf);
+			continue;
+		}
+		buf->vb2_state = VB2_BUF_STATE_ERROR;
 		vi5_capture_dequeue(chan, buf);
 	}
 
@@ -731,36 +760,57 @@ static int vi5_channel_error_recover(struct tegra_channel *chan,
 	/* clear capture channel error state */
 	spin_lock_irqsave(&chan->capture_state_lock, flags);
 	chan->capture_state = CAPTURE_IDLE;
+	chan->capture_timeout_recover = false;
 	spin_unlock_irqrestore(&chan->capture_state_lock, flags);
 
+	wake_up_interruptible(&chan->start_wait);
+
 done:
+	if (err && timeout_recover) {
+		tegra_channel_queued_buf_done(chan, VB2_BUF_STATE_ERROR, false);
+
+		spin_lock_irqsave(&chan->capture_state_lock, flags);
+		chan->capture_timeout_recover = false;
+		spin_unlock_irqrestore(&chan->capture_state_lock, flags);
+
+		vb2_queue_error(&chan->queue);
+	}
+
 	return err;
+}
+
+static bool vi5_capture_enqueue_ready(struct tegra_channel *chan)
+{
+	unsigned long flags;
+	bool ready;
+
+	spin_lock_irqsave(&chan->capture_state_lock, flags);
+	ready = (chan->capture_state != CAPTURE_ERROR) &&
+		(chan->capture_reqs_enqueued <
+			(chan->capture_queue_depth * chan->valid_ports));
+	spin_unlock_irqrestore(&chan->capture_state_lock, flags);
+
+	return ready;
 }
 
 static int tegra_channel_kthread_capture_enqueue(void *data)
 {
 	struct tegra_channel *chan = data;
 	struct tegra_channel_buffer *buf;
-	unsigned long flags;
+
 	set_freezable();
 
 	while (1) {
 		try_to_freeze();
 
 		wait_event_interruptible(chan->start_wait,
-			(kthread_should_stop() || !list_empty(&chan->capture)));
+			(kthread_should_stop() ||
+			 (!list_empty(&chan->capture) &&
+			  vi5_capture_enqueue_ready(chan))));
 
 		while (!(kthread_should_stop() || list_empty(&chan->capture))) {
-			spin_lock_irqsave(&chan->capture_state_lock, flags);
-			if ((chan->capture_state == CAPTURE_ERROR)
-					|| !(chan->capture_reqs_enqueued
-					< (chan->capture_queue_depth * chan->valid_ports))) {
-				spin_unlock_irqrestore(
-					&chan->capture_state_lock, flags);
+			if (!vi5_capture_enqueue_ready(chan))
 				break;
-			}
-			spin_unlock_irqrestore(&chan->capture_state_lock,
-				flags);
 
 			buf = dequeue_buffer(chan, false);
 			if (!buf)
@@ -935,6 +985,7 @@ static int vi5_channel_start_streaming(struct vb2_queue *vq, u32 count)
 
 			spin_lock_irqsave(&chan->capture_state_lock, flags);
 			chan->capture_state = CAPTURE_IDLE;
+			chan->capture_timeout_recover = false;
 			spin_unlock_irqrestore(&chan->capture_state_lock, flags);
 
 			if (!chan->pg_mode) {

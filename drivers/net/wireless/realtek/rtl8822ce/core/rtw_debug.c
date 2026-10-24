@@ -1181,6 +1181,7 @@ int proc_get_rx_stat(struct seq_file *m, void *v)
 	return 0;
 }
 
+#ifdef CONFIG_RTW_DBG_PROC
 int proc_get_sta_tx_stat(struct seq_file *m, void *v)
 {
 	struct net_device *dev = m->private;
@@ -1235,6 +1236,7 @@ ssize_t proc_set_sta_tx_stat(struct file *file, const char __user *buffer, size_
 
 	return count;
 }
+#endif
 
 int proc_get_tx_stat(struct seq_file *m, void *v)
 {
@@ -7220,6 +7222,7 @@ ssize_t proc_set_xmit_block(struct file *file, const char __user *buffer, size_t
 }
 #endif
 
+#ifdef CONFIG_RTW_DBG_PROC
 #include <hal_data.h>
 int proc_get_efuse_map(struct seq_file *m, void *v)
 {
@@ -7341,6 +7344,7 @@ ssize_t proc_set_efuse_map(struct file *file, const char __user *buffer, size_t 
 #endif
 	return count;
 }
+#endif
 
 #ifdef CONFIG_IEEE80211W
 ssize_t proc_set_tx_sa_query(struct file *file, const char __user *buffer, size_t count, loff_t *pos, void *data)

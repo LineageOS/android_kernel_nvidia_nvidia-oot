@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* SPDX-FileCopyrightText: Copyright (c) 2008-2024, NVIDIA CORPORATION.  All rights reserved. */
+/* SPDX-FileCopyrightText: Copyright (c) 2008-2026, NVIDIA CORPORATION.  All rights reserved. */
 
 #include "mods_internal.h"
 
@@ -12,8 +12,6 @@
 #include <linux/io.h>
 #include <linux/platform_device.h>
 #include <linux/of_platform.h>
-#include <linux/gpio.h>
-#include <linux/of_gpio.h>
 #endif
 
 #define PCI_VENDOR_ID_NVIDIA 0x10de
@@ -62,7 +60,6 @@ int mods_enable_device(struct mods_client   *client,
 		return -EINVAL;
 	}
 
-
 	/* Client already owns the device */
 	if (dpriv->client_id == client->client_id) {
 		if (dev_entry)
@@ -92,6 +89,24 @@ int mods_enable_device(struct mods_client   *client,
 		return err;
 	}
 
+#if defined(MODS_HAS_ARM_SMCCC)
+	if (dpriv->qual_mode != MODS_QUAL_MODE_DISABLED && !mods_get_force_qual_mode()) {
+		cl_info("enabling qual mode %u on dev %04x:%02x:%02x.%x\n",
+			dpriv->qual_mode,
+			pci_domain_nr(dev->bus),
+			dev->bus->number,
+			PCI_SLOT(dev->devfn),
+			PCI_FUNC(dev->devfn));
+
+		err = mods_qdev_enable(dev, dpriv->qual_mode, &dpriv->qual_dev);
+		if (unlikely(err)) {
+			cl_error("failed to enable qual mode\n");
+			pci_disable_device(dev);
+			return err;
+		}
+	}
+#endif
+
 	cl_info("enabled dev %04x:%02x:%02x.%x\n",
 		pci_domain_nr(dev->bus),
 		dev->bus->number,
@@ -117,6 +132,20 @@ void mods_disable_device(struct mods_client *client,
 	struct en_dev_entry *dpriv = pci_get_drvdata(dev);
 
 	WARN_ON(!mutex_is_locked(&irq_mtx));
+
+#if defined(MODS_HAS_ARM_SMCCC)
+	if (dpriv && dpriv->qual_dev && !mods_get_force_qual_mode()) {
+		cl_info("disabling qual mode on dev %04x:%02x:%02x.%x\n",
+			pci_domain_nr(dev->bus),
+			dev->bus->number,
+			PCI_SLOT(dev->devfn),
+			PCI_FUNC(dev->devfn));
+
+		if (mods_qdev_disable(dpriv->qual_dev))
+			cl_warn("failed to disable qual mode\n");
+		dpriv->qual_dev = NULL;
+	}
+#endif
 
 	pci_disable_device(dev);
 
@@ -444,6 +473,38 @@ static void setup_mask_info(struct dev_irq_map *newmap,
 }
 #endif
 
+static void free_irq_map(struct mods_client *client,
+			 struct dev_irq_map *del)
+{
+	unsigned long       flags  = 0;
+
+	LOG_ENT();
+
+	WARN_ON(client->client_id != del->client_id);
+
+	/* Disable interrupts on the device */
+	spin_lock_irqsave(&client->irq_lock, flags);
+	mods_disable_interrupts(del);
+	spin_unlock_irqrestore(&client->irq_lock, flags);
+
+	/* Unhook interrupts in the kernel */
+	free_irq(del->apic_irq, del);
+
+	/* Unmap aperture used for masking irqs */
+	if (del->dev_irq_aperture)
+		iounmap(del->dev_irq_aperture);
+
+#ifdef CONFIG_PCI
+	pci_dev_put(del->dev);
+#endif
+
+	/* Free memory */
+	kfree(del);
+	atomic_dec(&client->num_allocs);
+
+	LOG_EXT();
+}
+
 static int add_irq_map(struct mods_client         *client,
 		       struct pci_dev             *dev,
 		       struct MODS_REGISTER_IRQ_4 *p,
@@ -456,6 +517,12 @@ static int add_irq_map(struct mods_client         *client,
 	u32                 irq_type   = MODS_IRQ_TYPE_FROM_FLAGS(p->irq_flags);
 
 	LOG_ENT();
+
+	if (p->mask_info_cnt > MODS_IRQ_MAX_MASKS) {
+		cl_error("invalid mask count\n");
+		LOG_EXT();
+		return -EINVAL;
+	}
 
 	/* Get the flags based on the interrupt type*/
 	switch (irq_type) {
@@ -472,6 +539,7 @@ static int add_irq_map(struct mods_client         *client,
 		if (irq_flags & ~valid_mask) {
 			cl_error("invalid device interrupt flag %llx\n",
 				 (long long)irq_flags);
+			LOG_EXT();
 			return -EINVAL;
 		}
 		break;
@@ -482,7 +550,7 @@ static int add_irq_map(struct mods_client         *client,
 	}
 
 	/* Allocate memory for the new entry */
-	newmap = kzalloc(sizeof(*newmap), GFP_KERNEL | __GFP_NORETRY);
+	newmap = MODS_ZALLOC(*newmap);
 	if (unlikely(!newmap)) {
 		LOG_EXT();
 		return -ENOMEM;
@@ -517,6 +585,9 @@ static int add_irq_map(struct mods_client         *client,
 	list_add(&newmap->list, &client->irq_list);
 
 #ifdef CONFIG_PCI
+	if (dev)
+		pci_dev_get(dev);
+
 	/* Map BAR0 to be able to disable interrupts */
 	if ((irq_type == MODS_IRQ_TYPE_INT) &&
 	    (p->aperture_addr != 0) &&
@@ -528,6 +599,8 @@ static int add_irq_map(struct mods_client         *client,
 				 "failed to remap aperture: 0x%llx size=0x%x\n",
 				 p->aperture_addr,
 				 p->aperture_size);
+			list_del(&newmap->list);
+			free_irq_map(client, newmap);
 			LOG_EXT();
 			return -EPERM;
 		}
@@ -535,9 +608,6 @@ static int add_irq_map(struct mods_client         *client,
 		newmap->dev_irq_aperture = bar;
 		setup_mask_info(newmap, p, dev);
 	}
-
-	if (dev)
-		pci_dev_get(dev);
 #endif
 
 	/* Print out successful registration string */
@@ -601,38 +671,6 @@ static int add_irq_map(struct mods_client         *client,
 
 	LOG_EXT();
 	return OK;
-}
-
-static void mods_free_map(struct mods_client *client,
-			  struct dev_irq_map *del)
-{
-	unsigned long       flags  = 0;
-
-	LOG_ENT();
-
-	WARN_ON(client->client_id != del->client_id);
-
-	/* Disable interrupts on the device */
-	spin_lock_irqsave(&client->irq_lock, flags);
-	mods_disable_interrupts(del);
-	spin_unlock_irqrestore(&client->irq_lock, flags);
-
-	/* Unhook interrupts in the kernel */
-	free_irq(del->apic_irq, del);
-
-	/* Unmap aperture used for masking irqs */
-	if (del->dev_irq_aperture)
-		iounmap(del->dev_irq_aperture);
-
-#ifdef CONFIG_PCI
-	pci_dev_put(del->dev);
-#endif
-
-	/* Free memory */
-	kfree(del);
-	atomic_dec(&client->num_allocs);
-
-	LOG_EXT();
 }
 
 void mods_init_irq(void)
@@ -737,7 +775,7 @@ static int mods_free_irqs(struct mods_client *client,
 				 dev->bus->number,
 				 PCI_SLOT(dev->devfn),
 				 PCI_FUNC(dev->devfn));
-			mods_free_map(client, del);
+			free_irq_map(client, del);
 
 			WARN_ON(MODS_IRQ_TYPE_FROM_FLAGS(dpriv->irq_flags)
 				!= type);
@@ -752,9 +790,9 @@ static int mods_free_irqs(struct mods_client *client,
 
 	if (irq_type == MODS_IRQ_TYPE_MSIX) {
 		pci_disable_msix(dev);
-		kfree(dpriv->msix_entries);
 		if (dpriv->msix_entries)
 			atomic_dec(&client->num_allocs);
+		kfree(dpriv->msix_entries);
 		dpriv->msix_entries = NULL;
 	} else if (irq_type == MODS_IRQ_TYPE_MSI) {
 		pci_disable_msi(dev);
@@ -1205,7 +1243,7 @@ static int mods_unregister_cpu_irq(struct mods_client *client,
 			cl_debug(DEBUG_ISR,
 				 "unregistered CPU IRQ 0x%x\n",
 				 irq);
-			mods_free_map(client, del);
+			free_irq_map(client, del);
 			break;
 		}
 	}
@@ -1239,6 +1277,11 @@ int esc_mods_register_irq_3(struct mods_client         *client,
 {
 	struct MODS_REGISTER_IRQ_4 irq_data = { {0} };
 	u32 ii = 0;
+
+	if (p->mask_info_cnt > MODS_IRQ_MAX_MASKS) {
+		cl_error("invalid mask count\n");
+		return -EINVAL;
+	}
 
 	irq_data.dev = p->dev;
 	irq_data.aperture_addr = p->aperture_addr;
@@ -1622,62 +1665,6 @@ int esc_mods_map_irq(struct mods_client  *client,
 error:
 	of_node_put(np);
 	/* enable the interrupt */
-	return err;
-}
-
-int esc_mods_map_irq_to_gpio(struct mods_client    *client,
-			     struct MODS_GPIO_INFO *p)
-{
-	//TODO: Make sure you are allocating gpio properly
-	struct device_node *np;
-	int gpio_handle;
-	int irq;
-	int err = 0;
-
-	/* Make sure strings from userspace are null-terminated */
-	p->dt_name[sizeof(p->dt_name) - 1] = 0;
-	p->full_name[sizeof(p->full_name) - 1] = 0;
-
-	np = of_find_node_by_name(NULL, p->dt_name);
-
-	if (!np) {
-		cl_error("node %s is not valid\n", p->full_name);
-		err = -EINVAL;
-		goto error;
-	}
-
-	while (of_node_cmp(np->full_name, p->full_name)) {
-		np = of_find_node_by_name(np, p->dt_name);
-		if (!np) {
-			cl_error("node %s is not valid\n", p->full_name);
-			err = -EINVAL;
-			goto error;
-		}
-	}
-
-	gpio_handle = of_get_named_gpio(np, p->name, 0);
-	if (!gpio_is_valid(gpio_handle)) {
-		cl_error("gpio %s is missing\n", p->name);
-		err = gpio_handle;
-		goto error;
-	}
-
-	err = gpio_direction_input(gpio_handle);
-	if (err < 0) {
-		cl_error("pex_rst_gpio input direction change failed\n");
-		goto error;
-	}
-
-	irq = gpio_to_irq(gpio_handle);
-	if (irq < 0) {
-		cl_error("Unable to get irq for pex_rst_gpio\n");
-		err = -EINVAL;
-		goto error;
-	}
-	p->irq = irq;
-
-error:
-	of_node_put(np);
 	return err;
 }
 #endif

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2019-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2019-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * mapping between nvmap_hnadle and sci_ipc entery
  */
@@ -1326,6 +1326,8 @@ static int nvmap_ivc_validate_params(struct nvmap_ivc_context *ctx)
 	return 0;
 }
 
+static bool ivc_queue_exist;
+
 int nvmap_init_ivc_queue(struct device *dev)
 {
 	struct device_node *np = dev->of_node;
@@ -1340,6 +1342,8 @@ int nvmap_init_ivc_queue(struct device *dev)
 		err = 0; /* Not an error, just no IVC queue configured */
 		goto exit;
 	}
+
+	ivc_queue_exist = true;
 
 	if (ivc_cfg_len / sizeof(u32) != 3) {
 		pr_err("nvmap-sci-ipc-ivc-queue property has invalid length: %lu (expected 3)\n",
@@ -1416,7 +1420,8 @@ exit:
 void nvmap_deinit_ivc_queue(void)
 {
 	if (!nvmap_ivc_ctx) {
-		pr_err("IVC context not initialized\n");
+		if (ivc_queue_exist)
+			pr_err("IVC context not initialized\n");
 		return;
 	}
 

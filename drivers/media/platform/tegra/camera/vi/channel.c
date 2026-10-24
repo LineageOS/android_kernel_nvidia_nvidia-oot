@@ -2523,6 +2523,30 @@ static int tegra_channel_close(struct file *fp)
 		return ret;
 	}
 
+	/*
+	 * TEGRA_CAMERA_CID_VI_BYPASS_MODE (and chan->bypass) persist on
+	 * struct tegra_channel across opens, since the channel is allocated
+	 * once at probe time rather than per-fd. A client that enables
+	 * bypass mode (e.g. libargus/NVSIPL) and then closes the device
+	 * without disabling it again leaves the channel stuck in bypass
+	 * mode for the next client. Since vi5_channel_start_streaming() and
+	 * vi5_channel_stop_streaming() both skip RCE VI channel setup/
+	 * teardown entirely while chan->bypass is true, a subsequent V4L2
+	 * client (e.g. v4l2-ctl) would have its captures submitted with no
+	 * backing RCE channel: STREAMON appears to succeed but completions
+	 * never arrive and VIDIOC_DQBUF blocks forever. Reset the control
+	 * to its default here so each new client starts from a clean state.
+	 */
+	if (chan->bypass) {
+		struct v4l2_ctrl *bypass_ctrl =
+			v4l2_ctrl_find(&chan->ctrl_handler, TEGRA_CAMERA_CID_VI_BYPASS_MODE);
+
+		if (bypass_ctrl != NULL)
+			v4l2_ctrl_s_ctrl(bypass_ctrl, SWITCH_OFF);
+		else
+			chan->bypass = false;
+	}
+
 	if (tegra_channel_verify_focuser(chan)) {
 		ret = tegra_channel_set_power(chan, false);
 		if (ret < 0)
@@ -2793,6 +2817,7 @@ int tegra_channel_init(struct tegra_channel *chan)
 	mutex_init(&chan->stop_kthread_lock);
 	init_rwsem(&chan->reset_lock);
 	atomic_set(&chan->is_streaming, DISABLE);
+	chan->capture_timeout_recover = false;
 	spin_lock_init(&chan->capture_state_lock);
 	spin_lock_init(&chan->buffer_lock);
 

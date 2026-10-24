@@ -1,6 +1,6 @@
-// SPDX-License-Identifier: GPL-2.0
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Copyright (c) 2016-2023, NVIDIA CORPORATION.  All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2016-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  */
 
 #ifndef __IMX274_H__
@@ -40,14 +40,12 @@ struct imx274_power_rail {
 	unsigned int pwdn_gpio;
 	unsigned int cam1_gpio;
 	unsigned int reset_gpio;
-	unsigned int af_gpio;
 };
 
 struct imx274_platform_data {
 	const char *mclk_name; /* NULL for default default_mclk */
 	unsigned int cam1_gpio;
 	unsigned int reset_gpio;
-	unsigned int af_gpio;
 	bool ext_reg;
 	int (*power_on)(struct imx274_power_rail *pw);
 	int (*power_off)(struct imx274_power_rail *pw);

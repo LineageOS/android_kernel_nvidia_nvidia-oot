@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
-// SPDX-FileCopyrightText: Copyright (c) 2017-2024 NVIDIA CORPORATION & AFFILIATES.
+// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-FileCopyrightText: Copyright (c) 2017-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // All rights reserved.
 //
 // nv_imx318.c - imx318 sensor driver
@@ -9,19 +9,17 @@
 
 #include <linux/slab.h>
 #include <linux/uaccess.h>
-#include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/module.h>
 #include <linux/seq_file.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
-#include <linux/of_gpio.h>
 
 #include <media/tegra_v4l2_camera.h>
 #include <media/tegracam_core.h>
 #include <media/tegracam_utils.h>
 #include <media/imx318.h>
 
-#include "../platform/tegra/camera/camera_gpio.h"
 #include "imx318_mode_tbls.h"
 
 #define IMX318_MAX_COARSE_DIFF			10
@@ -256,8 +254,8 @@ static int imx318_power_on(struct camera_common_data *s_data)
 		return err;
 	}
 
-	if (pw->reset_gpio)
-		gpio_set_value(pw->reset_gpio, 0);
+	if (pw->reset_gpiod)
+		gpiod_set_value(pw->reset_gpiod, 0);
 	usleep_range(15, 20);
 	if (pw->avdd)
 		err = regulator_enable(pw->avdd);
@@ -274,8 +272,8 @@ static int imx318_power_on(struct camera_common_data *s_data)
 	if (err)
 		goto imx318_dvdd_fail;
 
-	if (pw->reset_gpio)
-		gpio_set_value(pw->reset_gpio, 1);
+	if (pw->reset_gpiod)
+		gpiod_set_value(pw->reset_gpiod, 1);
 
 	usleep_range(19000, 19010);
 	pw->state = SWITCH_ON;
@@ -309,8 +307,8 @@ static int imx318_power_off(struct camera_common_data *s_data)
 			return err;
 		}
 	} else {
-		if (pw->reset_gpio)
-			gpio_set_value(pw->reset_gpio, 0);
+		if (pw->reset_gpiod)
+			gpiod_set_value(pw->reset_gpiod, 0);
 		usleep_range(15, 20);
 		if (pw->avdd)
 			regulator_disable(pw->avdd);
@@ -334,7 +332,6 @@ static int imx318_power_put(struct tegracam_device *tc_dev)
 {
 	struct camera_common_data *s_data = tc_dev->s_data;
 	struct camera_common_power_rail *pw = s_data->power;
-	struct camera_common_pdata *pdata = s_data->pdata;
 
 	if (unlikely(!pw))
 		return -EFAULT;
@@ -352,12 +349,8 @@ static int imx318_power_put(struct tegracam_device *tc_dev)
 	pw->iovdd = NULL;
 	pw->dvdd = NULL;
 
-	if (pdata && pdata->use_cam_gpio)
-		cam_gpio_deregister(s_data->dev, pw->pwdn_gpio);
-	else {
-		gpio_free(pw->pwdn_gpio);
-		gpio_free(pw->reset_gpio);
-	}
+	if (pw->reset_gpiod)
+		gpiod_put(pw->reset_gpiod);
 
 	return 0;
 }
@@ -411,16 +404,19 @@ static int imx318_power_get(struct tegracam_device *tc_dev)
 	/* dig 1.2v */
 	err |= camera_common_regulator_get(dev,
 			&pw->dvdd, pdata->regulators.dvdd);
+	if (err)
+		return err;
 
-	if (!err)
-		pw->reset_gpio = pdata->reset_gpio;
-
-	ret = gpio_request(pw->reset_gpio, "cam_reset_gpio");
-	if (ret < 0)
-		dev_dbg(dev, "%s can't request reset_gpio %d\n", __func__, ret);
+	pw->reset_gpiod = gpiod_get(dev, "reset", GPIOD_ASIS);
+	if (IS_ERR(pw->reset_gpiod)) {
+		dev_dbg(dev, "%s can't request reset_gpio %ld\n", __func__,
+			PTR_ERR(pw->reset_gpiod));
+		pw->reset_gpiod = NULL;
+	}
 
 	pw->state = SWITCH_OFF;
-	return err;
+
+	return 0;
 }
 
 static struct camera_common_pdata *imx318_parse_dt(struct tegracam_device *tc_dev)
@@ -431,7 +427,6 @@ static struct camera_common_pdata *imx318_parse_dt(struct tegracam_device *tc_de
 	const struct of_device_id *match;
 	int err;
 	struct camera_common_pdata *ret = NULL;
-	int gpio;
 
 	if (!np)
 		return NULL;
@@ -451,15 +446,6 @@ static struct camera_common_pdata *imx318_parse_dt(struct tegracam_device *tc_de
 				&board_priv_pdata->mclk_name);
 	if (err)
 		dev_err(dev, "mclk not in DT\n");
-
-	gpio = of_get_named_gpio(np, "reset-gpios", 0);
-	if (gpio < 0) {
-		if (gpio == -EPROBE_DEFER)
-			ret = ERR_PTR(-EPROBE_DEFER);
-		dev_err(dev, "reset-gpios not found %d\n", err);
-		goto error;
-	}
-	board_priv_pdata->reset_gpio = (unsigned int)gpio;
 
 	err = of_property_read_string(np, "avdd-reg",
 			&board_priv_pdata->regulators.avdd);

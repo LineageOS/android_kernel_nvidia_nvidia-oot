@@ -76,20 +76,28 @@ static inline void nvjpg_writel(struct nvjpg *nvjpg, u32 value, unsigned int off
 static int nvjpg_set_rate(struct nvjpg *nvjpg, unsigned long rate)
 {
 	unsigned long dev_rate;
-	u32 emc_kbps;
+	u64 emc_kbps;
 	int err;
 
 	err = clk_set_rate(nvjpg->clk, rate);
 	if (err < 0)
 		return err;
 
-	if (pm_runtime_suspended(nvjpg->dev))
+	/*
+	 * Skip ICC BW update when the device is not fully active. Using
+	 * pm_runtime_suspended() is insufficient because it misses the
+	 * RPM_SUSPENDING state: an in-flight actmon IRQ can race with
+	 * nvjpg_runtime_suspend() after icc_set_bw(0,0) but before
+	 * clk_disable_unprepare(), restoring non-zero BW and leaving it
+	 * set after suspend completes.
+	 */
+	if (!pm_runtime_active(nvjpg->dev))
 		return 0;
 
 	dev_rate = clk_get_rate(nvjpg->clk);
 
 	if (nvjpg->icc_write) {
-		emc_kbps = dev_rate * NVJPG_AXI_RW_BANDWIDTH / 1024;
+		emc_kbps = (u64)dev_rate * NVJPG_AXI_RW_BANDWIDTH / 1024;
 		err = icc_set_bw(nvjpg->icc_write, 0, kbps_to_icc(emc_kbps));
 		if (err)
 			dev_warn(nvjpg->dev, "failed to set icc bw: %d\n", err);
@@ -465,6 +473,17 @@ static __maybe_unused int nvjpg_runtime_resume(struct device *dev)
 	if (err < 0) {
 		dev_err(dev, "failed to set clock rate: %d\n", err);
 		goto disable;
+	}
+
+	/* nvjpg_set_rate skips ICC BW during RPM_RESUMING; set it explicitly here. */
+	if (nvjpg->icc_write) {
+		u64 emc_kbps = (u64)clk_get_rate(nvjpg->clk) * NVJPG_AXI_RW_BANDWIDTH / 1024;
+
+		err = icc_set_bw(nvjpg->icc_write, 0, kbps_to_icc(emc_kbps));
+		if (err) {
+			dev_warn(dev, "failed to set icc bw: %d\n", err);
+			goto disable;
+		}
 	}
 
 	usleep_range(10, 20);

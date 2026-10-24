@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* SPDX-FileCopyrightText: Copyright (c) 2024-2025, NVIDIA CORPORATION.  All rights reserved. */
+/* SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION.  All rights reserved. */
 
 #include <linux/delay.h>
 #include <linux/dma-mapping.h>
@@ -706,7 +706,11 @@ tegra_pcie_dma_status_t tegra234_pcie_edma_submit_xfer(void *cookie,
 			dma_ll_virt->ctrl_reg.ctrl_e.rie = !!prv->is_remote_dma;
 			final_pcs = ch->pcs;
 		} else {
-			/* CB should be updated last in the descriptor */
+			/*
+			 * CB publishes the descriptor to the DMA engine. Ensure
+			 * the payload is visible before the engine can consume it.
+			 */
+			dma_wmb();
 			dma_ll_virt->ctrl_reg.ctrl_e.cb = ch->pcs;
 		}
 		ch->db_pos = !ch->db_pos;
@@ -714,13 +718,14 @@ tegra_pcie_dma_status_t tegra234_pcie_edma_submit_xfer(void *cookie,
 		ch->w_idx++;
 		if (!ch->db_pos) {
 			ch->wcount = 0;
-			db->llp.ctrl_reg.ctrl_e.cb = ch->pcs;
 			if (ch->w_idx == ch->desc_sz) {
 				ch->pcs = !ch->pcs;
-				db->llp.ctrl_reg.ctrl_e.cb = ch->pcs;
 				dev_dbg(prv->dev, "Toggled pcs at w_idx %d\n", ch->w_idx);
 				ch->w_idx = 0;
 			}
+			/* Publish the link only after the preceding descriptors. */
+			dma_wmb();
+			db->llp.ctrl_reg.ctrl_e.cb = ch->pcs;
 			db = (struct edma_dblock *)ch->desc + (ch->w_idx / 2);
 		}
 	}
@@ -729,7 +734,8 @@ tegra_pcie_dma_status_t tegra234_pcie_edma_submit_xfer(void *cookie,
 	ring->priv = tx_info->priv;
 	ring->complete = tx_info->complete;
 
-	/* Update CB post SW ring update to order callback and transfer updates */
+	/* Publish the final descriptor after its payload and callback state. */
+	dma_wmb();
 	dma_ll_virt->ctrl_reg.ctrl_e.cb = final_pcs;
 
 	/* desc write should not go OOO wrt DMA DB ring */

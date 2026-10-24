@@ -83,14 +83,15 @@ inline struct proc_dir_entry *rtw_proc_create_dir(const char *name, struct proc_
 }
 
 inline struct proc_dir_entry *rtw_proc_create_entry(const char *name, struct proc_dir_entry *parent,
-	const struct rtw_proc_ops *fops, void * data)
+	const struct rtw_proc_ops *fops, void *data, bool has_write)
 {
 	struct proc_dir_entry *entry;
+	umode_t mode = S_IFREG | S_IRUGO | (has_write ? S_IWUSR : 0);
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 26))
-	entry = proc_create_data(name,  S_IFREG | S_IRUGO | S_IWUGO, parent, fops, data);
+	entry = proc_create_data(name, mode, parent, fops, data);
 #else
-	entry = create_proc_entry(name, S_IFREG | S_IRUGO | S_IWUGO, parent);
+	entry = create_proc_entry(name, mode, parent);
 	if (entry) {
 		entry->data = data;
 		entry->proc_fops = fops;
@@ -98,6 +99,114 @@ inline struct proc_dir_entry *rtw_proc_create_entry(const char *name, struct pro
 #endif
 
 	return entry;
+}
+
+/* Allocates count+1 bytes, copies count bytes from user, and NUL-terminates.
+ * Returns count+1 (alloc_size) on success — allocation size, not copied length —
+ * so callers can free with rtw_vmfree(*dst, ret) without recomputing it. */
+static inline ssize_t rtw_proc_alloc_copy_from_user(char **dst, const char __user *buffer,
+	size_t count, size_t max_len)
+{
+	ssize_t ret;
+	char *buf;
+
+	ret = rtw_proc_require_net_admin();
+	if (ret)
+		return ret;
+
+	if (!buffer || count < 1 || count > max_len)
+		return -EINVAL;
+
+	buf = rtw_vmalloc(count + 1);
+	if (!buf)
+		return -ENOMEM;
+
+	if (copy_from_user(buf, buffer, count)) {
+		rtw_vmfree(buf, count + 1);
+		return -EFAULT;
+	}
+
+	buf[count] = '\0';
+	*dst = buf;
+	return (ssize_t)(count + 1);
+}
+
+static inline bool rtw_proc_token_match(const char *buf, size_t len, const char *token, size_t token_len)
+{
+	return len >= token_len && memcmp(buf, token, token_len) == 0;
+}
+
+static inline bool rtw_proc_has_arg_prefix(size_t len, size_t type_len)
+{
+	return len > type_len;
+}
+
+static inline int rtw_proc_parse_decimal(const char *buf, int *val)
+{
+	return kstrtoint(buf, 10, val);
+}
+
+static inline int rtw_proc_parse_u8(const char *buf, u8 *val)
+{
+	return kstrtou8(buf, 10, val);
+}
+
+static inline int rtw_proc_parse_hex_u16(const char *buf, u16 *val)
+{
+	return kstrtou16(buf, 16, val);
+}
+
+static inline int rtw_proc_parse_two_alpha2(const char *buf, char alpha2[2])
+{
+	if (strlen(buf) != 2)
+		return -EINVAL;
+
+	alpha2[0] = buf[0];
+	alpha2[1] = buf[1];
+	return 0;
+}
+
+static inline int rtw_proc_parse_chan_plan(const char *buf, u16 *chplan, u16 *chplan_6g, u8 *env)
+{
+	char *argv[3] = {0};
+	int argc = 0;
+	char *tmp;
+	char *iter;
+	char *token;
+	int ret;
+
+	tmp = kstrdup(buf, GFP_KERNEL);
+	if (!tmp)
+		return -ENOMEM;
+
+	iter = tmp;
+	while ((token = strsep(&iter, " \t")) != NULL) {
+		if (!*token)
+			continue;
+		if (argc >= 3) {
+			ret = -EINVAL;
+			goto exit;
+		}
+		argv[argc++] = token;
+	}
+
+	ret = -EINVAL;
+	if (argc >= 1) {
+		ret = rtw_proc_parse_hex_u16(argv[0], chplan);
+		if (!ret && argc >= 2)
+			ret = rtw_proc_parse_hex_u16(argv[1], chplan_6g);
+		if (!ret && argc >= 3)
+			ret = rtw_proc_parse_u8(argv[2], env);
+	}
+
+exit:
+	kfree(tmp);
+	return ret;
+}
+
+static inline int rtw_proc_parse_country_code(const char *buf, char alpha2[2])
+{
+	return rtw_proc_parse_two_alpha2(buf, alpha2);
 }
 
 static int proc_get_dummy(struct seq_file *m, void *v)
@@ -125,31 +234,35 @@ static int proc_get_drv_cfg(struct seq_file *m, void *v)
 
 static ssize_t proc_set_log_level(struct file *file, const char __user *buffer, size_t count, loff_t *pos, void *data)
 {
-	char tmp[32];
-	int log_level;
+	ssize_t ret;
 
-	if (count < 1)
-		return -EINVAL;
-
-	if (count > sizeof(tmp)) {
-		rtw_warn_on(1);
-		return -EFAULT;
-	}
+	ret = rtw_proc_require_net_admin();
+	if (ret)
+		return ret;
 
 #ifdef CONFIG_RTW_DEBUG
-	if (buffer && !copy_from_user(tmp, buffer, count)) {
+	{
+		char tmp[32];
+		int log_level;
 
-		int num = sscanf(tmp, "%d ", &log_level);
+		if (count >= sizeof(tmp)) {
+			rtw_warn_on(1);
+			return -EFAULT;
+		}
+		ret = rtw_proc_copy_from_user(tmp, sizeof(tmp), buffer, count);
+		if (ret < 0)
+			return ret;
 
-		if (num == 1 &&
-		    log_level >= _DRV_NONE_ && log_level <= _DRV_MAX_) {
+		rtw_proc_stripped_len(tmp, ret);
+
+		if (!rtw_proc_parse_decimal(tmp, &log_level)
+			&& log_level >= _DRV_NONE_ && log_level <= _DRV_MAX_) {
 			rtw_drv_log_level = log_level;
 			printk("rtw_drv_log_level:%d\n", rtw_drv_log_level);
 		}
-	} else
-		return -EFAULT;
+	}
 #else
-	printk("CONFIG_RTW_DEBUG is disabled\n");
+	return -EOPNOTSUPP;
 #endif
 
 	return count;
@@ -174,22 +287,25 @@ static ssize_t proc_set_country_chplan_map(struct file *file, const char __user 
 {
 	char tmp[32];
 	int regd_info_val;
+	ssize_t ret;
 
-	if (count < 1)
-		return -EINVAL;
+	ret = rtw_proc_require_net_admin();
+	if (ret)
+		return ret;
 
-	if (count > sizeof(tmp)) {
+	if (count >= sizeof(tmp)) {
 		rtw_warn_on(1);
 		return -EFAULT;
 	}
 
-	if (buffer && !copy_from_user(tmp, buffer, count)) {
-		int num = sscanf(tmp, "%d", &regd_info_val);
+	ret = rtw_proc_copy_from_user(tmp, sizeof(tmp), buffer, count);
+	if (ret < 0)
+		return ret;
 
-		if (num >= 1)
-			regd_info = regd_info_val ? 1 : 0;
-	} else
-		return -EFAULT;
+	rtw_proc_stripped_len(tmp, ret);
+
+	if (!rtw_proc_parse_decimal(tmp, &regd_info_val))
+		regd_info = regd_info_val ? 1 : 0;
 
 	return count;
 }
@@ -281,28 +397,28 @@ static int proc_get_hal_info(struct seq_file *m, void *v)
 * init/deinit when register/unregister driver
 */
 const struct rtw_proc_hdl drv_proc_hdls[] = {
-	RTW_PROC_HDL_SSEQ("ver_info", proc_get_drv_version, NULL),
-	RTW_PROC_HDL_SSEQ("log_level", proc_get_log_level, proc_set_log_level),
-	RTW_PROC_HDL_SSEQ("drv_cfg", proc_get_drv_cfg, NULL),
+	RTW_PROC_HDL_SSEQ_VERIFIED("ver_info", proc_get_drv_version, NULL),
+	RTW_PROC_HDL_SSEQ_VERIFIED("log_level", proc_get_log_level, proc_set_log_level),
+	RTW_PROC_HDL_SSEQ_VERIFIED("drv_cfg", proc_get_drv_cfg, NULL),
 #ifdef DBG_MEM_ALLOC
-	RTW_PROC_HDL_SSEQ("mstat", proc_get_mstat, NULL),
+	RTW_PROC_HDL_SSEQ_VERIFIED("mstat", proc_get_mstat, NULL),
 #endif /* DBG_MEM_ALLOC */
-	RTW_PROC_HDL_SSEQ("country_chplan_map", proc_get_country_chplan_map, proc_set_country_chplan_map),
-	RTW_PROC_HDL_SSEQ("country_list", proc_get_country_list, NULL),
-	RTW_PROC_HDL_SSEQ("chplan_id_list", proc_get_chplan_id_list, NULL),
-	RTW_PROC_HDL_SSEQ("chplan_country_list", proc_get_chplan_country_list, NULL),
+	RTW_PROC_HDL_SSEQ_VERIFIED("country_chplan_map", proc_get_country_chplan_map, proc_set_country_chplan_map),
+	RTW_PROC_HDL_SSEQ_VERIFIED("country_list", proc_get_country_list, NULL),
+	RTW_PROC_HDL_SSEQ_VERIFIED("chplan_id_list", proc_get_chplan_id_list, NULL),
+	RTW_PROC_HDL_SSEQ_VERIFIED("chplan_country_list", proc_get_chplan_country_list, NULL),
 #if CONFIG_IEEE80211_BAND_6GHZ
-	RTW_PROC_HDL_SSEQ("chplan_6g_id_list", proc_get_chplan_6g_id_list, NULL),
-	RTW_PROC_HDL_SSEQ("chplan_6g_country_list", proc_get_chplan_6g_country_list, NULL),
+	RTW_PROC_HDL_SSEQ_VERIFIED("chplan_6g_id_list", proc_get_chplan_6g_id_list, NULL),
+	RTW_PROC_HDL_SSEQ_VERIFIED("chplan_6g_country_list", proc_get_chplan_6g_country_list, NULL),
 #endif
 #ifdef CONFIG_RTW_CHPLAN_DEV
 	RTW_PROC_HDL_SSEQ("chplan_test", proc_get_chplan_test, NULL),
 #endif
-	RTW_PROC_HDL_SSEQ("chplan_ver", proc_get_chplan_ver, NULL),
+	RTW_PROC_HDL_SSEQ_VERIFIED("chplan_ver", proc_get_chplan_ver, NULL),
 #ifdef CONFIG_RTW_CHSET_DEV
 	RTW_PROC_HDL_SSEQ("chset_test", proc_get_chset_test, NULL),
 #endif
-	RTW_PROC_HDL_SSEQ("global_op_class", proc_get_global_op_class, NULL),
+	RTW_PROC_HDL_SSEQ_VERIFIED("global_op_class", proc_get_global_op_class, NULL),
 #ifdef CONFIG_RTW_OPCLASS_DEV
 	RTW_PROC_HDL_SSEQ("opc_test", proc_get_opc_test, NULL),
 #endif
@@ -409,11 +525,13 @@ int rtw_drv_proc_init(void)
 	}
 
 	for (i = 0; i < drv_proc_hdls_num; i++) {
+		if (drv_proc_hdls[i].verified == 0)
+			continue;
 		if (drv_proc_hdls[i].type == RTW_PROC_HDL_TYPE_SEQ)
-			entry = rtw_proc_create_entry(drv_proc_hdls[i].name, rtw_proc, &rtw_drv_proc_seq_fops, (void *)i);
+			entry = rtw_proc_create_entry(drv_proc_hdls[i].name, rtw_proc, &rtw_drv_proc_seq_fops, (void *)i, drv_proc_hdls[i].write != NULL);
 		else if (drv_proc_hdls[i].type == RTW_PROC_HDL_TYPE_SSEQ ||
 			drv_proc_hdls[i].type == RTW_PROC_HDL_TYPE_SZSEQ)
-			entry = rtw_proc_create_entry(drv_proc_hdls[i].name, rtw_proc, &rtw_drv_proc_sseq_fops, (void *)i);
+			entry = rtw_proc_create_entry(drv_proc_hdls[i].name, rtw_proc, &rtw_drv_proc_sseq_fops, (void *)i, drv_proc_hdls[i].write != NULL);
 		else
 			entry = NULL;
 
@@ -436,8 +554,11 @@ void rtw_drv_proc_deinit(void)
 	if (rtw_proc == NULL)
 		return;
 
-	for (i = 0; i < drv_proc_hdls_num; i++)
+	for (i = 0; i < drv_proc_hdls_num; i++) {
+		if (drv_proc_hdls[i].verified == 0)
+			continue;
 		remove_proc_entry(drv_proc_hdls[i].name, rtw_proc);
+	}
 
 	remove_proc_entry(RTW_PROC_NAME, get_proc_net);
 	rtw_proc = NULL;
@@ -1151,6 +1272,7 @@ static ssize_t proc_set_rx_info_msg(struct file *file, const char __user *buffer
 	_adapter *padapter = (_adapter *)rtw_netdev_priv(dev);
 	struct recv_info *recvinfo;
 	char tmp[32] = {0};
+	ssize_t ret;
 	int phy_info_flag = 0;
 
 	if (!padapter)
@@ -1158,22 +1280,24 @@ static ssize_t proc_set_rx_info_msg(struct file *file, const char __user *buffer
 
 	recvinfo = &padapter->recvinfo;
 
-	if (count < 1) {
-		RTW_INFO("argument size is less than 1\n");
-		return -EFAULT;
-	}
+	ret = rtw_proc_require_net_admin();
+	if (ret)
+		return ret;
 
-	if (count > sizeof(tmp)) {
+	if (count >= sizeof(tmp)) {
 		rtw_warn_on(1);
 		return -EFAULT;
 	}
 
-	if (buffer && !copy_from_user(tmp, buffer, count)) {
-		int num = sscanf(tmp, "%d", &phy_info_flag);
+	ret = rtw_proc_copy_from_user(tmp, sizeof(tmp), buffer, count);
+	if (ret < 0)
+		return ret;
 
-		if (num == 1)
-			recvinfo->store_law_data_flag = (boolean) phy_info_flag;
-	}
+	rtw_proc_stripped_len(tmp, ret);
+
+	if (!rtw_proc_parse_decimal(tmp, &phy_info_flag))
+		recvinfo->store_law_data_flag = (boolean)phy_info_flag;
+
 	return count;
 }
 static int proc_get_rx_info_msg(struct seq_file *m, void *v)
@@ -1780,28 +1904,31 @@ static ssize_t proc_set_chan_plan(struct file *file, const char __user *buffer, 
 	u16 chplan = RTW_CHPLAN_UNSPECIFIED;
 	u16 chplan_6g = RTW_CHPLAN_6G_UNSPECIFIED;
 	u8 env = RTW_ENV_NUM;
+	ssize_t ret;
 
 	if (!padapter)
 		return -EFAULT;
 
-	if (count < 1) {
-		RTW_INFO("argument size is less than 1\n");
-		return -EFAULT;
-	}
+	ret = rtw_proc_require_net_admin();
+	if (ret)
+		return ret;
 
-	if (count > sizeof(tmp)) {
+	if (count >= sizeof(tmp)) {
 		rtw_warn_on(1);
 		return -EFAULT;
 	}
 
-	if (buffer && !copy_from_user(tmp, buffer, count)) {
-		int num = sscanf(tmp, "%hx %hx %hhu", &chplan, &chplan_6g, &env);
-		if (num < 1)
-			return count;
+	ret = rtw_proc_copy_from_user(tmp, sizeof(tmp), buffer, count);
+	if (ret < 0)
+		return ret;
 
-		rtw_chplan_ioctl_input_mapping(&chplan, &chplan_6g);
-	}
+	rtw_proc_stripped_len(tmp, ret);
 
+	ret = rtw_proc_parse_chan_plan(tmp, &chplan, &chplan_6g, &env);
+	if (ret)
+		return ret;
+
+	rtw_chplan_ioctl_input_mapping(&chplan, &chplan_6g);
 	rtw_set_channel_plan(padapter, chplan, chplan_6g, env, RTW_REGD_SET_BY_USER);
 
 	return count;
@@ -1825,27 +1952,31 @@ static ssize_t proc_set_country_code(struct file *file, const char __user *buffe
 	char tmp[32];
 	char alpha2[2];
 	u8 env = RTW_ENV_NUM;
-	int num;
+	ssize_t ret;
 
-	if (count < 1)
+	if (!padapter)
 		return -EFAULT;
 
-	if (count > sizeof(tmp)) {
+	ret = rtw_proc_require_net_admin();
+	if (ret)
+		return ret;
+
+	if (count >= sizeof(tmp)) {
 		rtw_warn_on(1);
 		return -EFAULT;
 	}
 
-	if (!buffer || copy_from_user(tmp, buffer, count))
-		goto exit;
+	ret = rtw_proc_copy_from_user(tmp, sizeof(tmp), buffer, count);
+	if (ret < 0)
+		return ret;
 
-	/* TODO: accept environment */
-	num = sscanf(tmp, "%c%c", &alpha2[0], &alpha2[1]);
-	if (num < 2)
+	rtw_proc_stripped_len(tmp, ret);
+
+	if (rtw_proc_parse_country_code(tmp, alpha2))
 		return count;
 
 	rtw_set_country(padapter, alpha2, env, RTW_REGD_SET_BY_USER);
 
-exit:
 	return count;
 }
 
@@ -1866,26 +1997,28 @@ static ssize_t proc_set_env(struct file *file, const char __user *buffer, size_t
 	_adapter *padapter = (_adapter *)rtw_netdev_priv(dev);
 	char tmp[32];
 	u8 env = RTW_ENV_NUM;
+	ssize_t ret;
 
 	if (!padapter)
 		return -EFAULT;
 
-	if (count < 1) {
-		RTW_INFO("argument size is less than 1\n");
-		return -EFAULT;
-	}
+	ret = rtw_proc_require_net_admin();
+	if (ret)
+		return ret;
 
-	if (count > sizeof(tmp)) {
+	if (count >= sizeof(tmp)) {
 		rtw_warn_on(1);
 		return -EFAULT;
 	}
 
-	if (buffer && !copy_from_user(tmp, buffer, count)) {
-		int num = sscanf(tmp, "%hhu", &env);
+	ret = rtw_proc_copy_from_user(tmp, sizeof(tmp), buffer, count);
+	if (ret < 0)
+		return ret;
 
-		if (num < 1)
-			return count;
-	}
+	rtw_proc_stripped_len(tmp, ret);
+
+	if (rtw_proc_parse_u8(tmp, &env))
+		return count;
 
 	rtw_set_env(padapter, env, RTW_REGD_SET_BY_USER);
 
@@ -1908,26 +2041,18 @@ static ssize_t proc_set_chplan_confs(struct file *file, const char __user *buffe
 {
 	struct net_device *dev = data;
 	_adapter *adapter = rtw_netdev_priv(dev);
-	char *tmp;
+	char *tmp = NULL;
 	struct chplan_confs confs;
+	ssize_t ret;
 
-	if (!buffer || count < 1)
-		return -EFAULT;
-
-	tmp = rtw_vmalloc(count + 1);
-	if (!tmp)
-		return -ENOMEM;
-
-	if (copy_from_user(tmp, buffer, count))
-		goto exit;
-	tmp[count] = '\0';
+	ret = rtw_proc_alloc_copy_from_user(&tmp, buffer, count, PAGE_SIZE);
+	if (ret < 0)
+		return ret;
 
 	if (rtw_parse_chplan_confs_cmd_str(&confs, tmp))
 		rtw_set_chplan_confs_cmd(adapter, RTW_CMDF_WAIT_ACK, &confs);
 
-exit:
-	rtw_vmfree(tmp, count + 1);
-
+	rtw_vmfree(tmp, ret);
 	return count;
 }
 
@@ -1945,21 +2070,24 @@ static int proc_get_cap_spt_op_class_ch(struct seq_file *m, void *v)
 static ssize_t proc_set_cap_spt_op_class_ch(struct file *file, const char __user *buffer, size_t count, loff_t *pos, void *data)
 {
 	char tmp[32];
+	ssize_t ret;
 
-	if (count < 1)
-		return -EFAULT;
+	ret = rtw_proc_require_net_admin();
+	if (ret)
+		return ret;
 
-	if (count > sizeof(tmp)) {
+	if (count >= sizeof(tmp)) {
 		rtw_warn_on(1);
 		return -EFAULT;
 	}
 
-	if (!buffer || copy_from_user(tmp, buffer, count))
-		goto exit;
+	ret = rtw_proc_copy_from_user(tmp, sizeof(tmp), buffer, count);
+	if (ret < 0)
+		return ret;
 
-	sscanf(tmp, "%d", &cap_spt_op_class_ch_detail);
-
-exit:
+	rtw_proc_stripped_len(tmp, ret);
+	if (rtw_proc_parse_decimal(tmp, &cap_spt_op_class_ch_detail))
+		return -EINVAL;
 	return count;
 }
 
@@ -1977,21 +2105,24 @@ static int proc_get_reg_spt_op_class_ch(struct seq_file *m, void *v)
 static ssize_t proc_set_reg_spt_op_class_ch(struct file *file, const char __user *buffer, size_t count, loff_t *pos, void *data)
 {
 	char tmp[32];
+	ssize_t ret;
 
-	if (count < 1)
-		return -EFAULT;
+	ret = rtw_proc_require_net_admin();
+	if (ret)
+		return ret;
 
-	if (count > sizeof(tmp)) {
+	if (count >= sizeof(tmp)) {
 		rtw_warn_on(1);
 		return -EFAULT;
 	}
 
-	if (!buffer || copy_from_user(tmp, buffer, count))
-		goto exit;
+	ret = rtw_proc_copy_from_user(tmp, sizeof(tmp), buffer, count);
+	if (ret < 0)
+		return ret;
 
-	sscanf(tmp, "%d", &reg_spt_op_class_ch_detail);
-
-exit:
+	rtw_proc_stripped_len(tmp, ret);
+	if (rtw_proc_parse_decimal(tmp, &reg_spt_op_class_ch_detail))
+		return -EINVAL;
 	return count;
 }
 
@@ -2009,21 +2140,24 @@ static int proc_get_cur_spt_op_class_ch(struct seq_file *m, void *v)
 static ssize_t proc_set_cur_spt_op_class_ch(struct file *file, const char __user *buffer, size_t count, loff_t *pos, void *data)
 {
 	char tmp[32];
+	ssize_t ret;
 
-	if (count < 1)
-		return -EFAULT;
+	ret = rtw_proc_require_net_admin();
+	if (ret)
+		return ret;
 
-	if (count > sizeof(tmp)) {
+	if (count >= sizeof(tmp)) {
 		rtw_warn_on(1);
 		return -EFAULT;
 	}
 
-	if (!buffer || copy_from_user(tmp, buffer, count))
-		goto exit;
+	ret = rtw_proc_copy_from_user(tmp, sizeof(tmp), buffer, count);
+	if (ret < 0)
+		return ret;
 
-	sscanf(tmp, "%d", &cur_spt_op_class_ch_detail);
-
-exit:
+	rtw_proc_stripped_len(tmp, ret);
+	if (rtw_proc_parse_decimal(tmp, &cur_spt_op_class_ch_detail))
+		return -EINVAL;
 	return count;
 }
 
@@ -3241,39 +3375,14 @@ static int proc_get_tx_power_ext_info(struct seq_file *m, void *v)
 
 static ssize_t proc_set_tx_power_ext_info(struct file *file, const char __user *buffer, size_t count, loff_t *pos, void *data)
 {
-	char tmp[32] = {0};
-	char cmd[16] = {0};
+	ssize_t ret;
 
-	if (count > sizeof(tmp)) {
-		rtw_warn_on(1);
-		return -EFAULT;
-	}
+	ret = rtw_proc_require_net_admin();
+	if (ret)
+		return ret;
 
-	if (buffer && !copy_from_user(tmp, buffer, count)) {
-
-		int num = sscanf(tmp, "%s", cmd);
-
-		if (num < 1)
-			return count;
-
-#if 0 /* TODO */
-		struct net_device *dev = data;
-		_adapter *adapter = (_adapter *)rtw_netdev_priv(dev);
-
-		#ifdef CONFIG_LOAD_PHY_PARA_FROM_FILE
-		phy_free_filebuf_mask(adapter, LOAD_BB_PG_PARA_FILE | LOAD_RF_TXPWR_LMT_PARA_FILE);
-		#endif
-
-		if (strcmp("default", cmd) == 0)
-			rtw_run_in_thread_cmd(adapter, ((void *)(phy_reload_default_tx_power_ext_info)), adapter);
-		else
-			rtw_run_in_thread_cmd(adapter, ((void *)(phy_reload_tx_power_ext_info)), adapter);
-
-		rtw_run_in_thread_cmd_wait(adapter, ((void *)(rtw_hal_update_txpwr_level)), adapter, 2000);
-#endif
-	}
-
-	return count;
+	/* TODO: reload tx power ext info from file (default/custom path) */
+	return -EOPNOTSUPP;
 }
 
 #ifdef GEORGIA_TODO_TX_PWR
@@ -5519,12 +5628,12 @@ const struct rtw_proc_hdl adapter_proc_hdls[] = {
 	RTW_PROC_HDL_SSEQ("backop_flags_mesh", proc_get_backop_flags_mesh, proc_set_backop_flags_mesh),
 	#endif
 #endif
-	RTW_PROC_HDL_SSEQ("survey_info", proc_get_survey_info, proc_set_survey_info),
+	RTW_PROC_HDL_SSEQ_VERIFIED("survey_info", proc_get_survey_info, proc_set_survey_info),
 	RTW_PROC_HDL_SSEQ("ap_info", proc_get_ap_info, NULL),
 #ifdef PRIVATE_R
 	RTW_PROC_HDL_SSEQ("infra_ap", proc_get_infra_ap, NULL),
 #endif /* PRIVATE_R */
-	RTW_PROC_HDL_SSEQ("trx_info", proc_get_trx_info, proc_reset_trx_info),
+	RTW_PROC_HDL_SSEQ_VERIFIED("trx_info", proc_get_trx_info, proc_reset_trx_info),
 	RTW_PROC_HDL_SSEQ("tx_power_offset", proc_get_tx_power_offset, proc_set_tx_power_offset),
 	RTW_PROC_HDL_SSEQ("rate_ctl", proc_get_rate_ctl, proc_set_rate_ctl),
 	RTW_PROC_HDL_SSEQ("bss_color", proc_get_bss_color_ctl, proc_set_bss_color_ctl),
@@ -5541,11 +5650,11 @@ const struct rtw_proc_hdl adapter_proc_hdls[] = {
 #endif
 
 	RTW_PROC_HDL_SSEQ("ps_dbg_info", proc_get_ps_dbg_info, proc_set_ps_dbg_info),
-	RTW_PROC_HDL_SSEQ("wifi_spec", proc_get_wifi_spec, NULL),
+	RTW_PROC_HDL_SSEQ_VERIFIED("wifi_spec", proc_get_wifi_spec, NULL),
 #ifdef CONFIG_LAYER2_ROAMING
-	RTW_PROC_HDL_SSEQ("roam_flags", proc_get_roam_flags, proc_set_roam_flags),
-	RTW_PROC_HDL_SSEQ("roam_param", proc_get_roam_param, proc_set_roam_param),
-	RTW_PROC_HDL_SSEQ("roam_tgt_addr", NULL, proc_set_roam_tgt_addr),
+	RTW_PROC_HDL_SSEQ_VERIFIED("roam_flags", proc_get_roam_flags, proc_set_roam_flags),
+	RTW_PROC_HDL_SSEQ_VERIFIED("roam_param", proc_get_roam_param, proc_set_roam_param),
+	RTW_PROC_HDL_SSEQ_VERIFIED("roam_tgt_addr", NULL, proc_set_roam_tgt_addr),
 #endif /* CONFIG_LAYER2_ROAMING */
 #ifdef CONFIG_RTW_MBO
 	RTW_PROC_HDL_SSEQ("non_pref_ch", rtw_mbo_proc_non_pref_chans_get, rtw_mbo_proc_non_pref_chans_set),
@@ -5619,8 +5728,8 @@ const struct rtw_proc_hdl adapter_proc_hdls[] = {
 	RTW_PROC_HDL_SSEQ("tx_ampdu_num", proc_get_tx_ampdu_num, proc_set_tx_ampdu_num),
 	RTW_PROC_HDL_SSEQ("tx_quick_addba_req", proc_get_tx_quick_addba_req, proc_set_tx_quick_addba_req),
 #ifdef CONFIG_TX_AMSDU
-	RTW_PROC_HDL_SSEQ("tx_amsdu", proc_get_tx_amsdu, proc_set_tx_amsdu),
-	RTW_PROC_HDL_SSEQ("tx_amsdu_rate", proc_get_tx_amsdu_rate, proc_set_tx_amsdu_rate),
+	RTW_PROC_HDL_SSEQ_VERIFIED("tx_amsdu", proc_get_tx_amsdu, proc_set_tx_amsdu),
+	RTW_PROC_HDL_SSEQ_VERIFIED("tx_amsdu_rate", proc_get_tx_amsdu_rate, proc_set_tx_amsdu_rate),
 #endif
 	RTW_PROC_HDL_SSEQ("tx_max_agg_time", proc_get_tx_max_agg_time, proc_set_tx_max_agg_time),
 #ifdef CONFIG_CORE_TXSC
@@ -5649,8 +5758,8 @@ const struct rtw_proc_hdl adapter_proc_hdls[] = {
 	RTW_PROC_HDL_SSEQ("sta_tp_dump", proc_get_sta_tp_dump, proc_set_sta_tp_dump),
 	RTW_PROC_HDL_SSEQ("sta_tp_info", proc_get_sta_tp_info, NULL),
 	RTW_PROC_HDL_SSEQ("dis_turboedca", proc_get_turboedca_ctrl, proc_set_turboedca_ctrl),
-	RTW_PROC_HDL_SSEQ("tx_info_msg", proc_get_tx_info_msg, NULL),
-	RTW_PROC_HDL_SSEQ("rx_info_msg", proc_get_rx_info_msg, proc_set_rx_info_msg),
+	RTW_PROC_HDL_SSEQ_VERIFIED("tx_info_msg", proc_get_tx_info_msg, NULL),
+	RTW_PROC_HDL_SSEQ_VERIFIED("rx_info_msg", proc_get_rx_info_msg, proc_set_rx_info_msg),
 	RTW_PROC_HDL_SSEQ("false_alarm_accumulated",
 			  proc_get_false_alarm_accumulated,
 			  proc_set_false_alarm_accumulated),
@@ -5710,15 +5819,15 @@ const struct rtw_proc_hdl adapter_proc_hdls[] = {
 #ifdef CONFIG_P2P_WOWLAN
 	RTW_PROC_HDL_SSEQ("p2p_wowlan_info", proc_get_p2p_wowlan_info, NULL),
 #endif
-	RTW_PROC_HDL_SSEQ("country_code", proc_get_country_code, proc_set_country_code),
+	RTW_PROC_HDL_SSEQ_VERIFIED("country_code", proc_get_country_code, proc_set_country_code),
 #if CONFIG_IEEE80211_BAND_6GHZ
-	RTW_PROC_HDL_SSEQ("env", proc_get_env, proc_set_env),
+	RTW_PROC_HDL_SSEQ_VERIFIED("env", proc_get_env, proc_set_env),
 #endif
-	RTW_PROC_HDL_SSEQ("chan_plan", proc_get_chan_plan, proc_set_chan_plan),
-	RTW_PROC_HDL_SSEQ("chplan_confs", proc_get_chplan_confs, proc_set_chplan_confs),
-	RTW_PROC_HDL_SSEQ("cap_spt_op_class_ch", proc_get_cap_spt_op_class_ch, proc_set_cap_spt_op_class_ch),
-	RTW_PROC_HDL_SSEQ("reg_spt_op_class_ch", proc_get_reg_spt_op_class_ch, proc_set_reg_spt_op_class_ch),
-	RTW_PROC_HDL_SSEQ("cur_spt_op_class_ch", proc_get_cur_spt_op_class_ch, proc_set_cur_spt_op_class_ch),
+	RTW_PROC_HDL_SSEQ_VERIFIED("chan_plan", proc_get_chan_plan, proc_set_chan_plan),
+	RTW_PROC_HDL_SSEQ_VERIFIED("chplan_confs", proc_get_chplan_confs, proc_set_chplan_confs),
+	RTW_PROC_HDL_SSEQ_VERIFIED("cap_spt_op_class_ch", proc_get_cap_spt_op_class_ch, proc_set_cap_spt_op_class_ch),
+	RTW_PROC_HDL_SSEQ_VERIFIED("reg_spt_op_class_ch", proc_get_reg_spt_op_class_ch, proc_set_reg_spt_op_class_ch),
+	RTW_PROC_HDL_SSEQ_VERIFIED("cur_spt_op_class_ch", proc_get_cur_spt_op_class_ch, proc_set_cur_spt_op_class_ch),
 #if CONFIG_RTW_MACADDR_ACL
 	RTW_PROC_HDL_SSEQ("macaddr_acl", proc_get_macaddr_acl, proc_set_macaddr_acl),
 #endif
@@ -5727,7 +5836,7 @@ const struct rtw_proc_hdl adapter_proc_hdls[] = {
 #endif
 	RTW_PROC_HDL_SSEQ("ch_sel_policy", proc_get_ch_sel_policy, proc_set_ch_sel_policy),
 #ifdef CONFIG_80211D
-	RTW_PROC_HDL_SSEQ("country_ie_slave_records", proc_get_country_ie_slave_records, NULL),
+	RTW_PROC_HDL_SSEQ_VERIFIED("country_ie_slave_records", proc_get_country_ie_slave_records, NULL),
 #endif
 #ifdef CONFIG_DFS_MASTER
 	RTW_PROC_HDL_SSEQ("dfs_test_case", proc_get_dfs_test_case, proc_set_dfs_test_case),
@@ -5756,16 +5865,16 @@ const struct rtw_proc_hdl adapter_proc_hdls[] = {
 	#endif
 #endif
 
-	RTW_PROC_HDL_SSEQ("target_tx_power", proc_get_target_tx_power, NULL),
-	RTW_PROC_HDL_SSEQ("tx_power_by_rate", proc_get_tx_power_by_rate, NULL),
+	RTW_PROC_HDL_SSEQ_VERIFIED("target_tx_power", proc_get_target_tx_power, NULL),
+	RTW_PROC_HDL_SSEQ_VERIFIED("tx_power_by_rate", proc_get_tx_power_by_rate, NULL),
 #if CONFIG_TXPWR_LIMIT
-	RTW_PROC_HDL_SSEQ("tx_power_limit", proc_get_tx_power_limit, NULL),
+	RTW_PROC_HDL_SSEQ_VERIFIED("tx_power_limit", proc_get_tx_power_limit, NULL),
 	#ifdef CONFIG_80211AX_HE
-	RTW_PROC_HDL_SSEQ("tx_power_limit_ru", proc_get_tx_power_limit_ru, NULL),
+	RTW_PROC_HDL_SSEQ_VERIFIED("tx_power_limit_ru", proc_get_tx_power_limit_ru, NULL),
 	#endif
 #endif
 	RTW_PROC_HDL_SSEQ("tpc_settings", proc_get_tpc_settings, proc_set_tpc_settings),
-	RTW_PROC_HDL_SSEQ("tx_power_ext_info", proc_get_tx_power_ext_info, proc_set_tx_power_ext_info),
+	RTW_PROC_HDL_SSEQ_VERIFIED("tx_power_ext_info", proc_get_tx_power_ext_info, proc_set_tx_power_ext_info),
 #ifdef GEORGIA_TODO_TX_PWR
 	RTW_PROC_HDL_SEQ("tx_power_idx", &seq_ops_tx_power_idx, NULL),
 	RTW_PROC_HDL_SEQ("txpwr_total_dbm", &seq_ops_txpwr_total_dbm, NULL),
@@ -5797,7 +5906,7 @@ const struct rtw_proc_hdl adapter_proc_hdls[] = {
 	RTW_PROC_HDL_SSEQ("11w_tx_auth", proc_get_tx_auth, proc_set_tx_auth),
 #endif /* CONFIG_IEEE80211W */
 
-	RTW_PROC_HDL_SSEQ("mac_addr", proc_get_mac_addr, NULL),
+	RTW_PROC_HDL_SSEQ_VERIFIED("mac_addr", proc_get_mac_addr, NULL),
 	RTW_PROC_HDL_SSEQ("skip_band", proc_get_skip_band, proc_set_skip_band),
 
 	RTW_PROC_HDL_SSEQ("rx_stat", proc_get_rx_stat, NULL),
@@ -5839,7 +5948,7 @@ const struct rtw_proc_hdl adapter_proc_hdls[] = {
 
 	RTW_PROC_HDL_SSEQ("dynamic_agg_enable", proc_get_dynamic_agg_enable, proc_set_dynamic_agg_enable),
 
-	RTW_PROC_HDL_SSEQ("fw_info", proc_get_fw_info, NULL),
+	RTW_PROC_HDL_SSEQ_VERIFIED("fw_info", proc_get_fw_info, NULL),
 	RTW_PROC_HDL_SSEQ("fw_offload", proc_get_fw_offload, proc_set_fw_offload),
 
 #ifdef CONFIG_RTW_WDS
@@ -6110,41 +6219,37 @@ static ssize_t proc_set_phydm_cmd(struct file *file, char *buffer, size_t count,
 
 static ssize_t proc_set_phl_cmd(struct file *file, const char __user *buffer, size_t count, loff_t *pos, void *data)
 {
-	char *buf, *p;
+	char *buf = NULL, *p;
 	enum rtw_proc_cmd_type type;
-	ssize_t ret, len;
+	ssize_t ret, alloc_size;
+	size_t len;
 	int type_len;
 
-	buf = _rtw_malloc(count + 1);
-	if (!buf)
-		return -ENOMEM;
+	alloc_size = rtw_proc_alloc_copy_from_user(&buf, buffer, count, PHYDM_MSG_LEN - 1);
+	if (alloc_size < 0)
+		return alloc_size;
 
-	if (copy_from_user(buf, buffer, count)) {
-		ret = -EFAULT;
-		goto err;
-	}
+	len = rtw_proc_stripped_len(buf, alloc_size - 1);
 
-	if (strncmp(buf, "bb ", 3) == 0) {
+	if (rtw_proc_token_match(buf, len, "bb ", 3)) {
 		type = RTW_PROC_CMD_BB;
 		type_len = 3;
-	} else if (strncmp(buf, "rf ", 3) == 0) {
+	} else if (rtw_proc_token_match(buf, len, "rf ", 3)) {
 		type = RTW_PROC_CMD_RF;
 		type_len = 3;
-	} else if (strncmp(buf, "mac ", 4) == 0) {
+	} else if (rtw_proc_token_match(buf, len, "mac ", 4)) {
 		type = RTW_PROC_CMD_MAC;
 		type_len = 4;
-	} else if (strncmp(buf, "phl ", 4) == 0) {
+	} else if (rtw_proc_token_match(buf, len, "phl ", 4)) {
 		type = RTW_PROC_CMD_PHL;
 		type_len = 4;
-	} else if (strncmp(buf, "core ", 5) == 0) {
-		printk("%s(%d)\n",__func__,__LINE__);
+	} else if (rtw_proc_token_match(buf, len, "core ", 5)) {
 		type = RTW_PROC_CMD_CORE;
 		type_len = 5;
-	} else if (strncmp(buf, "btc ", 4) == 0) {
-		printk("%s(%d)\n",__func__,__LINE__);
+	} else if (rtw_proc_token_match(buf, len, "btc ", 4)) {
 		type = RTW_PROC_CMD_BTC;
 		type_len = 4;
-	} else if (strncmp(buf, "efuse ", 6) == 0) {
+	} else if (rtw_proc_token_match(buf, len, "efuse ", 6)) {
 		type = RTW_PROC_CMD_EFUSE;
 		type_len = 6;
 	} else {
@@ -6152,22 +6257,17 @@ static ssize_t proc_set_phl_cmd(struct file *file, const char __user *buffer, si
 		goto err;
 	}
 
-	/* skip first type token, like 'bb ', 'rf ' */
+	if (!rtw_proc_has_arg_prefix(len, type_len)) {
+		ret = -EINVAL;
+		goto err;
+	}
+
 	p = buf + type_len;
-	len = count - type_len;
-
-	/* remove trailing newline character, because BB/RF parser uses
-	 * " ," as delimiter that leads the last token contains '\n' if
-	 * we use 'echo' command without '-n' argument.
-	 */
-	if (p[len - 1] == '\n')
-		len--;
-	p[len++] = '\0';
-
-	ret = proc_set_phydm_cmd(file, p, len, pos, data, type);
+	ret = proc_set_phydm_cmd(file, p, strlen(p) + 1, pos, data, type);
 
 err:
-	_rtw_mfree(buf, count + 1);
+	if (buf)
+		rtw_vmfree(buf, alloc_size);
 
 	if (ret >= 0)
 		return count;
@@ -6181,7 +6281,7 @@ err:
 */
 const struct rtw_proc_hdl odm_proc_hdls[] = {
 	RTW_PROC_HDL_SSEQ("adaptivity", proc_get_phy_adaptivity, NULL),
-	RTW_PROC_HDL_SZSEQ("phl_cmd", proc_get_phl_cmd, proc_set_phl_cmd, PHYDM_MSG_LEN),
+	RTW_PROC_HDL_SZSEQ_VERIFIED("phl_cmd", proc_get_phl_cmd, proc_set_phl_cmd, PHYDM_MSG_LEN),
 };
 
 const int odm_proc_hdls_num = sizeof(odm_proc_hdls) / sizeof(struct rtw_proc_hdl);
@@ -6288,11 +6388,13 @@ struct proc_dir_entry *rtw_odm_proc_init(struct net_device *dev)
 	adapter->dir_odm = dir_odm;
 
 	for (i = 0; i < odm_proc_hdls_num; i++) {
+		if (odm_proc_hdls[i].verified == 0)
+			continue;
 		if (odm_proc_hdls[i].type == RTW_PROC_HDL_TYPE_SEQ)
-			entry = rtw_proc_create_entry(odm_proc_hdls[i].name, dir_odm, &rtw_odm_proc_seq_fops, (void *)i);
+			entry = rtw_proc_create_entry(odm_proc_hdls[i].name, dir_odm, &rtw_odm_proc_seq_fops, (void *)i, odm_proc_hdls[i].write != NULL);
 		else if (odm_proc_hdls[i].type == RTW_PROC_HDL_TYPE_SSEQ ||
 			 odm_proc_hdls[i].type == RTW_PROC_HDL_TYPE_SZSEQ)
-			entry = rtw_proc_create_entry(odm_proc_hdls[i].name, dir_odm, &rtw_odm_proc_sseq_fops, (void *)i);
+			entry = rtw_proc_create_entry(odm_proc_hdls[i].name, dir_odm, &rtw_odm_proc_sseq_fops, (void *)i, odm_proc_hdls[i].write != NULL);
 		else
 			entry = NULL;
 
@@ -6318,8 +6420,11 @@ void rtw_odm_proc_deinit(_adapter  *adapter)
 		return;
 	}
 
-	for (i = 0; i < odm_proc_hdls_num; i++)
+	for (i = 0; i < odm_proc_hdls_num; i++) {
+		if (odm_proc_hdls[i].verified == 0)
+			continue;
 		remove_proc_entry(odm_proc_hdls[i].name, dir_odm);
+	}
 
 	remove_proc_entry("odm", adapter->dir_dev);
 
@@ -6358,11 +6463,13 @@ struct proc_dir_entry *rtw_adapter_proc_init(struct net_device *dev)
 	adapter->dir_dev = dir_dev;
 
 	for (i = 0; i < adapter_proc_hdls_num; i++) {
+		if (adapter_proc_hdls[i].verified == 0)
+			continue;
 		if (adapter_proc_hdls[i].type == RTW_PROC_HDL_TYPE_SEQ)
-			entry = rtw_proc_create_entry(adapter_proc_hdls[i].name, dir_dev, &rtw_adapter_proc_seq_fops, (void *)i);
+			entry = rtw_proc_create_entry(adapter_proc_hdls[i].name, dir_dev, &rtw_adapter_proc_seq_fops, (void *)i, adapter_proc_hdls[i].write != NULL);
 		else if (adapter_proc_hdls[i].type == RTW_PROC_HDL_TYPE_SSEQ ||
 			 adapter_proc_hdls[i].type == RTW_PROC_HDL_TYPE_SZSEQ)
-			entry = rtw_proc_create_entry(adapter_proc_hdls[i].name, dir_dev, &rtw_adapter_proc_sseq_fops, (void *)i);
+			entry = rtw_proc_create_entry(adapter_proc_hdls[i].name, dir_dev, &rtw_adapter_proc_sseq_fops, (void *)i, adapter_proc_hdls[i].write != NULL);
 		else
 			entry = NULL;
 
@@ -6391,8 +6498,11 @@ void rtw_adapter_proc_deinit(struct net_device *dev)
 		return;
 	}
 
-	for (i = 0; i < adapter_proc_hdls_num; i++)
+	for (i = 0; i < adapter_proc_hdls_num; i++) {
+		if (adapter_proc_hdls[i].verified == 0)
+			continue;
 		remove_proc_entry(adapter_proc_hdls[i].name, dir_dev);
+	}
 
 	rtw_odm_proc_deinit(adapter);
 	remove_proc_entry(dev->name, drv_proc);
@@ -6414,8 +6524,11 @@ void rtw_adapter_proc_replace(struct net_device *dev)
 		return;
 	}
 
-	for (i = 0; i < adapter_proc_hdls_num; i++)
+	for (i = 0; i < adapter_proc_hdls_num; i++) {
+		if (adapter_proc_hdls[i].verified == 0)
+			continue;
 		remove_proc_entry(adapter_proc_hdls[i].name, dir_dev);
+	}
 
 	rtw_odm_proc_deinit(adapter);
 

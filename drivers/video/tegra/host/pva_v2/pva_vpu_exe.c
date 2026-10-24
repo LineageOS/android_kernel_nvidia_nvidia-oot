@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2021-2023, NVIDIA Corporation.  All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2021-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  */
 
 #include <linux/dma-mapping.h>
@@ -673,7 +673,7 @@ populate_symtab(void *elf, struct nvpva_elf_context *d,
 			goto fail;
 		}
 
-		(void)strncpy(symID->symbol_name, symname, stringsize);
+		(void)memcpy(symID->symbol_name, symname, stringsize);
 		symID->symbol_name[stringsize] = '\0';
 		if (strncmp(symID->symbol_name,
 			   PVA_SYS_INSTANCE_DATA_V1_SYMBOL,

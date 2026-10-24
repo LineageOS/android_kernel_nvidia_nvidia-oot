@@ -2,6 +2,25 @@
 // SPDX-FileCopyrightText: Copyright (c) 2019-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include "ether_linux.h"
+#include "ether_xdp.h"
+#ifdef CONFIG_XDP_SOCKETS
+#include <net/xdp_sock_drv.h>
+#include <linux/ratelimit.h>
+
+/* Stricter than net_ratelimit(): 1 msg per 10s to avoid log flood when fill queue drains */
+static DEFINE_RATELIMIT_STATE(xsk_alloc_fail_rs, 10 * HZ, 1);
+
+static inline void ether_xsk_buff_dma_sync_for_cpu(struct xdp_buff *xdp,
+						   struct xsk_buff_pool *pool)
+{
+#if defined(NV_XSK_BUFF_DMA_SYNC_FOR_CPU_HAS_POOL_ARG)
+	xsk_buff_dma_sync_for_cpu(xdp, pool);
+#else
+	(void)pool;
+	xsk_buff_dma_sync_for_cpu(xdp);
+#endif
+}
+#endif /* CONFIG_XDP_SOCKETS */
 
 /**
  * @brief ether_get_free_tx_ts_node - get free node for pending SKB
@@ -203,23 +222,68 @@ static inline int ether_alloc_skb(struct ether_priv_data *pdata,
 	}
 
 #else
-	rx_swcx->buf_virt_addr = page_pool_dev_alloc_pages(pdata->page_pool[chan]);
-	if (!rx_swcx->buf_virt_addr) {
-		dev_err(pdata->dev,
-			"page pool allocation failed using resv_buf\n");
-		rx_swcx->buf_virt_addr = pdata->resv_buf_virt_addr;
-		rx_swcx->buf_phy_addr = pdata->resv_buf_phy_addr;
-		rx_swcx->flags |= OSI_RX_SWCX_BUF_VALID;
-		val = pdata->xstats.re_alloc_rxbuf_failed[chan];
-		pdata->xstats.re_alloc_rxbuf_failed[chan] = update_stats_counter(val, 1UL);
-		return 0;
-	}
+#ifdef CONFIG_XDP_SOCKETS
+	if (pdata->rx_napi[chan]->xsk_pool) {
+		struct xdp_buff *xdp;
 
-	rx_swcx->buf_phy_addr = page_pool_get_dma_addr(rx_swcx->buf_virt_addr);
+		xdp = xsk_buff_alloc(pdata->rx_napi[chan]->xsk_pool);
+		if (xdp) {
+			if (xsk_uses_need_wakeup(pdata->rx_napi[chan]->xsk_pool))
+				xsk_clear_rx_need_wakeup(pdata->rx_napi[chan]->xsk_pool);
+			rx_swcx->buf_virt_addr = xdp;
+			rx_swcx->buf_phy_addr = xsk_buff_xdp_get_dma(xdp);
+			rx_swcx->flags |= OSI_RX_SWCX_XSK_BUFF;
+			goto rx_buf_valid;
+		}
+
+		/* Fill queue empty: leave this descriptor unfilled until
+		 * userspace refills UMEM and calls ndo_xsk_wakeup().
+		 */
+		if (xsk_uses_need_wakeup(pdata->rx_napi[chan]->xsk_pool))
+			xsk_set_rx_need_wakeup(pdata->rx_napi[chan]->xsk_pool);
+		if (__ratelimit(&xsk_alloc_fail_rs))
+			netdev_warn(pdata->ndev,
+				    "xsk_buff_alloc failed (fill queue empty): RX descriptor refill deferred\n");
+		rx_swcx->flags &= ~(OSI_RX_SWCX_XSK_BUFF |
+				     OSI_RX_SWCX_BUF_VALID);
+		rx_swcx->buf_virt_addr = NULL;
+		rx_swcx->buf_phy_addr = 0;
+		val = pdata->xstats.re_alloc_rxbuf_failed[chan];
+		pdata->xstats.re_alloc_rxbuf_failed[chan] =
+			update_stats_counter(val, 1UL);
+		return -ENOBUFS;
+	}
+#endif
+	{
+		rx_swcx->buf_virt_addr = page_pool_dev_alloc_pages(pdata->page_pool[chan]);
+		if (!rx_swcx->buf_virt_addr) {
+			dev_err(pdata->dev,
+				"page pool allocation failed using resv_buf\n");
+			rx_swcx->flags &= ~OSI_RX_SWCX_XSK_BUFF;
+			rx_swcx->buf_virt_addr = pdata->resv_buf_virt_addr;
+			rx_swcx->buf_phy_addr = pdata->resv_buf_phy_addr;
+			rx_swcx->flags |= OSI_RX_SWCX_BUF_VALID;
+			val = pdata->xstats.re_alloc_rxbuf_failed[chan];
+			pdata->xstats.re_alloc_rxbuf_failed[chan] =
+				update_stats_counter(val, 1UL);
+			return 0;
+		}
+		/* page_pool stores the page-base DMA address. The pool offset
+		 * only scopes DMA sync, so program HW at the packet start after
+		 * XDP headroom.
+		 */
+		rx_swcx->buf_phy_addr =
+			page_pool_get_dma_addr(rx_swcx->buf_virt_addr) +
+			ETHER_XDP_RX_HEADROOM;
+		rx_swcx->flags &= ~OSI_RX_SWCX_XSK_BUFF;
+	}
 #endif
 #ifndef ETHER_PAGE_POOL
 	rx_swcx->buf_virt_addr = skb;
 	rx_swcx->buf_phy_addr = dma_addr;
+#endif
+#ifdef CONFIG_XDP_SOCKETS
+rx_buf_valid:
 #endif
 	rx_swcx->flags |= OSI_RX_SWCX_BUF_VALID;
 
@@ -285,6 +349,22 @@ static void osd_realloc_buf(void *priv, struct osi_rx_ring *rx_ring,
 
 	ether_realloc_rx_skb(pdata, rx_ring, chan);
 }
+
+#ifdef CONFIG_XDP_SOCKETS
+void ether_xsk_rx_refill(struct ether_priv_data *pdata, unsigned int chan)
+{
+	struct osi_rx_ring *rx_ring;
+
+	if (!pdata->rx_napi[chan]->xsk_pool)
+		return;
+
+	rx_ring = pdata->osi_dma->rx_ring[chan];
+	if (!rx_ring)
+		return;
+
+	ether_realloc_rx_skb(pdata, rx_ring, chan);
+}
+#endif
 
 #ifdef ETHER_NVGRO
 /**
@@ -597,25 +677,250 @@ void osd_receive_packet(void *priv, struct osi_rx_ring *rx_ring,
 		   OSI_PKT_CX_VALID)) {
 #endif
 #ifdef ETHER_PAGE_POOL
+#ifdef CONFIG_XDP_SOCKETS
+		if (rx_napi->xsk_pool &&
+		    ((rx_swcx->flags & OSI_RX_SWCX_XSK_BUFF) ==
+		     OSI_RX_SWCX_XSK_BUFF)) {
+			struct xdp_buff *xdp = (struct xdp_buff *)rx_swcx->buf_virt_addr;
+			enum ether_xdp_action xdp_act;
+			unsigned int xdp_len;
+
+			xsk_buff_set_size(xdp, rx_pkt_cx->pkt_len);
+			ether_xsk_buff_dma_sync_for_cpu(xdp, rx_napi->xsk_pool);
+
+			xdp_act = ether_xdp_run_prog_xdp(pdata, chan, xdp,
+							 &xdp_len);
+
+			if (xdp_act == ETHER_XDP_DROP ||
+			    xdp_act == ETHER_XDP_CONSUMED) {
+				ndev->stats.rx_dropped++;
+				if (xdp_act == ETHER_XDP_DROP)
+					xsk_buff_free(xdp);
+				rx_swcx->buf_virt_addr = NULL;
+				rx_swcx->buf_phy_addr = 0;
+				rx_swcx->flags |= OSI_RX_SWCX_PROCESSED;
+				if (osi_get_refill_rx_desc_cnt(pdata->osi_dma, chan) >= 16U)
+					ether_realloc_rx_skb(pdata, rx_ring, chan);
+				return;
+			}
+			if (xdp_act == ETHER_XDP_TX ||
+			    xdp_act == ETHER_XDP_REDIRECT) {
+				ndev->stats.rx_bytes =
+					update_stats_counter(ndev->stats.rx_bytes,
+							     xdp_len);
+				ndev->stats.rx_packets =
+					update_stats_counter(ndev->stats.rx_packets,
+							     1UL);
+				/* XDP_TX/REDIRECT owns buffer; do not free */
+				rx_swcx->buf_virt_addr = NULL;
+				rx_swcx->buf_phy_addr = 0;
+				rx_swcx->flags |= OSI_RX_SWCX_PROCESSED;
+				if (osi_get_refill_rx_desc_cnt(pdata->osi_dma, chan) >= 16U)
+					ether_realloc_rx_skb(pdata, rx_ring, chan);
+				return;
+			}
+			/* XDP_PASS: copy to SKB and continue */
+			skb = netdev_alloc_skb_ip_align(pdata->ndev, xdp_len);
+			if (unlikely(!skb)) {
+				pdata->ndev->stats.rx_dropped++;
+				xsk_buff_free(xdp);
+				rx_swcx->buf_virt_addr = NULL;
+				rx_swcx->buf_phy_addr = 0;
+				rx_swcx->flags |= OSI_RX_SWCX_PROCESSED;
+				if (osi_get_refill_rx_desc_cnt(pdata->osi_dma, chan) >= 16U)
+					ether_realloc_rx_skb(pdata, rx_ring, chan);
+				return;
+			}
+			skb_copy_to_linear_data(skb, xdp->data, xdp_len);
+			skb_put(skb, xdp_len);
+			xsk_buff_free(xdp);
+			rx_swcx->buf_virt_addr = NULL;
+			rx_swcx->buf_phy_addr = 0;
+			rx_swcx->flags |= OSI_RX_SWCX_PROCESSED;
+			goto xsk_pass_skb;
+		}
+#endif
+		dma_sync_single_for_cpu(pdata->dev, dma_addr,
+					rx_pkt_cx->pkt_len, DMA_FROM_DEVICE);
+#ifdef CONFIG_XDP_SOCKETS
+		if (!rx_napi->xsk_pool) {
+			unsigned int xdp_len = rx_pkt_cx->pkt_len;
+			void *page_data = page_address(page);
+			void *xdp_data = (char *)page_data + ETHER_XDP_RX_HEADROOM;
+			enum ether_xdp_action xdp_act;
+			bool xdp_prog_run;
+
+			/* Packet starts after XDP headroom. */
+			xdp_act = ether_xdp_run_prog(pdata, chan, page_data,
+						     xdp_len,
+						     ETHER_XDP_RX_HEADROOM +
+						     pdata->osi_dma->rx_buf_len,
+						     ETHER_XDP_RX_HEADROOM,
+						     true,
+						     &xdp_data, &xdp_len, &xdp_prog_run);
+			switch (xdp_act) {
+			case ETHER_XDP_PASS:
+				if (xdp_prog_run)
+					ether_xdp_stats_inc(rx_napi, &rx_napi->xdp_pass);
+				break;
+			case ETHER_XDP_DROP:
+				if (xdp_prog_run)
+					ether_xdp_stats_inc(rx_napi,
+							    &rx_napi->xdp_drop);
+				ndev->stats.rx_dropped++;
+				page_pool_recycle_direct(pdata->page_pool[chan], page);
+				rx_swcx->buf_virt_addr = NULL;
+				rx_swcx->buf_phy_addr = 0;
+				rx_swcx->flags |= OSI_RX_SWCX_PROCESSED;
+				if (osi_get_refill_rx_desc_cnt(pdata->osi_dma, chan) >= 16U)
+					ether_realloc_rx_skb(pdata, rx_ring, chan);
+				return;
+			case ETHER_XDP_CONSUMED:
+				if (xdp_prog_run)
+					ether_xdp_stats_inc(rx_napi, &rx_napi->xdp_drop);
+				ndev->stats.rx_dropped++;
+				rx_swcx->buf_virt_addr = NULL;
+				rx_swcx->buf_phy_addr = 0;
+				rx_swcx->flags |= OSI_RX_SWCX_PROCESSED;
+				if (osi_get_refill_rx_desc_cnt(pdata->osi_dma, chan) >= 16U)
+					ether_realloc_rx_skb(pdata, rx_ring, chan);
+				return;
+			case ETHER_XDP_TX:
+				ndev->stats.rx_bytes =
+					update_stats_counter(ndev->stats.rx_bytes,
+							     xdp_len);
+				ndev->stats.rx_packets =
+					update_stats_counter(ndev->stats.rx_packets,
+							     1UL);
+				/* XDP_TX/REDIRECT owns buffer; refill descriptor */
+				rx_swcx->buf_virt_addr = NULL;
+				rx_swcx->buf_phy_addr = 0;
+				rx_swcx->flags |= OSI_RX_SWCX_PROCESSED;
+				if (osi_get_refill_rx_desc_cnt(pdata->osi_dma, chan) >= 16U)
+					ether_realloc_rx_skb(pdata, rx_ring, chan);
+				return;
+			case ETHER_XDP_REDIRECT:
+				if (xdp_prog_run)
+					ether_xdp_stats_inc(rx_napi,
+							    &rx_napi->xdp_redirect);
+				ndev->stats.rx_bytes =
+					update_stats_counter(ndev->stats.rx_bytes,
+							     xdp_len);
+				ndev->stats.rx_packets =
+					update_stats_counter(ndev->stats.rx_packets,
+							     1UL);
+				rx_swcx->buf_virt_addr = NULL;
+				rx_swcx->buf_phy_addr = 0;
+				rx_swcx->flags |= OSI_RX_SWCX_PROCESSED;
+				if (osi_get_refill_rx_desc_cnt(pdata->osi_dma, chan) >= 16U)
+					ether_realloc_rx_skb(pdata, rx_ring, chan);
+				return;
+			default:
+				ndev->stats.rx_dropped++;
+				page_pool_recycle_direct(pdata->page_pool[chan], page);
+				rx_swcx->buf_virt_addr = NULL;
+				rx_swcx->buf_phy_addr = 0;
+				rx_swcx->flags |= OSI_RX_SWCX_PROCESSED;
+				if (osi_get_refill_rx_desc_cnt(pdata->osi_dma, chan) >= 16U)
+					ether_realloc_rx_skb(pdata, rx_ring, chan);
+				return;
+			}
+			skb = netdev_alloc_skb_ip_align(pdata->ndev, xdp_len);
+			if (unlikely(!skb)) {
+				pdata->ndev->stats.rx_dropped++;
+				dev_err(pdata->dev,
+					"%s(): Error in allocating the skb\n",
+					__func__);
+				page_pool_recycle_direct(pdata->page_pool[chan], page);
+				rx_swcx->buf_virt_addr = NULL;
+				rx_swcx->buf_phy_addr = 0;
+				rx_swcx->flags |= OSI_RX_SWCX_PROCESSED;
+				if (osi_get_refill_rx_desc_cnt(pdata->osi_dma, chan) >= 16U)
+					ether_realloc_rx_skb(pdata, rx_ring, chan);
+				return;
+			}
+
+			skb_copy_to_linear_data(skb, xdp_data, xdp_len);
+			skb_put(skb, xdp_len);
+			page_pool_recycle_direct(pdata->page_pool[chan], page);
+			goto xsk_pass_skb;
+		}
+#endif
 		skb = netdev_alloc_skb_ip_align(pdata->ndev,
 						rx_pkt_cx->pkt_len);
 		if (unlikely(!skb)) {
 			pdata->ndev->stats.rx_dropped++;
 			dev_err(pdata->dev,
 				"%s(): Error in allocating the skb\n",
-			        __func__);
+				__func__);
 			page_pool_recycle_direct(pdata->page_pool[chan], page);
+			rx_swcx->buf_virt_addr = NULL;
+			rx_swcx->buf_phy_addr = 0;
+			rx_swcx->flags |= OSI_RX_SWCX_PROCESSED;
+			if (osi_get_refill_rx_desc_cnt(pdata->osi_dma, chan) >= 16U)
+				ether_realloc_rx_skb(pdata, rx_ring, chan);
 			return;
 		}
 
-		dma_sync_single_for_cpu(pdata->dev, dma_addr,
-					rx_pkt_cx->pkt_len, DMA_FROM_DEVICE);
-		skb_copy_to_linear_data(skb, page_address(page),
+		skb_copy_to_linear_data(skb,
+					(char *)page_address(page) +
+					ETHER_XDP_RX_HEADROOM,
 					rx_pkt_cx->pkt_len);
 		skb_put(skb, rx_pkt_cx->pkt_len);
 		page_pool_recycle_direct(pdata->page_pool[chan], page);
+#ifdef CONFIG_XDP_SOCKETS
+xsk_pass_skb:
+#endif
 #else
+#ifdef CONFIG_XDP_SOCKETS
+		{
+			unsigned int xdp_len = rx_pkt_cx->pkt_len;
+			unsigned int xdp_frame_sz;
+			unsigned int xdp_headroom;
+			void *xdp_hard_start = skb->head;
+			void *xdp_data = skb->data;
+			enum ether_xdp_action xdp_act;
+			bool xdp_prog_run;
+
+			xdp_frame_sz = (unsigned int)(skb_end_pointer(skb) -
+						      skb->head);
+			xdp_headroom = (unsigned int)(skb->data - skb->head);
+			xdp_act = ether_xdp_run_prog(pdata, chan, xdp_hard_start,
+						     xdp_len, xdp_frame_sz,
+						     xdp_headroom,
+						     false,
+						     &xdp_data, &xdp_len, &xdp_prog_run);
+			switch (xdp_act) {
+			case ETHER_XDP_PASS:
+				if (xdp_prog_run)
+					ether_xdp_stats_inc(rx_napi, &rx_napi->xdp_pass);
+				break;
+			case ETHER_XDP_DROP:
+			default:
+				if (xdp_prog_run) {
+					ether_xdp_stats_inc(rx_napi, &rx_napi->xdp_drop);
+					ndev->stats.rx_dropped++;
+				}
+				dev_kfree_skb_any(skb);
+				rx_swcx->buf_virt_addr = NULL;
+				rx_swcx->buf_phy_addr = 0;
+				rx_swcx->flags |= OSI_RX_SWCX_PROCESSED;
+				if (osi_get_refill_rx_desc_cnt(pdata->osi_dma, chan) >= 16U)
+					ether_realloc_rx_skb(pdata, rx_ring, chan);
+				return;
+			}
+			/* The XDP program may move data in either direction within
+			 * the reported frame. Rebase the empty skb on that view before
+			 * handing it to the network stack.
+			 */
+			skb->data = xdp_data;
+			skb_reset_tail_pointer(skb);
+			skb_put(skb, xdp_len);
+			goto xdp_pass_skb;
+		}
+#endif
 		skb_put(skb, rx_pkt_cx->pkt_len);
+xdp_pass_skb:
 #endif
 		if (likely((rx_pkt_cx->rxcsum & OSI_CHECKSUM_UNNECESSARY) ==
 			 OSI_CHECKSUM_UNNECESSARY)) {
@@ -644,10 +949,10 @@ void osd_receive_packet(void *priv, struct osi_rx_ring *rx_ring,
 			shhwtstamp->hwtstamp = ns_to_ktime(rx_pkt_cx->ns);
 		}
 
-		skb_record_rx_queue(skb, chan);
+		skb_record_rx_queue(skb, rx_napi->ndev_queue_index);
 		skb->dev = ndev;
 		skb->protocol = eth_type_trans(skb, ndev);
-		if ((ULLONG_MAX - ndev->stats.rx_bytes) <= (skb->len)) {
+		if ((ULLONG_MAX - ndev->stats.rx_bytes) < skb->len) {
 			ndev->stats.rx_bytes = skb->len;
 		} else {
 			ndev->stats.rx_bytes += skb->len;
@@ -674,7 +979,20 @@ void osd_receive_packet(void *priv, struct osi_rx_ring *rx_ring,
 			ndev->stats.rx_errors++;
 		}
 #ifdef ETHER_PAGE_POOL
-		page_pool_recycle_direct(pdata->page_pool[chan], page);
+#ifdef CONFIG_XDP_SOCKETS
+			if ((rx_swcx->flags & OSI_RX_SWCX_XSK_BUFF) ==
+			    OSI_RX_SWCX_XSK_BUFF) {
+				struct xdp_buff *xdp;
+
+				xdp = rx_swcx->buf_virt_addr;
+				xsk_buff_free(xdp);
+			} else {
+				page_pool_recycle_direct(pdata->page_pool[chan],
+							 page);
+			}
+#else
+			page_pool_recycle_direct(pdata->page_pool[chan], page);
+#endif
 #endif
 		dev_kfree_skb_any(skb);
 	}
@@ -711,14 +1029,53 @@ void osd_transmit_complete(void *priv, const struct osi_tx_swcx *swcx,
 	unsigned int chan, qinx;
 	unsigned int len = swcx->len;
 
-	if ((ULLONG_MAX - ndev->stats.tx_bytes) <= (len)) {
-		ndev->stats.tx_bytes = len;
-	} else {
-		ndev->stats.tx_bytes += len;
-	}
-
 #ifdef BW_TEST
 	if (pdata->test_tx_bandwidth == OSI_ENABLE) {
+		return;
+	}
+#endif
+
+#ifdef CONFIG_XDP_SOCKETS
+	/* XSK TX: ether_xsk_tx sets ETHER_TX_SWCX_XSK_BUFF and retains the
+	 * submitting pool in buf_virt_addr. No DMA unmap is needed because the
+	 * buffer belongs to UMEM. Complete against the retained pool so ownership
+	 * does not depend on mutable RX-NAPI attachment state.
+	 */
+	if ((swcx->flags & ETHER_TX_SWCX_XSK_BUFF) == ETHER_TX_SWCX_XSK_BUFF) {
+		struct xsk_buff_pool *pool = swcx->buf_virt_addr;
+		unsigned int xsk_chan = swcx->chan;
+
+		ndev->stats.tx_bytes =
+			update_stats_counter(ndev->stats.tx_bytes, len);
+		ndev->stats.tx_packets =
+			update_stats_counter(ndev->stats.tx_packets, 1UL);
+		if (pool)
+			xsk_tx_completed(pool, 1);
+		ether_xdp_tx_wake_queue(pdata, xsk_chan);
+		return;
+	}
+	/* XDP redirect target and RX-origin XDP_TX store xdp_frame in
+	 * buf_virt_addr. Unmap only DMA-mapped frames; page-pool and XSK
+	 * RX-origin frames keep ownership with their backing pools.
+	 */
+	if (swcx->buf_virt_addr &&
+	    (swcx->flags & ETHER_TX_SWCX_XDP_FRAME) == ETHER_TX_SWCX_XDP_FRAME) {
+		struct xdp_frame *xdpf = (struct xdp_frame *)swcx->buf_virt_addr;
+
+		ndev->stats.tx_bytes =
+			update_stats_counter(ndev->stats.tx_bytes, len);
+		ndev->stats.tx_packets =
+			update_stats_counter(ndev->stats.tx_packets, 1UL);
+		if (dmaaddr != 0UL) {
+			if (!(swcx->flags & ETHER_TX_SWCX_XDP_TX_DMA_REUSE))
+				dma_unmap_single(pdata->dev, dmaaddr, len,
+						 DMA_TO_DEVICE);
+		}
+		if ((swcx->flags & ETHER_TX_SWCX_XDP_TX) == ETHER_TX_SWCX_XDP_TX)
+			xdp_return_frame_rx_napi(xdpf);
+		else
+			xdp_return_frame(xdpf);
+		ether_xdp_tx_wake_queue(pdata, swcx->chan);
 		return;
 	}
 #endif
@@ -756,6 +1113,18 @@ void osd_transmit_complete(void *priv, const struct osi_tx_swcx *swcx,
 			netif_tx_wake_queue(txq);
 			netdev_dbg(ndev, "Tx ring[%d] - waking Txq\n", chan);
 		}
+
+		/*
+		 * Use skb->len (whole-packet L2 length) rather than swcx->len
+		 * (per-descriptor DMA fragment); skb is attached only to the
+		 * last descriptor, so this accounts each packet once and
+		 * matches in-tree NIC convention. Excludes FCS and per-segment
+		 * TSO headers; for true wire bytes read the MAC MMC
+		 * tx_octetcount_g{,b} counters exposed via ethtool -S.
+		 */
+		ndev->stats.tx_bytes = update_stats_counter(ndev->stats.tx_bytes,
+							    skb->len);
+
 		if (ndev->stats.tx_packets == ULLONG_MAX) {
 			ndev->stats.tx_packets = 0;
 		} else {

@@ -1,6 +1,6 @@
 ###########################################################################
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: Copyright (c) 2023-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2023-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Makefile file for NVIDIA Linux conftest
 ###########################################################################
@@ -43,7 +43,7 @@ NV_CONFTEST_CMD := /bin/sh $(NV_CONFTEST_SCRIPT) \
 
 NV_CFLAGS_FROM_CONFTEST := $(shell $(NV_CONFTEST_CMD) build_cflags)
 
-NV_CONFTEST_CFLAGS = $(NV_CFLAGS_FROM_CONFTEST) $(EXTRA_CFLAGS) -fno-pie -Werror -Wno-address-of-packed-member -fms-extensions
+NV_CONFTEST_CFLAGS = $(NV_CFLAGS_FROM_CONFTEST) $(EXTRA_CFLAGS) -std=gnu11 -fno-pie -Werror -Wno-address-of-packed-member -fms-extensions
 
 NV_CONFTEST_COMPILE_TEST_HEADERS := $(obj)/conftest/macros.h
 NV_CONFTEST_COMPILE_TEST_HEADERS += $(obj)/conftest/functions.h
@@ -127,6 +127,7 @@ NV_CONFTEST_FUNCTION_COMPILE_TESTS += devm_tegra_core_dev_init_opp_table_common
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += devm_thermal_of_zone_register
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += disk_check_media_change
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += dma_buf_ops_has_cache_sgt_mapping
+NV_CONFTEST_FUNCTION_COMPILE_TESTS += dma_fence_struct_has_extern_lock
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += dma_slave_config_struct_has_slave_id
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += drm_aperture_remove_framebuffers
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += drm_connector_helper_funcs_struct_mode_valid_has_const_arg
@@ -176,6 +177,7 @@ NV_CONFTEST_FUNCTION_COMPILE_TESTS += i2c_mux_add_adapter_has_no_class_argument
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += iio_dev_opaque_has_mlock
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += iommu_map_has_gfp_arg
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += iommu_paging_domain_alloc
+NV_CONFTEST_FUNCTION_COMPILE_TESTS += __ioremap_prot
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += ioremap_prot_has_pgprot_t_arg
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += irq_get_nr_irqs
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += kthread_complete_and_exit
@@ -183,9 +185,11 @@ NV_CONFTEST_FUNCTION_COMPILE_TESTS += mii_bus_struct_has_read_c45
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += mii_bus_struct_has_write_c45
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += media_entity_remote_pad
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += mm_struct_struct_has_percpu_counter_rss_stat
+NV_CONFTEST_FUNCTION_COMPILE_TESTS += mm_struct_struct_has_percpu_counter_tree_rss_stat
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += module_import_ns_calls_stringify
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += mrq_pcie_request_struct_present
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += msi_get_virq
+NV_CONFTEST_FUNCTION_COMPILE_TESTS += netdev_xdp_act_xsk_zerocopy_present
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += netif_set_tso_max_size
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += netif_napi_add_weight
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += no_llseek
@@ -196,10 +200,10 @@ NV_CONFTEST_FUNCTION_COMPILE_TESTS += gpio_device_find
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += gpio_device_get_chip
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += of_property_for_each_u32_removed_internal_args
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += of_property_present
+NV_CONFTEST_FUNCTION_COMPILE_TESTS += page_pool_params_struct_has_netdev
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += page_struct_has___folio_index
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += pde_data
-NV_CONFTEST_FUNCTION_COMPILE_TESTS += platform_msi_domain_alloc_irqs
-NV_CONFTEST_FUNCTION_COMPILE_TESTS += platform_msi_domain_free_irqs
+NV_CONFTEST_FUNCTION_COMPILE_TESTS += platform_device_msi_init_and_alloc_irqs
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += pwm_chip_struct_has_base_arg
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += pwm_chip_struct_has_struct_device
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += pwm_ops_struct_has_owner
@@ -225,6 +229,7 @@ NV_CONFTEST_FUNCTION_COMPILE_TESTS += slab_mem_spread
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += snd_compress_ops_struct_pointer_has_tstamp64_arg
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += snd_soc_card_jack_new_has_no_snd_soc_jack_pins
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += snd_soc_component_driver_struct_has_non_legacy_dai_naming
+NV_CONFTEST_FUNCTION_COMPILE_TESTS += snd_soc_component_driver_struct_has_pcm_new_and_free
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += snd_soc_component_to_dapm
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += snd_soc_dai_link_struct_has_c2c_params_arg
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += snd_soc_dai_ops_struct_has_probe
@@ -240,6 +245,7 @@ NV_CONFTEST_FUNCTION_COMPILE_TESTS += spi_get_chipselect
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += tc_taprio_qopt_offload_struct_has_cmd
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += tegra264_chip_id
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += tegra_pmc_io_pad_power_enable
+NV_CONFTEST_FUNCTION_COMPILE_TESTS += tegra_pmc_powergate_power_off
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += tegra_dev_iommu_get_stream_id
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += tegra_ivc_struct_has_iosys_map
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += thermal_zone_device_priv
@@ -269,7 +275,9 @@ NV_CONFTEST_FUNCTION_COMPILE_TESTS += vb2_buffer_struct_has_wait_prepare_and_fin
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += vm_flags_set
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += vsock_transport_struct_allow_callbacks_have_vsk_arg
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += work_on_cpu_key
+NV_CONFTEST_FUNCTION_COMPILE_TESTS += xsk_buff_dma_sync_for_cpu_has_pool_arg
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += of_property_read_reg
+NV_CONFTEST_FUNCTION_COMPILE_TESTS += zap_special_vma_range
 NV_CONFTEST_GENERIC_COMPILE_TESTS += is_export_symbol_present_drm_gem_prime_fd_to_handle
 NV_CONFTEST_GENERIC_COMPILE_TESTS += is_export_symbol_present_drm_gem_prime_handle_to_fd
 NV_CONFTEST_GENERIC_COMPILE_TESTS += is_export_symbol_present_queue_limits_set
@@ -279,6 +287,13 @@ NV_CONFTEST_MACRO_COMPILE_TESTS += tegra264_bwmgr_debug_macro
 NV_CONFTEST_SYMBOL_COMPILE_TESTS += is_export_symbol_present_crypto_engine_register_aead
 NV_CONFTEST_SYMBOL_COMPILE_TESTS += is_export_symbol_present_ufshcd_query_attr
 NV_CONFTEST_SYMBOL_COMPILE_TESTS += is_export_symbol_present_ufshcd_query_descriptor_retry
+NV_CONFTEST_TYPE_COMPILE_TESTS += drm_atomic_commit_struct_present
+NV_CONFTEST_TYPE_COMPILE_TESTS += drm_atomic_private_obj_init_removed_state_arg
+NV_CONFTEST_TYPE_COMPILE_TESTS += reserved_mem_ops_struct_has_node_init
+NV_CONFTEST_TYPE_COMPILE_TESTS += thermal_of_cooling_device_register_has_cdev_id_arg
+NV_CONFTEST_TYPE_COMPILE_TESTS += ufs_hba_variant_ops_pwr_change_notify_removed_desired_pwr_mode_arg
+NV_CONFTEST_TYPE_COMPILE_TESTS += net_device_struct_has_xdp_features
+NV_CONFTEST_TYPE_COMPILE_TESTS += net_device_struct_has_xdp_zc_max_segs
 
 $(eval $(call NV_GENERATE_COMPILE_TEST_HEADER,functions,$(NV_CONFTEST_FUNCTION_COMPILE_TESTS)))
 $(eval $(call NV_GENERATE_COMPILE_TEST_HEADER,generic,$(NV_CONFTEST_GENERIC_COMPILE_TESTS)))
@@ -310,6 +325,7 @@ NV_HEADER_PRESENCE_TESTS = \
   linux/cpuhplock.h \
   linux/kconfig.h \
   linux/iosys-map.h \
+  linux/of_gpio.h \
   linux/tegra_prod.h \
   net/gso.h \
   net/page_pool.h

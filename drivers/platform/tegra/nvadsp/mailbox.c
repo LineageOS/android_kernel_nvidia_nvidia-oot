@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2014-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2014-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include "dev.h"
 #include "hwmailbox.h"
@@ -195,7 +195,7 @@ static status_t _nvadsp_mbox_open(struct nvadsp_handle *nvadsp_handle,
 		mbox->id = *mid;
 	}
 
-	strncpy(mbox->name, name, NVADSP_MBOX_NAME_MAX);
+	strscpy(mbox->name, name, sizeof(mbox->name));
 	mboxq_init(&mbox->recv_queue);
 	mbox->handler = handler;
 	mbox->hdata = hdata;

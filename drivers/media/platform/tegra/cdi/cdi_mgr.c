@@ -1,16 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* SPDX-FileCopyrightText: Copyright (c) 2015-2026 NVIDIA CORPORATION & AFFILIATES.
- * All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- */
+// SPDX-FileCopyrightText: Copyright (c) 2015-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include <nvidia/conftest.h>
 
@@ -19,7 +8,6 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/gpio.h>
-#include <linux/of_gpio.h>
 #include <linux/regmap.h>
 #include <linux/delay.h>
 #include <linux/platform_device.h>
@@ -1426,9 +1414,8 @@ static void cdi_mgr_dev_ins(struct work_struct *work)
 	}
 }
 
-static int cdi_mgr_of_get_grp_gpio(
-	struct device *dev, struct device_node *np,
-	const char *name, int size, u32 *grp, u32 *flags)
+static int cdi_mgr_of_get_grp_gpio(struct device *dev, const char *name,
+				   int size, u32 *grp, u32 *flags)
 {
 	char prop_name[32]; /* 32 is max size of property name */
 	int num, i;
@@ -1437,24 +1424,39 @@ static int cdi_mgr_of_get_grp_gpio(
 
 	num = gpiod_count(dev, name);
 	dev_dbg(dev, "    num gpios of %s: %d\n", prop_name, num);
-	if (num < 0)
+	if (num == -ENOENT)
 		return 0;
+	if (num < 0)
+		return num;
 
 	for (i = 0; (i < num) && (i < size); i++) {
-#if defined(NV_OF_GET_NAMED_GPIO_FLAGS_PRESENT) /* Linux 6.2 */
-		grp[i] = of_get_named_gpio_flags(np, prop_name, i, &flags[i]);
-#else
-		grp[i] = of_get_named_gpio(np, prop_name, i);
-		flags[i] = 0;
-#endif
-		if ((int)grp[i] < 0) {
+		struct gpio_desc *desc;
+		int gpio;
+
+		desc = gpiod_get_index_optional(dev, name, i, GPIOD_ASIS);
+		if (IS_ERR(desc)) {
+			if (PTR_ERR(desc) != -EPROBE_DEFER)
+				dev_err(dev, "%s: gpio[%d] invalid: %ld\n",
+					__func__, i, PTR_ERR(desc));
+			return PTR_ERR(desc);
+		}
+		if (!desc) {
 			dev_err(dev, "%s: gpio[%d] invalid\n", __func__, i);
 			return -EINVAL;
 		}
+		gpio = desc_to_gpio(desc);
+		if (!gpio_is_valid(gpio)) {
+			dev_err(dev, "%s: gpio[%d] not valid\n", __func__, i);
+			gpiod_put(desc);
+			return -EINVAL;
+		}
+		flags[i] = gpiod_is_active_low(desc) ? 1 : 0;
+		grp[i] = gpio;
+		gpiod_put(desc);
 		dev_dbg(dev, "        [%d] - %d %x\n", i, grp[i], flags[i]);
 	}
 
-	return num;
+	return i;
 }
 
 static int cdi_mgr_get_pwr_map(
@@ -1556,13 +1558,13 @@ static struct cdi_mgr_platform_data *of_cdi_mgr_pdata(struct platform_device
 	dev_dbg(&pdev->dev, "    csiport: %d\n", pd->csi_port);
 
 	pd->num_pwr_gpios = cdi_mgr_of_get_grp_gpio(
-		&pdev->dev, np, "pwdn",
+		&pdev->dev, "pwdn",
 		ARRAY_SIZE(pd->pwr_gpios), pd->pwr_gpios, pd->pwr_flags);
 	if (pd->num_pwr_gpios < 0)
 		return ERR_PTR(pd->num_pwr_gpios);
 
 	pd->num_mcdi_gpios = cdi_mgr_of_get_grp_gpio(
-		&pdev->dev, np, "mcdi",
+		&pdev->dev, "mcdi",
 		ARRAY_SIZE(pd->mcdi_gpios), pd->mcdi_gpios, pd->mcdi_flags);
 	if (pd->num_mcdi_gpios < 0)
 		return ERR_PTR(pd->num_mcdi_gpios);

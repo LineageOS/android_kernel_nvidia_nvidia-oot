@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2020-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2020-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 /*
  * Lontium LT6911UXC HDMI-CSI bridge driver
  */
@@ -8,17 +8,13 @@
 
 #include <linux/slab.h>
 #include <linux/uaccess.h>
-#include <linux/gpio.h>
 #include <linux/module.h>
 #include <linux/seq_file.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
-#include <linux/of_gpio.h>
 
 #include <media/tegra_v4l2_camera.h>
 #include <media/tegracam_core.h>
-
-#include "../platform/tegra/camera/camera_gpio.h"
 
 #define lt6911uxc_reg struct reg_8
 #define LT6911_TABLE_WAIT_MS	0
@@ -251,11 +247,11 @@ static int lt6911uxc_start_streaming(struct tegracam_device *tc_dev)
 	struct camera_common_data *s_data = tc_dev->s_data;
 	struct camera_common_power_rail *pw = s_data->power;
 
-	if (pw->reset_gpio) {
-		if (gpiod_cansleep(gpio_to_desc(pw->reset_gpio)))
-			gpio_set_value_cansleep(pw->reset_gpio, 1);
+	if (pw->reset_gpiod) {
+		if (gpiod_cansleep(pw->reset_gpiod))
+			gpiod_set_value_cansleep(pw->reset_gpiod, 1);
 		else
-			gpio_set_value(pw->reset_gpio, 1);
+			gpiod_set_value(pw->reset_gpiod, 1);
 	}
 	msleep(300);
 
@@ -267,11 +263,11 @@ static int lt6911uxc_stop_streaming(struct tegracam_device *tc_dev)
 	struct camera_common_data *s_data = tc_dev->s_data;
 	struct camera_common_power_rail *pw = s_data->power;
 
-	if (pw->reset_gpio) {
-		if (gpiod_cansleep(gpio_to_desc(pw->reset_gpio)))
-			gpio_set_value_cansleep(pw->reset_gpio, 0);
+	if (pw->reset_gpiod) {
+		if (gpiod_cansleep(pw->reset_gpiod))
+			gpiod_set_value_cansleep(pw->reset_gpiod, 0);
 		else
-			gpio_set_value(pw->reset_gpio, 0);
+			gpiod_set_value(pw->reset_gpiod, 0);
 	}
 	return 0;
 }
@@ -344,9 +340,9 @@ static int lt6911uxc_power_get(struct tegracam_device *tc_dev)
 	}
 
 	/* Reset or ENABLE GPIO */
-	pw->reset_gpio = pdata->reset_gpio;
-	err = gpio_request(pw->reset_gpio, "cam_reset_gpio");
-	if (err < 0) {
+	pw->reset_gpiod = gpiod_get(dev, "reset", GPIOD_ASIS);
+	if (IS_ERR(pw->reset_gpiod)) {
+		err = PTR_ERR(pw->reset_gpiod);
 		dev_err(dev, "%s: unable to request reset_gpio (%d)\n",
 			__func__, err);
 		goto done;
@@ -379,8 +375,8 @@ static int lt6911uxc_power_put(struct tegracam_device *tc_dev)
 	pw->avdd = NULL;
 	pw->iovdd = NULL;
 
-	if (likely(pw->reset_gpio))
-		gpio_free(pw->reset_gpio);
+	if (likely(pw->reset_gpiod))
+		gpiod_put(pw->reset_gpiod);
 
 	return 0;
 }
@@ -392,9 +388,7 @@ static struct camera_common_pdata *lt6911uxc_parse_dt(
 	struct device_node *np = dev->of_node;
 	struct camera_common_pdata *board_priv_pdata;
 	const struct of_device_id *match;
-	struct camera_common_pdata *ret = NULL;
 	int err = 0;
-	int gpio;
 
 	if (!np)
 		return NULL;
@@ -409,15 +403,6 @@ static struct camera_common_pdata *lt6911uxc_parse_dt(
 		sizeof(*board_priv_pdata), GFP_KERNEL);
 	if (!board_priv_pdata)
 		return NULL;
-
-	gpio = of_get_named_gpio(np, "reset-gpios", 0);
-	if (gpio < 0) {
-		if (gpio == -EPROBE_DEFER)
-			ret = ERR_PTR(-EPROBE_DEFER);
-		dev_err(dev, "reset-gpios not found\n");
-		goto error;
-	}
-	board_priv_pdata->reset_gpio = (unsigned int)gpio;
 
 	err = of_property_read_string(np, "mclk", &board_priv_pdata->mclk_name);
 	if (err)
@@ -437,11 +422,6 @@ static struct camera_common_pdata *lt6911uxc_parse_dt(
 		of_property_read_bool(np, "has-eeprom");
 
 	return board_priv_pdata;
-
-error:
-	devm_kfree(dev, board_priv_pdata);
-
-	return ret;
 }
 
 static int lt6911uxc_power_on(struct camera_common_data *s_data)
@@ -460,11 +440,11 @@ static int lt6911uxc_power_on(struct camera_common_data *s_data)
 		return err;
 	}
 
-	if (pw->reset_gpio) {
-		if (gpiod_cansleep(gpio_to_desc(pw->reset_gpio)))
-			gpio_set_value_cansleep(pw->reset_gpio, 1);
+	if (pw->reset_gpiod) {
+		if (gpiod_cansleep(pw->reset_gpiod))
+			gpiod_set_value_cansleep(pw->reset_gpiod, 1);
 		else
-			gpio_set_value(pw->reset_gpio, 1);
+			gpiod_set_value(pw->reset_gpiod, 1);
 	}
 
 	usleep_range(10, 20);
@@ -520,11 +500,11 @@ static int lt6911uxc_power_off(struct camera_common_data *s_data)
 			return err;
 		}
 	} else {
-		if (pw->reset_gpio) {
-			if (gpiod_cansleep(gpio_to_desc(pw->reset_gpio)))
-				gpio_set_value_cansleep(pw->reset_gpio, 0);
+		if (pw->reset_gpiod) {
+			if (gpiod_cansleep(pw->reset_gpiod))
+				gpiod_set_value_cansleep(pw->reset_gpiod, 0);
 			else
-				gpio_set_value(pw->reset_gpio, 0);
+				gpiod_set_value(pw->reset_gpiod, 0);
 		}
 	}
 
@@ -581,11 +561,11 @@ static int lt6911uxc_set_mode(struct tegracam_device *tc_dev)
 		dev_err(tc_dev->dev, "%s Error in writing shadow EDID \n", __func__);
 
 	// Toggle the reset pin to low, stream on will again set it to high
-	if (pw->reset_gpio) {
-		if (gpiod_cansleep(gpio_to_desc(pw->reset_gpio)))
-			gpio_set_value_cansleep(pw->reset_gpio, 0);
+	if (pw->reset_gpiod) {
+		if (gpiod_cansleep(pw->reset_gpiod))
+			gpiod_set_value_cansleep(pw->reset_gpiod, 0);
 		else
-			gpio_set_value(pw->reset_gpio, 0);
+			gpiod_set_value(pw->reset_gpiod, 0);
 	}
 	// Keep reset pin low for the changes to take effect
 	msleep(800);
@@ -698,7 +678,7 @@ static int lt6911uxc_probe(struct i2c_client *client,
 
 	priv->i2c_client = tc_dev->client = client;
 	tc_dev->dev = dev;
-	strncpy(tc_dev->name, "lt6911uxc", sizeof(tc_dev->name));
+	strscpy(tc_dev->name, "lt6911uxc", sizeof(tc_dev->name));
 	tc_dev->dev_regmap_config = &sensor_regmap_config;
 	tc_dev->sensor_ops = &lt6911uxc_common_ops;
 	tc_dev->v4l2sd_internal_ops = &lt6911uxc_subdev_internal_ops;

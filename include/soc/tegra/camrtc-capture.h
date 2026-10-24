@@ -875,9 +875,19 @@ struct capture_coe_channel_config {
 	 */
 	uint8_t vlan_enable;
 	/**
+	 * Offset subtracted from dma_chan to get a dense 0-based channels[] slot.
+	 * Derived by KMD from DT (min of nvidia,vm-channels). 0 => identity/legacy.
+	 *
+	 * The KMD guarantees that the DT channel IDs of one MGBE instance are
+	 * unique and contiguous, so (dma_chan - coe_channels_offset) is always
+	 * in [0, number of CoE channels on the instance). A device tree which
+	 * violates that is rejected at probe time.
+	 */
+	uint8_t coe_channels_offset;
+	/**
 	 * Padding to make the structure size a multiple of 8 bytes
 	 */
-	uint8_t _padding[7];
+	uint8_t _padding[6];
 } CAPTURE_IVC_ALIGN;
 
 /**

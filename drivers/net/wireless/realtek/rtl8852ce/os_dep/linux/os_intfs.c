@@ -2413,7 +2413,7 @@ int netdev_open(struct net_device *pnetdev)
 
 	RTW_INFO(FUNC_NDEV_FMT" , netif_up=%d\n", FUNC_NDEV_ARG(pnetdev), padapter->netif_up);
 	/*rtw_dump_stack();*/
-	_rtw_mutex_lock_interruptible(&(adapter_to_dvobj(padapter)->hw_init_mutex));
+	_rtw_mutex_lock(&(adapter_to_dvobj(padapter)->hw_init_mutex));
 	ret = _netdev_open(pnetdev);
 	_rtw_mutex_unlock(&(adapter_to_dvobj(padapter)->hw_init_mutex));
 
@@ -2505,7 +2505,7 @@ int pm_netdev_open(struct net_device *pnetdev, u8 bnormal)
 	_adapter *padapter = (_adapter *)rtw_netdev_priv(pnetdev);
 
 	if (_TRUE == bnormal) {
-		_rtw_mutex_lock_interruptible(&(adapter_to_dvobj(padapter)->hw_init_mutex));
+		_rtw_mutex_lock(&(adapter_to_dvobj(padapter)->hw_init_mutex));
 		status = _mi_pm_netdev_open(pnetdev);
 
 		_rtw_mutex_unlock(&(adapter_to_dvobj(padapter)->hw_init_mutex));

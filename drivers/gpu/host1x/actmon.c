@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/*
- * Tegra host1x activity monitor interfaces
- *
- * Copyright (c) 2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- */
+// SPDX-FileCopyrightText: Copyright (c) 2023-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include <linux/clk.h>
 #include <linux/debugfs.h>
@@ -377,7 +373,7 @@ int host1x_actmon_register(struct host1x_client *client)
 		module->type = i;
 		module->regs = actmon->regs + (i * HOST1X_ACTMON_MODULE_OFFSET);
 
-		module->k = 6;
+		module->k = 2;
 		module->consec_upper_num = 7;
 		module->consec_lower_num = 7;
 		host1x_actmon_module_init(module);

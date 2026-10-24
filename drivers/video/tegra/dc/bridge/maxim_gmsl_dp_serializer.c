@@ -1,16 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0-only
+// SPDX-FileCopyrightText: Copyright (c) 2021-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 /*
  * MAXIM DP Serializer driver for MAXIM GMSL Serializers
- *
- * Copyright (c) 2021-2023, NVIDIA CORPORATION.  All rights reserved.
  */
 
 #include <nvidia/conftest.h>
 
 #include <linux/device.h>
 #include <linux/fwnode.h>
+#include <linux/gpio.h>
 #include <linux/gpio/consumer.h>
-#include <linux/gpio/driver.h>
 #include <linux/i2c.h>
 #include <linux/i2c-mux.h>
 #include <linux/module.h>
@@ -18,7 +17,9 @@
 #include <linux/of_graph.h>
 #include <linux/slab.h>
 #include <linux/regmap.h>
+#if defined(NV_LINUX_OF_GPIO_H_PRESENT) /* Removed in Linux v7.1 */
 #include <linux/of_gpio.h>
+#endif
 #include <linux/workqueue.h>
 #include <linux/of_device.h>
 #include <linux/of.h>
@@ -1246,7 +1247,6 @@ static int max_gmsl_dp_ser_probe(struct i2c_client *client)
 {
 	struct max_gmsl_dp_ser_priv *priv;
 	struct device *dev;
-	struct device_node *ser = client->dev.of_node;
 	int ret;
 
 	priv = devm_kzalloc(&client->dev, sizeof(*priv), GFP_KERNEL);
@@ -1284,29 +1284,38 @@ static int max_gmsl_dp_ser_probe(struct i2c_client *client)
 		return -EFAULT;
 	}
 
-	priv->ser_errb = of_get_named_gpio(ser, "ser-errb", 0);
-
+#if defined(NV_LINUX_OF_GPIO_H_PRESENT) /* Removed in Linux v7.1 */
+	priv->ser_errb = of_get_named_gpio(client->dev.of_node, "ser-errb", 0);
+#else
+	priv->ser_errb = -ENODEV;
+#endif
 	ret = devm_gpio_request_one(&client->dev, priv->ser_errb,
 				    GPIOF_IN, "GPIO_MAXIM_SER");
 	if (ret < 0) {
-		dev_err(dev, "%s: GPIO request failed\n ret: %d",
+		dev_err(dev, "%s: GPIO request failed ret: %d\n",
 			__func__, ret);
 		return ret;
 	}
 
-	if (gpio_is_valid(priv->ser_errb)) {
-		priv->ser_irq = gpio_to_irq(priv->ser_errb);
-		ret = request_threaded_irq(priv->ser_irq, NULL,
-					   max_gsml_dp_ser_irq_handler,
-					   IRQF_TRIGGER_FALLING
-					   | IRQF_ONESHOT, "SER", priv);
-		if (ret < 0) {
-			dev_err(dev, "%s: Unable to register IRQ handler ret: %d\n",
-				__func__, ret);
-			return ret;
-		}
-
+	ret = gpio_to_irq(priv->ser_errb);
+	if (ret < 0) {
+		dev_err(dev, "%s: GPIO not configure for interrupts: %d\n",
+			__func__, ret);
+		return ret;
 	}
+
+	priv->ser_irq = ret;
+
+	ret = devm_request_threaded_irq(&client->dev, priv->ser_irq, NULL,
+					max_gsml_dp_ser_irq_handler,
+					IRQF_TRIGGER_FALLING
+					| IRQF_ONESHOT, "SER", priv);
+	if (ret < 0) {
+		dev_err(dev, "%s: Unable to register IRQ handler ret: %d\n",
+			__func__, ret);
+		return ret;
+	}
+
 	return ret;
 }
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include <nvidia/conftest.h>
 
@@ -378,8 +378,13 @@ static int host1x_pollfd_release(struct inode *inode, struct file *file)
 			pfd_fence->callback_set = false;
 		}
 		/*The lock/unlock just ensures that the callback execution has finished*/
+#if defined(NV_DMA_FENCE_STRUCT_HAS_EXTERN_LOCK) /* Linux v7.1 */
+		spin_lock_irqsave(pfd_fence->fence->extern_lock, irqflags);
+		spin_unlock_irqrestore(pfd_fence->fence->extern_lock, irqflags);
+#else
 		spin_lock_irqsave(pfd_fence->fence->lock, irqflags);
 		spin_unlock_irqrestore(pfd_fence->fence->lock, irqflags);
+#endif
 
 		dma_fence_put(pfd_fence->fence);
 		kfree(pfd_fence);
@@ -414,8 +419,13 @@ static unsigned int host1x_pollfd_poll(struct file *file, poll_table *wait)
 				pfd_fence->callback_set = false;
 			}
 			/*The lock/unlock just ensures that the callback execution has finished*/
+#if defined(NV_DMA_FENCE_STRUCT_HAS_EXTERN_LOCK) /* Linux v7.1 */
+			spin_lock_irqsave(pfd_fence->fence->extern_lock, irqflags);
+			spin_unlock_irqrestore(pfd_fence->fence->extern_lock, irqflags);
+#else
 			spin_lock_irqsave(pfd_fence->fence->lock, irqflags);
 			spin_unlock_irqrestore(pfd_fence->fence->lock, irqflags);
+#endif
 
 			dma_fence_put(pfd_fence->fence);
 			list_del(&pfd_fence->list);

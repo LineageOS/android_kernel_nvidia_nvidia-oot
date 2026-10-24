@@ -4,8 +4,8 @@ endif
 
 ifneq ($(KERNELRELEASE),)
 ifeq ($(CONFIG_USB),y)
-	obj-m := rtk_btusb.o
-	rtk_btusb-y = rtk_coex.o rtk_misc.o rtk_bt.o
+	obj-m := btrtlusb.o
+	btrtlusb-y = btrtl_coex.o btrtl_misc.o btrtl_usb.o
 endif
 else
 	PWD := $(shell pwd)

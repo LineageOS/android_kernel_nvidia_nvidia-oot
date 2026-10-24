@@ -14,6 +14,9 @@
 #include <linux/gpio/consumer.h>
 
 #include <drm/drm_atomic.h>
+#if defined(NV_DRM_ATOMIC_COMMIT_STRUCT_PRESENT) /* Linux v7.2 */
+#define drm_atomic_state drm_atomic_commit
+#endif
 #ifdef CONFIG_DRM_TEGRA_HAVE_DISPLAY
 #include <drm/drm_bridge.h>
 #include <drm/drm_encoder.h>

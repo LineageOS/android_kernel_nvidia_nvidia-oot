@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* SPDX-FileCopyrightText: Copyright (c) 2008-2025, NVIDIA CORPORATION.  All rights reserved. */
+/* SPDX-FileCopyrightText: Copyright (c) 2008-2026, NVIDIA CORPORATION.  All rights reserved. */
 
 #include "mods_internal.h"
 
@@ -22,6 +22,9 @@
 #ifdef CONFIG_X86
 #   include <linux/screen_info.h>
 #   include <asm/msr.h>
+#endif
+#ifdef MODS_HAS_SYSFB_SCREEN_INFO
+#   include <linux/sysfb.h>
 #endif
 
 /***********************************************************************
@@ -98,11 +101,35 @@ static int mods_pci_probe(struct pci_dev *dev, const struct pci_device_id *id)
 {
 	struct en_dev_entry *dpriv;
 
-	dpriv = kzalloc(sizeof(*dpriv), GFP_KERNEL | __GFP_NORETRY);
+	dpriv = MODS_ZALLOC(*dpriv);
 	if (unlikely(!dpriv))
 		return -ENOMEM;
 
 	dpriv->dev = pci_dev_get(dev);
+
+#if defined(MODS_HAS_ARM_SMCCC)
+	{
+		const int qm = mods_get_force_qual_mode();
+
+		if (qm) {
+			int err;
+
+			mods_info_printk("enabling qual mode %d on dev %04x:%02x:%02x.%x\n",
+					 qm,
+					 pci_domain_nr(dev->bus),
+					 dev->bus->number,
+					 PCI_SLOT(dev->devfn),
+					 PCI_FUNC(dev->devfn));
+
+			err = mods_qdev_enable(dev, qm, &dpriv->qual_dev);
+			if (unlikely(err))
+				mods_warning_printk("failed to enable qual mode\n");
+			else
+				dpriv->qual_mode = (u8)qm;
+		}
+	}
+#endif
+
 	init_completion(&dpriv->client_completion);
 	pci_set_drvdata(dev, dpriv);
 
@@ -139,6 +166,20 @@ static void mods_pci_remove(struct pci_dev *dev)
 		mutex_unlock(mods_get_irq_mutex());
 		wait_for_completion(&dpriv->client_completion);
 	}
+
+#if defined(MODS_HAS_ARM_SMCCC)
+	if (dpriv->qual_dev) {
+		mods_info_printk("disabling qual mode on dev %04x:%02x:%02x.%x\n",
+			pci_domain_nr(dev->bus),
+			dev->bus->number,
+			PCI_SLOT(dev->devfn),
+			PCI_FUNC(dev->devfn));
+
+		if (mods_qdev_disable(dpriv->qual_dev))
+			mods_warning_printk("failed to disable qual mode\n");
+		dpriv->qual_dev = NULL;
+	}
+#endif
 
 	pci_dev_put(dpriv->dev);
 	pci_set_drvdata(dev, NULL);
@@ -185,6 +226,7 @@ static struct pci_driver mods_pci_driver = {
 static int debug;
 static int multi_instance = MODS_MULTI_INSTANCE_DEFAULT_VALUE;
 static u32 access_token   = MODS_ACCESS_TOKEN_NONE;
+static int force_qual_mode;
 
 #if defined(CONFIG_PCI) && defined(MODS_HAS_SRIOV)
 static int mods_pci_sriov_configure(struct pci_dev *dev, int numvfs)
@@ -384,20 +426,6 @@ error:
 }
 #endif
 
-#if defined(CONFIG_PPC64)
-static int ppc_tce_bypass = MODS_PPC_TCE_BYPASS_ON;
-
-void mods_set_ppc_tce_bypass(int bypass)
-{
-	ppc_tce_bypass = bypass;
-}
-
-int mods_get_ppc_tce_bypass(void)
-{
-	return ppc_tce_bypass;
-}
-#endif
-
 void mods_set_debug_level(int mask)
 {
 	debug = mask;
@@ -423,6 +451,18 @@ int mods_get_multi_instance(void)
 	return multi_instance > 0;
 }
 
+void mods_set_force_qual_mode(int qm)
+{
+	const int valid_mask = MODS_QUAL_MODE_LINK_IDE | MODS_QUAL_MODE_C2C | MODS_QUAL_MODE_SEL_IDE;
+
+	force_qual_mode = qm & valid_mask;
+}
+
+int mods_get_force_qual_mode(void)
+{
+	return force_qual_mode;
+}
+
 /*********************
  * CLIENT MANAGEMENT *
  *********************/
@@ -440,7 +480,7 @@ static struct mods_client *alloc_client(void)
 		max_clients = MODS_MAX_CLIENTS;
 
 	for (idx = 1; idx <= max_clients; idx++) {
-		if (!test_and_set_bit(idx - 1U, &mp.client_flags)) {
+		if (!test_and_set_bit(idx - 1U, mp.client_flags)) {
 			struct mods_client *client = mods_client_from_id(idx);
 
 			memset(client, 0, sizeof(*client));
@@ -449,8 +489,8 @@ static struct mods_client *alloc_client(void)
 			atomic_set(&client->last_bad_dbdf, -1);
 
 			cl_debug(DEBUG_IOCTL,
-				 "open client (bit mask 0x%lx)\n",
-				 mp.client_flags);
+				 "open client %u\n",
+				 idx);
 
 			mutex_init(&client->mtx);
 			spin_lock_init(&client->irq_lock);
@@ -460,10 +500,6 @@ static struct mods_client *alloc_client(void)
 			INIT_LIST_HEAD(&client->enabled_devices);
 			INIT_LIST_HEAD(&client->mem_map_list);
 			INIT_LIST_HEAD(&client->free_mem_list);
-#if defined(CONFIG_PPC64)
-			INIT_LIST_HEAD(&client->ppc_tce_bypass_list);
-			INIT_LIST_HEAD(&client->nvlink_sysmem_trained_list);
-#endif
 
 			LOG_EXT();
 			return client;
@@ -480,12 +516,13 @@ static void free_client(u8 client_id)
 
 	LOG_ENT();
 
+	cl_debug(DEBUG_IOCTL, "closed client\n");
+
 	memset(client, 0, sizeof(*client));
 
 	/* Indicate the client_id is free */
-	clear_bit((unsigned int)client_id - 1U, &mp.client_flags);
+	clear_bit((unsigned int)client_id - 1U, mp.client_flags);
 
-	cl_debug(DEBUG_IOCTL, "closed client\n");
 	LOG_EXT();
 }
 
@@ -496,7 +533,9 @@ struct mods_client *mods_client_from_id(u8 client_id)
 
 int mods_is_client_enabled(u8 client_id)
 {
-	return test_bit(client_id - 1, &mp.client_flags);
+	if (client_id < 1 || client_id > MODS_MAX_CLIENTS)
+		return false;
+	return test_bit(client_id - 1, mp.client_flags);
 }
 
 u32 mods_get_access_token(void)
@@ -546,12 +585,31 @@ static int mods_check_access_token(struct mods_client *client)
 	return OK;
 }
 
+#if defined(MODS_HAS_ARM_FFA)
+static bool ffa_registered;
+#endif
+
 /******************************
  * INIT/EXIT MODULE FUNCTIONS *
  ******************************/
 static int __init mods_init_module(void)
 {
-	int rc;
+	int  err;
+	bool misc_ok = false;
+#if defined(CONFIG_PCI)
+	bool pci_ok = false;
+#endif
+#if defined(MODS_HAS_TEGRA) && defined(CONFIG_COMMON_CLK)
+	bool clocks_ok = false;
+#endif
+	bool dbgfs_ok = false;
+	bool dmabuf_ok = false;
+#if defined(MODS_HAS_TEGRA)
+	bool smmu_ok = false;
+#if defined(CONFIG_DMA_ENGINE)
+	bool dma_eng_ok = false;
+#endif
+#endif
 
 	LOG_ENT();
 
@@ -559,44 +617,54 @@ static int __init mods_init_module(void)
 
 	mods_init_irq();
 
-	rc = misc_register(&mods_dev);
-	if (rc < 0)
-		return -EBUSY;
+	err = misc_register(&mods_dev);
+	if (err < 0)
+		goto error;
+	misc_ok = true;
 
 #if defined(CONFIG_PCI)
-	rc = pci_register_driver(&mods_pci_driver);
-	if (rc < 0)
-		return -EBUSY;
+	err = pci_register_driver(&mods_pci_driver);
+	if (err < 0)
+		goto error;
+	pci_ok = true;
 #endif
 
 #if defined(MODS_HAS_TEGRA) && defined(CONFIG_COMMON_CLK)
 	mods_init_clock_api();
+	clocks_ok = true;
 #endif
 
-	rc = mods_create_debugfs(&mods_dev);
-	if (rc < 0)
-		return rc;
+	err = mods_create_debugfs(&mods_dev);
+	if (err < 0)
+		goto error;
+	dbgfs_ok = true;
 
-	rc = mods_init_dmabuf();
-	if (rc < 0)
-		return rc;
+	err = mods_init_dmabuf();
+	if (err < 0)
+		goto error;
+	dmabuf_ok = true;
 
 #if defined(MODS_HAS_TEGRA)
-	rc = smmu_driver_init();
-	if (rc < 0)
-		return rc;
+	err = smmu_driver_init();
+	if (err < 0)
+		goto error;
+	smmu_ok = true;
 
 #if defined(CONFIG_DMA_ENGINE)
-	rc = mods_init_dma();
-	if (rc < 0)
-		return rc;
+	err = mods_init_dma();
+	if (err < 0)
+		goto error;
+	dma_eng_ok = true;
 #endif
 #endif
 
 #if defined(MODS_HAS_ARM_FFA)
-	rc = mods_ffa_abi_register();
-	if (rc < 0)
-		mods_warning_printk("error on mods_ffa_abi_register returned %d\n", rc);
+	err = mods_ffa_abi_register();
+	if (err < 0) {
+		mods_warning_printk("error on mods_ffa_abi_register returned %d\n", err);
+		err = 0;
+	} else
+		ffa_registered = true;
 #endif
 
 	mods_info_printk("*** WARNING: DIAGNOSTIC DRIVER LOADED ***\n");
@@ -608,7 +676,40 @@ static int __init mods_init_module(void)
 		mods_info_printk("debug level 0x%x\n", debug);
 
 	LOG_EXT();
-	return OK;
+	return 0;
+
+error:
+#if defined(MODS_HAS_ARM_FFA)
+	if (ffa_registered) {
+		mods_ffa_abi_unregister();
+		ffa_registered = false;
+	}
+#endif
+#if defined(MODS_HAS_TEGRA)
+#if defined(CONFIG_DMA_ENGINE)
+	if (dma_eng_ok)
+		mods_exit_dma();
+#endif
+	if (smmu_ok)
+		smmu_driver_exit();
+#endif
+	if (dmabuf_ok)
+		mods_exit_dmabuf();
+	if (dbgfs_ok)
+		mods_remove_debugfs();
+#if defined(MODS_HAS_TEGRA) && defined(CONFIG_COMMON_CLK)
+	if (clocks_ok)
+		mods_shutdown_clock_api();
+#endif
+#if defined(CONFIG_PCI)
+	if (pci_ok)
+		pci_unregister_driver(&mods_pci_driver);
+#endif
+	if (misc_ok)
+		misc_deregister(&mods_dev);
+
+	LOG_EXT();
+	return err;
 }
 
 static void __exit mods_exit_module(void)
@@ -617,14 +718,17 @@ static void __exit mods_exit_module(void)
 
 	LOG_ENT();
 
-	mods_exit_dmabuf();
-
-	mods_remove_debugfs();
-
 	for (i = 0; i < MODS_MAX_CLIENTS; i++) {
-		if (mp.client_flags & (1U << i))
+		if (test_bit(i, mp.client_flags))
 			free_client(i + 1);
 	}
+
+#if defined(MODS_HAS_ARM_FFA)
+	if (ffa_registered) {
+		mods_ffa_abi_unregister();
+		ffa_registered = false;
+	}
+#endif
 
 #if defined(MODS_HAS_TEGRA)
 #if defined(CONFIG_DMA_ENGINE)
@@ -633,19 +737,20 @@ static void __exit mods_exit_module(void)
 	smmu_driver_exit();
 #endif
 
+	mods_exit_dmabuf();
+
+	mods_remove_debugfs();
+
+#if defined(MODS_HAS_TEGRA) && defined(CONFIG_COMMON_CLK)
+	mods_shutdown_clock_api();
+#endif
+
 #if defined(CONFIG_PCI)
 	pci_unregister_driver(&mods_pci_driver);
 #endif
 
 	misc_deregister(&mods_dev);
 
-#if defined(MODS_HAS_TEGRA) && defined(CONFIG_COMMON_CLK)
-	mods_shutdown_clock_api();
-#endif
-
-#if defined(MODS_HAS_ARM_FFA)
-	mods_ffa_abi_unregister();
-#endif
 	mods_free_mem_reservations();
 	mods_info_printk("driver unloaded\n");
 	LOG_EXT();
@@ -658,6 +763,7 @@ module_init(mods_init_module);
 module_exit(mods_exit_module);
 
 MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("NVIDIA diagnostic driver");
 
 #define STRING_VALUE(x) #x
 #define MAKE_MODULE_VERSION(x, y) STRING_VALUE(x) "." STRING_VALUE(y)
@@ -672,10 +778,9 @@ module_param(multi_instance, int, 0644);
 MODULE_PARM_DESC(multi_instance,
 	"allows more than one client to simultaneously open the driver");
 
-#if defined(CONFIG_PPC64)
-module_param(ppc_tce_bypass, int, 0644);
-MODULE_PARM_DESC(ppc_tce_bypass,
-	"PPC TCE bypass (0=sys default, 1=force bypass, 2=force non bypass)");
+#if defined(MODS_HAS_ARM_SMCCC)
+module_param(force_qual_mode, int, 0644);
+MODULE_PARM_DESC(force_qual_mode, "enable qual mode during driver probing");
 #endif
 
 /********************
@@ -968,8 +1073,7 @@ static int mods_krnl_vma_access(struct vm_area_struct *vma,
 	}
 
 	if (unlikely(!p_map_mem || addr < p_map_mem->virtual_addr ||
-		     addr + len > p_map_mem->virtual_addr +
-				  p_map_mem->mapping_length)) {
+		     addr + len > p_map_mem->virtual_addr + p_map_mem->mapping_length)) {
 		cl_error("mapped range [virt 0x%lx, size 0x%x] does not match vma [virt 0x%lx, size 0x%lx]\n",
 			 addr, len, vma->vm_start, vma->vm_end - vma->vm_start);
 		mutex_unlock(&client->mtx);
@@ -1109,20 +1213,6 @@ static int mods_krnl_close(struct inode *ip, struct file *fp)
 		cl_error("failed to free all memory\n");
 	final_err = err;
 
-#if defined(CONFIG_PPC64)
-	err = mods_unregister_all_ppc_tce_bypass(client);
-	if (err)
-		cl_error("failed to restore dma bypass\n");
-	if (!final_err)
-		final_err = err;
-
-	err = mods_unregister_all_nvlink_sysmem_trained(client);
-	if (err)
-		cl_error("failed to free nvlink trained\n");
-	if (!final_err)
-		final_err = err;
-#endif
-
 #if defined(CONFIG_TEGRA_IVC)
 	mods_bpmpipc_cleanup();
 #endif
@@ -1134,9 +1224,7 @@ static int mods_krnl_close(struct inode *ip, struct file *fp)
 		const int num_pages  = atomic_read(&client->num_pages);
 
 		if (num_allocs || num_pages) {
-			cl_error(
-				"not all allocations have been freed, allocs=%d, pages=%d\n",
-				num_allocs, num_pages);
+			cl_error("not all allocations have been freed, allocs=%d, pages=%d\n", num_allocs, num_pages);
 			if (!final_err)
 				final_err = -ENOMEM;
 		}
@@ -1205,7 +1293,7 @@ static int mods_krnl_mmap(struct file *fp, struct vm_area_struct *vma)
 
 	vma->vm_ops = &mods_krnl_vm_ops;
 
-	p_map_mem = kzalloc(sizeof(*p_map_mem), GFP_KERNEL | __GFP_NORETRY);
+	p_map_mem = MODS_ZALLOC(*p_map_mem);
 	if (unlikely(!p_map_mem)) {
 		LOG_EXT();
 		return -ENOMEM;
@@ -1236,7 +1324,7 @@ static int map_system_mem(struct mods_client    *client,
 {
 	struct scatterlist *sg          = NULL;
 	const char         *cache_str   = mods_get_prot_str(p_mem_info->cache_type);
-	const phys_addr_t   req_pa = (phys_addr_t)vma->vm_pgoff << PAGE_SHIFT;
+	const phys_addr_t   req_pa      = (phys_addr_t)vma->vm_pgoff << PAGE_SHIFT;
 	phys_addr_t         reg_pa      = 0;
 	const unsigned long vma_size    = vma->vm_end - vma->vm_start;
 	unsigned long       size_to_map = vma_size;
@@ -1245,9 +1333,7 @@ static int map_system_mem(struct mods_client    *client,
 	const u32           num_chunks  = get_num_chunks(p_mem_info);
 	u32                 map_chunks;
 	u32                 i           = 0;
-	pgprot_t            prot        = get_prot(client,
-						   p_mem_info->cache_type,
-						   vma->vm_page_prot);
+	pgprot_t            prot        = get_prot(client, p_mem_info->cache_type, vma->vm_page_prot);
 
 #ifdef MODS_HAS_PGPROT_DECRYPTED
 	if (p_mem_info->decrypted_mmap)
@@ -1391,16 +1477,29 @@ static int map_internal(struct mods_client    *client,
 }
 
 #if defined(CONFIG_X86)
-static void mods_get_screen_info(struct MODS_SCREEN_INFO *p)
+static void get_screen_info(struct MODS_SCREEN_INFO_2 *p)
 {
-	p->orig_video_mode = screen_info.orig_video_mode;
-	p->orig_video_is_vga = screen_info.orig_video_isVGA;
-	p->lfb_width = screen_info.lfb_width;
-	p->lfb_height = screen_info.lfb_height;
-	p->lfb_depth = screen_info.lfb_depth;
-	p->lfb_base = screen_info.lfb_base;
-	p->lfb_size = screen_info.lfb_size;
-	p->lfb_linelength = screen_info.lfb_linelength;
+	const struct screen_info *si;
+
+#ifdef MODS_HAS_SYSFB_SCREEN_INFO
+	si = &sysfb_primary_display.screen;
+#else
+	si = &screen_info;
+#endif
+
+	memset(p, 0, sizeof(*p));
+
+	p->info.orig_video_mode   = si->orig_video_mode;
+	p->info.orig_video_is_vga = si->orig_video_isVGA;
+	p->info.lfb_width         = si->lfb_width;
+	p->info.lfb_height        = si->lfb_height;
+	p->info.lfb_depth         = si->lfb_depth;
+	p->info.lfb_base          = si->lfb_base;
+	p->info.lfb_size          = si->lfb_size;
+	p->info.lfb_linelength    = si->lfb_linelength;
+#if defined(VIDEO_CAPABILITY_64BIT_BASE)
+	p->ext_lfb_base           = si->ext_lfb_base;
+#endif
 }
 #endif
 
@@ -1426,12 +1525,14 @@ static int esc_mods_get_kernel_version(struct mods_client      *client,
 static int esc_mods_get_screen_info(struct mods_client      *client,
 				    struct MODS_SCREEN_INFO *p)
 {
-	mods_get_screen_info(p);
+	struct MODS_SCREEN_INFO_2 si2;
 
-#if defined(VIDEO_CAPABILITY_64BIT_BASE)
-	if (screen_info.ext_lfb_base)
+	get_screen_info(&si2);
+
+	if (si2.ext_lfb_base)
 		return -EOVERFLOW;
-#endif
+
+	*p = si2.info;
 
 	return OK;
 }
@@ -1444,16 +1545,10 @@ static int esc_mods_get_screen_info_2(struct mods_client        *client,
 	bool         found = false;
 #endif
 
-	mods_get_screen_info(&p->info);
-
-#if defined(VIDEO_CAPABILITY_64BIT_BASE)
-	p->ext_lfb_base = screen_info.ext_lfb_base;
-#else
-	p->ext_lfb_base = 0;
-#endif
+	get_screen_info(p);
 
 #if defined(CONFIG_FB) && defined(MODS_HAS_FB_SET_SUSPEND)
-	if (screen_info.orig_video_isVGA != VIDEO_TYPE_EFI)
+	if (p->info.orig_video_is_vga != VIDEO_TYPE_EFI)
 		return OK;
 
 	/* With pci=realloc on the kernel command line, GPU BAR1 can be
@@ -1552,8 +1647,15 @@ static int resume_fb(struct mods_client *client)
 	return err;
 }
 #else
-#define suspend_fb(client) (-EINVAL)
-#define resume_fb(client) (-EINVAL)
+static int suspend_fb(struct mods_client *client)
+{
+	return -EINVAL;
+}
+
+static int resume_fb(struct mods_client *client)
+{
+	return -EINVAL;
+}
 #endif
 
 static atomic_t console_is_locked;
@@ -2253,6 +2355,14 @@ static long mods_krnl_ioctl(struct file  *fp,
 			   mods_pci_dev_2);
 		break;
 
+#ifdef MODS_HAS_PCI_RESET_BUS
+	case MODS_ESC_PCI_RESET_BUS:
+		MODS_IOCTL(MODS_ESC_PCI_RESET_BUS,
+			   esc_mods_pci_reset_bus,
+			   mods_pci_dev_2);
+		break;
+#endif
+
 #ifdef MODS_HAS_DEV_PROPS
 	case MODS_ESC_READ_DEV_PROPERTY:
 		MODS_IOCTL(MODS_ESC_READ_DEV_PROPERTY,
@@ -2302,6 +2412,12 @@ static long mods_krnl_ioctl(struct file  *fp,
 	case MODS_ESC_RESERVE_ALLOCATION:
 		MODS_IOCTL(MODS_ESC_RESERVE_ALLOCATION,
 			   esc_mods_reserve_allocation,
+			   MODS_RESERVE_ALLOCATION);
+		break;
+
+	case MODS_ESC_SHARE_ALLOCATION:
+		MODS_IOCTL(MODS_ESC_SHARE_ALLOCATION,
+			   esc_mods_share_allocation,
 			   MODS_RESERVE_ALLOCATION);
 		break;
 
@@ -2364,38 +2480,6 @@ static long mods_krnl_ioctl(struct file  *fp,
 			   esc_mods_phys_to_virtual, MODS_PHYSICAL_TO_VIRTUAL);
 		break;
 
-#if defined(CONFIG_PPC64)
-	case MODS_ESC_PCI_HOT_RESET:
-		MODS_IOCTL_NORETVAL(MODS_ESC_PCI_HOT_RESET,
-				    esc_mods_pci_hot_reset,
-				    MODS_PCI_HOT_RESET);
-		break;
-
-	case MODS_ESC_SET_PPC_TCE_BYPASS:
-		MODS_IOCTL(MODS_ESC_SET_PPC_TCE_BYPASS,
-			   esc_mods_set_ppc_tce_bypass,
-			   MODS_SET_PPC_TCE_BYPASS);
-		break;
-
-	case MODS_ESC_GET_ATS_ADDRESS_RANGE:
-		MODS_IOCTL(MODS_ESC_GET_ATS_ADDRESS_RANGE,
-			   esc_mods_get_ats_address_range,
-			   MODS_GET_ATS_ADDRESS_RANGE);
-		break;
-
-	case MODS_ESC_SET_NVLINK_SYSMEM_TRAINED:
-		MODS_IOCTL(MODS_ESC_SET_NVLINK_SYSMEM_TRAINED,
-			   esc_mods_set_nvlink_sysmem_trained,
-			   MODS_SET_NVLINK_SYSMEM_TRAINED);
-		break;
-
-	case MODS_ESC_GET_NVLINK_LINE_RATE:
-		MODS_IOCTL(MODS_ESC_GET_NVLINK_LINE_RATE,
-			   esc_mods_get_nvlink_line_rate,
-			   MODS_GET_NVLINK_LINE_RATE);
-		break;
-#endif
-
 #ifdef CONFIG_PCI
 	case MODS_ESC_DMA_MAP_MEMORY:
 		MODS_IOCTL(MODS_ESC_DMA_MAP_MEMORY,
@@ -2419,11 +2503,6 @@ static long mods_krnl_ioctl(struct file  *fp,
 	case MODS_ESC_MAP_INTERRUPT:
 		MODS_IOCTL(MODS_ESC_MAP_INTERRUPT,
 				esc_mods_map_irq, MODS_DT_INFO);
-		break;
-
-	case MODS_ESC_MAP_GPIO:
-		MODS_IOCTL(MODS_ESC_MAP_GPIO,
-		esc_mods_map_irq_to_gpio, MODS_GPIO_INFO);
 		break;
 #endif
 
@@ -2899,6 +2978,12 @@ static long mods_krnl_ioctl(struct file  *fp,
 		MODS_IOCTL(MODS_ESC_BPMP_UPHY_LANE_EOM_SCAN,
 			   esc_mods_bpmp_uphy_lane_eom_scan,
 			   MODS_BPMP_UPHY_LANE_EOM_SCAN_PARAMS);
+		break;
+#endif
+
+#if defined(MODS_HAS_ARM_SMCCC)
+	case MODS_ESC_SET_QUAL_MODE:
+		MODS_IOCTL(MODS_ESC_SET_QUAL_MODE, esc_mods_set_qual_mode, MODS_SET_QUAL_MODE);
 		break;
 #endif
 

@@ -34,16 +34,26 @@ struct rtw_proc_hdl {
 		} sz;
 	} u;
 	ssize_t (*write)(struct file *file, const char __user *buffer, size_t count, loff_t *pos, void *data);
+	int verified;
 };
 
 #define RTW_PROC_HDL_SEQ(_name, _seq_op, _write) \
-	{ .name = _name, .type = RTW_PROC_HDL_TYPE_SEQ, .u.seq_op = _seq_op, .write = _write}
+	{ .name = _name, .type = RTW_PROC_HDL_TYPE_SEQ, .u.seq_op = _seq_op, .write = _write, .verified = 0 }
 
 #define RTW_PROC_HDL_SSEQ(_name, _show, _write) \
-	{ .name = _name, .type = RTW_PROC_HDL_TYPE_SSEQ, .u.show = _show, .write = _write}
+	{ .name = _name, .type = RTW_PROC_HDL_TYPE_SSEQ, .u.show = _show, .write = _write, .verified = 0 }
 
 #define RTW_PROC_HDL_SZSEQ(_name, _show, _write, _size) \
-	{ .name = _name, .type = RTW_PROC_HDL_TYPE_SZSEQ, .u.sz.show = _show, .write = _write, .u.sz.size = _size}
+	{ .name = _name, .type = RTW_PROC_HDL_TYPE_SZSEQ, .u.sz.show = _show, .write = _write, .u.sz.size = _size, .verified = 0 }
+
+#define RTW_PROC_HDL_SEQ_VERIFIED(_name, _seq_op, _write) \
+	{ .name = _name, .type = RTW_PROC_HDL_TYPE_SEQ, .u.seq_op = _seq_op, .write = _write, .verified = 1 }
+
+#define RTW_PROC_HDL_SSEQ_VERIFIED(_name, _show, _write) \
+	{ .name = _name, .type = RTW_PROC_HDL_TYPE_SSEQ, .u.show = _show, .write = _write, .verified = 1 }
+
+#define RTW_PROC_HDL_SZSEQ_VERIFIED(_name, _show, _write, _size) \
+	{ .name = _name, .type = RTW_PROC_HDL_TYPE_SZSEQ, .u.sz.show = _show, .write = _write, .u.sz.size = _size, .verified = 1 }
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 6, 0))
 #define rtw_proc_ops proc_ops

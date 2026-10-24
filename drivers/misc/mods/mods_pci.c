@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* SPDX-FileCopyrightText: Copyright (c) 2008-2023, NVIDIA CORPORATION.  All rights reserved. */
+/* SPDX-FileCopyrightText: Copyright (c) 2008-2026, NVIDIA CORPORATION.  All rights reserved. */
 
 #include "mods_internal.h"
 
@@ -53,16 +53,10 @@ int mods_find_pci_dev(struct mods_client    *client,
 
 	dev = NULL;
 
-#ifdef MODS_HAS_NEW_ACPI_WALK
 	dev = pci_get_domain_bus_and_slot(pcidev->domain,
 					  pcidev->bus,
 					  PCI_DEVFN(pcidev->device,
 						    pcidev->function));
-#else
-	while ((dev = pci_get_device(PCI_ANY_ID, PCI_ANY_ID, dev)))
-		if (mods_is_pci_dev(dev, pcidev))
-			break;
-#endif
 
 	if (dev) {
 		if (unlikely(mutex_lock_interruptible(&client->mtx))) {
@@ -225,12 +219,9 @@ int esc_mods_pci_get_bar_info_2(struct mods_client             *client,
 				struct MODS_PCI_GET_BAR_INFO_2 *p)
 {
 	struct pci_dev *dev;
-	unsigned int bar_resource_offset;
-	unsigned int i;
-	int err;
-#if !defined(MODS_HAS_IORESOURCE_MEM_64)
-	__u32 temp;
-#endif
+	unsigned int    bar_resource_offset;
+	unsigned int    i;
+	int             err;
 
 	LOG_ENT();
 
@@ -248,53 +239,33 @@ int esc_mods_pci_get_bar_info_2(struct mods_client             *client,
 		 p->pci_device.function,
 		 p->bar_index);
 
-#if defined(CONFIG_PPC64)
-	if (unlikely(mutex_lock_interruptible(mods_get_irq_mutex()))) {
-		pci_dev_put(dev);
-		LOG_EXT();
-		return -EINTR;
-	}
-
-	/* Enable device on the PCI bus */
-	err = mods_enable_device(client, dev, NULL);
-	if (err) {
-		cl_error("unable to enable dev %04x:%02x:%02x.%x\n",
-			 p->pci_device.domain,
-			 p->pci_device.bus,
-			 p->pci_device.device,
-			 p->pci_device.function);
-		mutex_unlock(mods_get_irq_mutex());
-		pci_dev_put(dev);
-		LOG_EXT();
-		return err;
-	}
-
-	mutex_unlock(mods_get_irq_mutex());
-#endif
-
 	bar_resource_offset = 0;
 	for (i = 0; i < p->bar_index; i++) {
-#if defined(MODS_HAS_IORESOURCE_MEM_64)
-		if (pci_resource_flags(dev, bar_resource_offset)
-		    & IORESOURCE_MEM_64) {
-#else
-		pci_read_config_dword(dev,
-				      (PCI_BASE_ADDRESS_0
-				       + (bar_resource_offset * 4)),
-				      &temp);
-		if (temp & PCI_BASE_ADDRESS_MEM_TYPE_64) {
-#endif
-			bar_resource_offset += 2;
-		} else {
-			bar_resource_offset += 1;
+		if (unlikely(bar_resource_offset >= PCI_NUM_RESOURCES)) {
+			cl_error("invalid pci bar index %u\n", p->bar_index);
+			err = -EINVAL;
+			goto error;
 		}
-	}
-	p->base_address = pci_resource_start(dev, bar_resource_offset);
-	p->bar_size	= pci_resource_len(dev, bar_resource_offset);
 
+		if (pci_resource_flags(dev, bar_resource_offset) & IORESOURCE_MEM_64)
+			bar_resource_offset += 2;
+		else
+			bar_resource_offset += 1;
+	}
+
+	if (bar_resource_offset < PCI_NUM_RESOURCES) {
+		p->base_address = pci_resource_start(dev, bar_resource_offset);
+		p->bar_size     = pci_resource_len(dev, bar_resource_offset);
+		err = 0;
+	} else {
+		cl_error("invalid pci bar index %u\n", p->bar_index);
+		err = -EINVAL;
+	}
+
+error:
 	pci_dev_put(dev);
 	LOG_EXT();
-	return OK;
+	return err;
 }
 
 int esc_mods_pci_get_bar_info(struct mods_client           *client,
@@ -303,17 +274,17 @@ int esc_mods_pci_get_bar_info(struct mods_client           *client,
 	int err;
 	struct MODS_PCI_GET_BAR_INFO_2 get_bar_info = { {0} };
 
-	get_bar_info.pci_device.domain	 = 0;
-	get_bar_info.pci_device.bus	 = p->pci_device.bus;
-	get_bar_info.pci_device.device	 = p->pci_device.device;
+	get_bar_info.pci_device.domain   = 0;
+	get_bar_info.pci_device.bus      = p->pci_device.bus;
+	get_bar_info.pci_device.device   = p->pci_device.device;
 	get_bar_info.pci_device.function = p->pci_device.function;
-	get_bar_info.bar_index		 = p->bar_index;
+	get_bar_info.bar_index           = p->bar_index;
 
 	err = esc_mods_pci_get_bar_info_2(client, &get_bar_info);
 
 	if (likely(!err)) {
-		p->base_address	= get_bar_info.base_address;
-		p->bar_size	= get_bar_info.bar_size;
+		p->base_address = get_bar_info.base_address;
+		p->bar_size     = get_bar_info.bar_size;
 	}
 
 	return err;
@@ -383,6 +354,7 @@ int esc_mods_pci_read_2(struct mods_client *client, struct MODS_PCI_READ_2 *p)
 
 	if (p->address > MODS_MAX_PCI_CFG_ADDR) {
 		cl_error("invalid pci config space address 0x%x\n", p->address);
+		pci_dev_put(dev);
 		LOG_EXT();
 		return -EINVAL;
 	}
@@ -512,6 +484,7 @@ int esc_mods_pci_write_2(struct mods_client *client, struct MODS_PCI_WRITE_2 *p)
 
 	if (p->address > MODS_MAX_PCI_CFG_ADDR) {
 		cl_error("invalid pci config space address 0x%x\n", p->address);
+		pci_dev_put(dev);
 		LOG_EXT();
 		return -EINVAL;
 	}
@@ -592,7 +565,6 @@ int esc_mods_pci_bus_add_dev(struct mods_client              *client,
 int esc_mods_pci_bus_rescan(struct mods_client         *client,
 			    struct MODS_PCI_BUS_RESCAN *rescan)
 {
-#ifndef MODS_HASNT_PCI_RESCAN_BUS
 	struct pci_bus *bus;
 	int    err = OK;
 
@@ -620,9 +592,6 @@ int esc_mods_pci_bus_rescan(struct mods_client         *client,
 	LOG_EXT();
 
 	return err;
-#else
-	return -EINVAL;
-#endif
 }
 
 int esc_mods_pci_bus_remove_dev(struct mods_client             *client,
@@ -655,6 +624,7 @@ int esc_mods_pci_bus_remove_dev(struct mods_client             *client,
 		 p->pci_device.function);
 
 	pci_stop_and_remove_bus_device(dev);
+	pci_dev_put(dev);
 	LOG_EXT();
 	return err;
 #else
@@ -960,17 +930,8 @@ int esc_mods_pci_set_dma_mask(struct mods_client       *client,
 			dma_mask->pci_device.bus,
 			dma_mask->pci_device.device,
 			dma_mask->pci_device.function);
-#if defined(CONFIG_PPC64)
-		/* Ignore error if TCE bypass is on */
-		if (dev->dma_mask == ~0ULL)
-			err = OK;
-#endif
 	} else {
-#if defined(MODS_HAS_SET_COHERENT_MASK)
 		err = dma_set_coherent_mask(&dev->dev, mask);
-#else
-		err = pci_set_consistent_dma_mask(dev, mask);
-#endif
 		if (err)
 			cl_error(
 				"failed to set consistent dma mask 0x%llx (%u) for dev %04x:%02x:%02x.%x\n",
@@ -1015,6 +976,106 @@ static int check_flr(struct pci_dev *dev)
 
 	return 0;
 }
+
+
+#ifdef MODS_HAS_PCI_RESET_BUS
+static int pci_bus_pm_get_all(struct mods_client *client,
+			      struct pci_bus *bus)
+{
+	struct pci_dev *dev;
+	int             err = 0;
+
+	list_for_each_entry(dev, &bus->devices, bus_list) {
+		err = pm_runtime_get_sync(&dev->dev);
+		if (err < 0) {
+			pm_runtime_put_noidle(&dev->dev);
+			goto error;
+		}
+	}
+	return 0;
+
+error:
+	cl_error("pm_runtime resume failed (%d) on dev %04x:%02x:%02x.%x\n",
+		 err,
+		 pci_domain_nr(dev->bus),
+		 dev->bus->number,
+		 PCI_SLOT(dev->devfn),
+		 PCI_FUNC(dev->devfn));
+	list_for_each_entry_continue_reverse(dev, &bus->devices, bus_list) {
+		pm_runtime_put(&dev->dev);
+	}
+	return err;
+}
+
+static void pci_bus_pm_put_all(struct pci_bus *bus)
+{
+	struct pci_dev *dev;
+
+	list_for_each_entry(dev, &bus->devices, bus_list) {
+		pm_runtime_put(&dev->dev);
+	}
+}
+
+int esc_mods_pci_reset_bus(struct mods_client    *client,
+			   struct mods_pci_dev_2 *pcidev)
+{
+	struct pci_dev *dev;
+	struct pci_bus *bus;
+	int             err = 0;
+
+	LOG_ENT();
+
+	err = mods_find_pci_dev(client, pcidev, &dev);
+
+	if (unlikely(err)) {
+		if (err == -ENODEV)
+			cl_error("dev %04x:%02x:%02x.%x not found\n",
+				 pcidev->domain,
+				 pcidev->bus,
+				 pcidev->device,
+				 pcidev->function);
+		LOG_EXT();
+		return err;
+	}
+
+	bus = dev->bus;
+	if (unlikely(!bus || !bus->self)) {
+		cl_error("dev %04x:%02x:%02x.%x has no upstream bridge; cannot issue SBR\n",
+			 pcidev->domain,
+			 pcidev->bus,
+			 pcidev->device,
+			 pcidev->function);
+		err = -ENOTTY;
+		goto error;
+	}
+
+	err = pci_bus_pm_get_all(client, bus);
+	if (err < 0)
+		goto error;
+
+	err = pci_reset_bus(dev);
+
+	pci_bus_pm_put_all(bus);
+
+	if (unlikely(err))
+		cl_error("pci_reset_bus failed on dev %04x:%02x:%02x.%x\n",
+			 pcidev->domain,
+			 pcidev->bus,
+			 pcidev->device,
+			 pcidev->function);
+	else
+		cl_info("pci_reset_bus succeeded on dev %04x:%02x:%02x.%x\n",
+			pcidev->domain,
+			pcidev->bus,
+			pcidev->device,
+			pcidev->function);
+
+error:
+	pci_dev_put(dev);
+	LOG_EXT();
+	return err;
+}
+#endif
 
 int esc_mods_pci_reset_function(struct mods_client    *client,
 				struct mods_pci_dev_2 *pcidev)
@@ -1090,7 +1151,7 @@ int esc_mods_read_dev_property(struct mods_client            *client,
 		goto error;
 	}
 
-	if (unlikely(sizeof(64) * p->array_size > sizeof(p->output))) {
+	if (unlikely(sizeof(u64) * p->array_size > sizeof(p->output))) {
 		cl_error("requested size %zu exceeds output array size %zu\n",
 			 sizeof(u64) * p->array_size,
 			 sizeof(p->output));

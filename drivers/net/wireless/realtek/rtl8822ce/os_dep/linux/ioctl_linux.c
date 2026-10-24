@@ -10096,7 +10096,7 @@ static int rtw_priv_mp_set(struct net_device *dev,
 #endif
 
 	RTW_INFO("%s mutx in %d\n", __func__, subcmd);
-	_enter_critical_mutex(&(adapter_to_dvobj(padapter)->ioctrl_mutex), NULL);
+	_enter_critical_mutex_lock(&(adapter_to_dvobj(padapter)->ioctrl_mutex), NULL);
 	switch (subcmd) {
 	case CTA_TEST:
 		RTW_INFO("set CTA_TEST\n");
@@ -10142,7 +10142,7 @@ static int rtw_priv_mp_get(struct net_device *dev,
 #endif
 
 	RTW_INFO("%s mutx in %d\n", __func__, subcmd);
-	_enter_critical_mutex(&(adapter_to_dvobj(padapter)->ioctrl_mutex), NULL);
+	_enter_critical_mutex_lock(&(adapter_to_dvobj(padapter)->ioctrl_mutex), NULL);
 
 	switch (subcmd) {
 	case MP_START:

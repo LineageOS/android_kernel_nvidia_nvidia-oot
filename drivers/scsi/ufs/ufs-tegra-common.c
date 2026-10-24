@@ -1472,7 +1472,73 @@ static void ufs_tegra_scramble_enable(struct ufs_hba *hba)
 	}
 }
 
-#if defined(NV_UFS_HBA_VARIANT_OPS_PWR_CHANGE_NOTIFY_HAS_CONST_ARG) /* Linux v6.15 */
+static int ufs_tegra_negotiate_pwr_mode(struct ufs_hba *hba,
+		const struct ufs_pa_layer_attr *dev_max_params,
+		struct ufs_pa_layer_attr *dev_req_params)
+{
+	struct ufs_tegra_host *ufs_tegra = hba->priv;
+
+#if defined(NV_UFS_HBA_STRUCT_HAS_BOOL_IS_UFS_ALREADY_ENABLED)
+	/* Return if ufs is already initialised */
+	if (hba->is_ufs_already_enabled)
+		return 0;
+#endif
+
+	memcpy(dev_req_params, dev_max_params,
+	       sizeof(struct ufs_pa_layer_attr));
+
+	if (ufs_tegra->enable_hs_mode && dev_max_params->hs_rate) {
+		if (ufs_tegra->max_hs_gear) {
+			if (dev_max_params->gear_rx > ufs_tegra->max_hs_gear)
+				dev_req_params->gear_rx =
+					ufs_tegra->max_hs_gear;
+			if (dev_max_params->gear_tx > ufs_tegra->max_hs_gear)
+				dev_req_params->gear_tx =
+					ufs_tegra->max_hs_gear;
+		} else {
+			dev_req_params->gear_rx = UFS_HS_G1;
+			dev_req_params->gear_tx = UFS_HS_G1;
+		}
+		if (ufs_tegra->mask_fast_auto_mode) {
+			dev_req_params->pwr_rx = FAST_MODE;
+			dev_req_params->pwr_tx = FAST_MODE;
+		} else {
+			dev_req_params->pwr_rx = FASTAUTO_MODE;
+			dev_req_params->pwr_tx = FASTAUTO_MODE;
+		}
+		if (ufs_tegra->mask_hs_mode_b)
+			dev_req_params->hs_rate = PA_HS_MODE_A;
+	} else {
+		if (ufs_tegra->max_pwm_gear) {
+			ufshcd_dme_get(hba, UIC_ARG_MIB(PA_MAXRXPWMGEAR),
+				       &dev_req_params->gear_rx);
+			ufshcd_dme_peer_get(hba, UIC_ARG_MIB(PA_MAXRXPWMGEAR),
+					    &dev_req_params->gear_tx);
+			if (dev_req_params->gear_rx > ufs_tegra->max_pwm_gear)
+				dev_req_params->gear_rx =
+					ufs_tegra->max_pwm_gear;
+			if (dev_req_params->gear_tx > ufs_tegra->max_pwm_gear)
+				dev_req_params->gear_tx =
+					ufs_tegra->max_pwm_gear;
+		} else {
+			dev_req_params->gear_rx = UFS_PWM_G1;
+			dev_req_params->gear_tx = UFS_PWM_G1;
+		}
+		dev_req_params->pwr_rx = SLOWAUTO_MODE;
+		dev_req_params->pwr_tx = SLOWAUTO_MODE;
+		dev_req_params->hs_rate = 0;
+	}
+	memcpy(&hba->max_pwr_info.info, dev_req_params,
+	       sizeof(struct ufs_pa_layer_attr));
+
+	return 0;
+}
+
+#if defined(NV_UFS_HBA_VARIANT_OPS_PWR_CHANGE_NOTIFY_REMOVED_DESIRED_PWR_MODE_ARG) /* Linux v7.1 */
+static int ufs_tegra_pwr_change_notify(struct ufs_hba *hba,
+		enum ufs_notify_change_status status,
+		struct ufs_pa_layer_attr *dev_req_params)
+#elif defined(NV_UFS_HBA_VARIANT_OPS_PWR_CHANGE_NOTIFY_HAS_CONST_ARG) /* Linux v6.15 */
 static int ufs_tegra_pwr_change_notify(struct ufs_hba *hba,
 		enum ufs_notify_change_status status,
 		const struct ufs_pa_layer_attr *dev_max_params,
@@ -1515,37 +1581,22 @@ static int ufs_tegra_pwr_change_notify(struct ufs_hba *hba,
 		ufshcd_dme_set(hba, UIC_ARG_MIB(VS_DEBUGSAVECONFIGTIME),
 			       vs_save_config);
 
-		memcpy(dev_req_params, dev_max_params,
-		       sizeof(struct ufs_pa_layer_attr));
+#if !defined(NV_UFS_HBA_VARIANT_OPS_PWR_CHANGE_NOTIFY_REMOVED_DESIRED_PWR_MODE_ARG)
+		/*
+		 * On older kernels there is no separate negotiate_pwr_mode
+		 * vop, so run the negotiation inline before the post-
+		 * negotiation hardware setup below.
+		 */
+		ufs_tegra_negotiate_pwr_mode(hba, dev_max_params, dev_req_params);
+#endif
 
-		if (ufs_tegra->enable_hs_mode && dev_max_params->hs_rate) {
-			if (ufs_tegra->max_hs_gear) {
-				if (dev_max_params->gear_rx >
-						ufs_tegra->max_hs_gear)
-					dev_req_params->gear_rx =
-						ufs_tegra->max_hs_gear;
-				if (dev_max_params->gear_tx >
-						ufs_tegra->max_hs_gear)
-					dev_req_params->gear_tx =
-						ufs_tegra->max_hs_gear;
-			} else {
-				dev_req_params->gear_rx = UFS_HS_G1;
-				dev_req_params->gear_tx = UFS_HS_G1;
-			}
-			if (ufs_tegra->mask_fast_auto_mode) {
-				dev_req_params->pwr_rx = FAST_MODE;
-				dev_req_params->pwr_tx = FAST_MODE;
-			} else {
-				dev_req_params->pwr_rx = FASTAUTO_MODE;
-				dev_req_params->pwr_tx = FASTAUTO_MODE;
-			}
-			if (ufs_tegra->mask_hs_mode_b) {
-				dev_req_params->hs_rate = PA_HS_MODE_A;
+		if (ufs_tegra->enable_hs_mode && dev_req_params->hs_rate) {
+			if (ufs_tegra->mask_hs_mode_b)
 				ufs_tegra_enable_ufs_uphy_pll3(ufs_tegra,
 							       false);
-			} else {
+			else
 				ufs_tegra_enable_ufs_uphy_pll3(ufs_tegra, true);
-			}
+
 			if (ufs_tegra->enable_scramble)
 				ufs_tegra_scramble_enable(hba);
 
@@ -1560,32 +1611,7 @@ static int ufs_tegra_pwr_change_notify(struct ufs_hba *hba,
 				ufshcd_dme_configure_adapt(hba, dev_req_params->gear_rx,
 							   PA_INITIAL_ADAPT);
 			}
-		} else {
-			if (ufs_tegra->max_pwm_gear) {
-				ufshcd_dme_get(hba,
-					       UIC_ARG_MIB(PA_MAXRXPWMGEAR),
-					&dev_req_params->gear_rx);
-				ufshcd_dme_peer_get(hba,
-						    UIC_ARG_MIB(PA_MAXRXPWMGEAR),
-					&dev_req_params->gear_tx);
-				if (dev_req_params->gear_rx >
-						ufs_tegra->max_pwm_gear)
-					dev_req_params->gear_rx =
-						ufs_tegra->max_pwm_gear;
-				if (dev_req_params->gear_tx >
-						ufs_tegra->max_pwm_gear)
-					dev_req_params->gear_tx =
-						ufs_tegra->max_pwm_gear;
-			} else {
-				dev_req_params->gear_rx = UFS_PWM_G1;
-				dev_req_params->gear_tx = UFS_PWM_G1;
-			}
-			dev_req_params->pwr_rx = SLOWAUTO_MODE;
-			dev_req_params->pwr_tx = SLOWAUTO_MODE;
-			dev_req_params->hs_rate = 0;
 		}
-		memcpy(&hba->max_pwr_info.info, dev_req_params,
-		       sizeof(struct ufs_pa_layer_attr));
 		break;
 	case POST_CHANGE:
 #if defined(NV_UFS_HBA_STRUCT_HAS_BOOL_IS_UFS_ALREADY_ENABLED)
@@ -2097,6 +2123,9 @@ struct ufs_hba_variant_ops ufs_hba_tegra_vops = {
 	.resume			= ufs_tegra_resume,
 	.hce_enable_notify      = ufs_tegra_hce_enable_notify,
 	.link_startup_notify	= ufs_tegra_link_startup_notify,
+#if defined(NV_UFS_HBA_VARIANT_OPS_PWR_CHANGE_NOTIFY_REMOVED_DESIRED_PWR_MODE_ARG) /* Linux v7.1 */
+	.negotiate_pwr_mode	= ufs_tegra_negotiate_pwr_mode,
+#endif
 	.pwr_change_notify      = ufs_tegra_pwr_change_notify,
 #if defined(NV_UFS_HBA_VARIANT_OPS_HAS_SET_DMA_MASK) /* Linux v6.13 */
 	.set_dma_mask		= ufs_tegra_set_dma_mask,

@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* SPDX-FileCopyrightText: Copyright (c) 2012-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+/* SPDX-FileCopyrightText: Copyright (c) 2012-2026 NVIDIA CORPORATION & AFFILIATES.
+ * All rights reserved.
  *
  * drivers/media/platform/tegra/camera/mc_common.h
  *
@@ -234,6 +235,7 @@ struct tegra_channel {
 	enum tegra_vi_pg_mode pg_mode;
 	bool bfirst_fstart;
 	enum channel_capture_state capture_state;
+	bool capture_timeout_recover;
 	bool queue_error;
 	spinlock_t capture_state_lock;
 	atomic_t is_streaming;

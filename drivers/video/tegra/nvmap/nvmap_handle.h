@@ -460,7 +460,9 @@ static inline struct dma_buf *nvmap_id_array_id_release(struct xarray *xarr, u32
 
 static inline void nvmap_add_mm_counter(struct mm_struct *mm, int member, long value)
 {
-#if defined(NV_MM_STRUCT_STRUCT_HAS_PERCPU_COUNTER_RSS_STAT) /* Linux v6.2 */
+#if defined(NV_MM_STRUCT_STRUCT_HAS_PERCPU_COUNTER_TREE_RSS_STAT) /* Linux v7.1 */
+	percpu_counter_tree_add(&mm->rss_stat[member], value);
+#elif defined(NV_MM_STRUCT_STRUCT_HAS_PERCPU_COUNTER_RSS_STAT) /* Linux v6.2 */
 	percpu_counter_add(&mm->rss_stat[member], value);
 #else
 	atomic_long_add_return(value, &mm->rss_stat.count[member]);

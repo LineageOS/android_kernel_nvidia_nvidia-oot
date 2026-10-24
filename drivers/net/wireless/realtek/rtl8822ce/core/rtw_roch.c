@@ -62,7 +62,7 @@ static int rtw_ro_ch_handler(_adapter *adapter, u8 *buf)
 	u8 remain_ch;
 	unsigned int duration;
 
-	_enter_critical_mutex(&pwdev_priv->roch_mutex, NULL);
+	_enter_critical_mutex_lock(&pwdev_priv->roch_mutex, NULL);
 
 	if (rtw_cfg80211_get_is_roch(adapter) != _TRUE)
 		goto exit;
@@ -160,7 +160,7 @@ static int rtw_cancel_ro_ch_handler(_adapter *padapter, u8 *buf)
 #endif
 	u8 ch, bw, offset;
 
-	_enter_critical_mutex(&pwdev_priv->roch_mutex, NULL);
+	_enter_critical_mutex_lock(&pwdev_priv->roch_mutex, NULL);
 
 	if (rtw_cfg80211_get_is_roch(padapter) != _TRUE)
 		goto exit;
@@ -329,7 +329,7 @@ u8 rtw_roch_wk_cmd(_adapter *padapter, int intCmdType, struct rtw_roch_parm *roc
 
 		if (res == _SUCCESS && (flags & RTW_CMDF_WAIT_ACK)) {
 			rtw_sctx_wait(&sctx, __func__);
-			_enter_critical_mutex(&pcmdpriv->sctx_mutex, NULL);
+			_enter_critical_mutex_lock(&pcmdpriv->sctx_mutex, NULL);
 			if (sctx.status == RTW_SCTX_SUBMITTED)
 				ph2c->sctx = NULL;
 			_exit_critical_mutex(&pcmdpriv->sctx_mutex, NULL);
@@ -449,7 +449,7 @@ void rtw_concurrent_handler(_adapter	*padapter)
 
 		if (chk_driver_interface(padapter, DRIVER_CFG80211)) {
 	#ifdef CONFIG_IOCTL_CFG80211
-			_enter_critical_mutex(&pwdev_priv->roch_mutex, NULL);
+			_enter_critical_mutex_lock(&pwdev_priv->roch_mutex, NULL);
 
 			if (rtw_get_oper_ch(padapter) != union_ch) {
 				/* Current channel is not AP's channel - switching to AP's channel */

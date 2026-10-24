@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2019-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2019-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include <nvidia/conftest.h>
 
@@ -1047,6 +1047,18 @@ static u64 counter_helper(u64 sizeof_stat, char *p)
 	return ret;
 }
 
+#if defined(CONFIG_XDP_SOCKETS) && !defined(OSI_STRIPPED_LIB)
+static bool ether_xdp_stats_fit(struct ether_priv_data *pdata,
+				unsigned int current_count)
+{
+	unsigned int xdp_count = ETHER_XDP_STATS_COUNT *
+				 pdata->osi_dma->num_dma_chans;
+
+	return xdp_count <= OSD_INT_MAX &&
+		current_count <= OSD_INT_MAX - xdp_count;
+}
+#endif
+
 void ether_get_ethtool_stats(struct net_device *dev,
 			     struct ethtool_stats *dummy,
 			     u64 *data)
@@ -1108,6 +1120,29 @@ void ether_get_ethtool_stats(struct net_device *dev,
 			}
 		}
 
+#ifndef OSI_STRIPPED_LIB
+#ifdef CONFIG_XDP_SOCKETS
+		if (ether_xdp_stats_fit(pdata, j)) {
+			for (i = 0; i < osi_dma->num_dma_chans; i++) {
+				unsigned int chan = osi_dma->dma_chans[i];
+				struct ether_rx_napi *rx_napi = pdata->rx_napi[chan];
+
+				if (!rx_napi) {
+					data[j++] = 0;
+					data[j++] = 0;
+					data[j++] = 0;
+					continue;
+				}
+				data[j++] = ether_xdp_stats_read(rx_napi,
+								 &rx_napi->xdp_pass);
+				data[j++] = ether_xdp_stats_read(rx_napi,
+								 &rx_napi->xdp_drop);
+				data[j++] = ether_xdp_stats_read(rx_napi,
+								 &rx_napi->xdp_redirect);
+			}
+		}
+#endif /* CONFIG_XDP_SOCKETS */
+
 		for (i = 0; i < ETHER_EXTRA_DMA_STAT_LEN; i++) {
 			char *p = (char *)osi_dma +
 				  ether_dstrings_stats[i].stat_offset;
@@ -1117,7 +1152,6 @@ void ether_get_ethtool_stats(struct net_device *dev,
 			}
 		}
 
-#ifndef OSI_STRIPPED_LIB
 		for (i = 0; i < ETHER_PKT_ERR_STAT_LEN; i++) {
 			char *p = (char *)osi_dma +
 				  ether_cstrings_stats[i].stat_offset;
@@ -1155,6 +1189,13 @@ int ether_get_sset_count(struct net_device *dev, int sset)
 	int len = 0;
 
 	if (sset == ETH_SS_STATS) {
+		/* The strings and values callbacks expose statistics only when
+		 * hardware MMC support is available. Keep the reported count in
+		 * lockstep so ethtool does not allocate slots that are never filled.
+		 */
+		if (pdata->hw_feat.mmc_sel != OSI_ENABLE)
+			return 0;
+
 		if (pdata->hw_feat.mmc_sel == OSI_ENABLE) {
 			if (OSD_INT_MAX < ETHER_MMC_STATS_LEN) {
 				/* do nothing*/
@@ -1167,12 +1208,16 @@ int ether_get_sset_count(struct net_device *dev, int sset)
 		} else {
 			len += ETHER_EXTRA_STAT_LEN;
 		}
+#ifndef OSI_STRIPPED_LIB
+#ifdef CONFIG_XDP_SOCKETS
+		if (ether_xdp_stats_fit(pdata, len))
+			len += ETHER_XDP_STATS_COUNT * pdata->osi_dma->num_dma_chans;
+#endif /* CONFIG_XDP_SOCKETS */
 		if (OSD_INT_MAX - ETHER_EXTRA_DMA_STAT_LEN < len) {
 			/* do nothing */
 		} else {
 			len += ETHER_EXTRA_DMA_STAT_LEN;
 		}
-#ifndef OSI_STRIPPED_LIB
 		if (OSD_INT_MAX - ETHER_PKT_ERR_STAT_LEN < len) {
 			/* do nothing */
 		} else {
@@ -1226,6 +1271,26 @@ void ether_get_strings(struct net_device *dev, u32 stringset, u8 *data)
 				}
 				p += ETH_GSTRING_LEN;
 			}
+#ifndef OSI_STRIPPED_LIB
+#ifdef CONFIG_XDP_SOCKETS
+			if (ether_xdp_stats_fit(pdata,
+						(unsigned int)((p - data) /
+						 ETH_GSTRING_LEN))) {
+				for (i = 0; i < pdata->osi_dma->num_dma_chans; i++) {
+					unsigned int chan = pdata->osi_dma->dma_chans[i];
+
+					snprintf((char *)p, ETH_GSTRING_LEN,
+						 "rx_chan_%u_xdp_pass", chan);
+					p += ETH_GSTRING_LEN;
+					snprintf((char *)p, ETH_GSTRING_LEN,
+						 "rx_chan_%u_xdp_drop", chan);
+					p += ETH_GSTRING_LEN;
+					snprintf((char *)p, ETH_GSTRING_LEN,
+						 "rx_chan_%u_xdp_redirect", chan);
+					p += ETH_GSTRING_LEN;
+				}
+			}
+#endif /* CONFIG_XDP_SOCKETS */
 			for (i = 0; i < ETHER_EXTRA_DMA_STAT_LEN; i++) {
 				str = (u8 *)ether_dstrings_stats[i].stat_string;
 				if (memcpy(p, str, ETH_GSTRING_LEN) ==
@@ -1234,7 +1299,6 @@ void ether_get_strings(struct net_device *dev, u32 stringset, u8 *data)
 				}
 				p += ETH_GSTRING_LEN;
 			}
-#ifndef OSI_STRIPPED_LIB
 			for (i = 0; i < ETHER_PKT_ERR_STAT_LEN; i++) {
 				str = (u8 *)ether_cstrings_stats[i].stat_string;
 				if (memcpy(p, str, ETH_GSTRING_LEN) ==

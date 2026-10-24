@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* SPDX-FileCopyrightText: Copyright (c) 2022-2023, NVIDIA CORPORATION.  All rights reserved. */
+/* SPDX-FileCopyrightText: Copyright (c) 2022-2026, NVIDIA CORPORATION.  All rights reserved. */
 
 #include "mods_internal.h"
 
@@ -303,7 +303,8 @@ static int bpmp_ipc_channel_init(struct mods_client *client,
 		}
 	}
 
-	bpmp_ipc_ch->is_init = true;
+	if (!err)
+		bpmp_ipc_ch->is_init = true;
 
 	return err;
 }

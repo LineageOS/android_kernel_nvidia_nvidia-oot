@@ -1549,6 +1549,7 @@ int proc_get_wifi_spec(struct seq_file *m, void *v)
 	return 0;
 }
 
+#ifdef CONFIG_RTW_DBG_PROC
 static int proc_get_chan_plan(struct seq_file *m, void *v)
 {
 	struct net_device *dev = m->private;
@@ -1591,7 +1592,9 @@ static ssize_t proc_set_chan_plan(struct file *file, const char __user *buffer, 
 
 	return count;
 }
+#endif
 
+#ifdef CONFIG_RTW_DBG_PROC
 static int proc_get_country_code(struct seq_file *m, void *v)
 {
 	struct net_device *dev = m->private;
@@ -1631,6 +1634,7 @@ static ssize_t proc_set_country_code(struct file *file, const char __user *buffe
 exit:
 	return count;
 }
+#endif
 
 static int cap_spt_op_class_ch_detail = 0;
 
@@ -3032,6 +3036,7 @@ clear_ps_deny:
 	return count;
 }
 
+#ifdef CONFIG_RTW_DBG_PROC
 static void *proc_start_tx_power_idx(struct seq_file *m, loff_t *pos)
 {
 	u8 path = ((*pos) & 0xFF00) >> 8;
@@ -3119,7 +3124,9 @@ static ssize_t proc_set_tx_power_idx_dump(struct file *file, const char __user *
 
 	return count;
 }
+#endif
 
+#ifdef CONFIG_RTW_DBG_PROC
 static void *proc_start_txpwr_total_dbm(struct seq_file *m, loff_t *pos)
 {
 	u8 rs = *pos;
@@ -3198,6 +3205,7 @@ static ssize_t proc_set_txpwr_total_dbm_dump(struct file *file, const char __use
 
 	return count;
 }
+#endif
 
 #ifdef CONFIG_RF_POWER_TRIM
 static int proc_get_kfree_flag(struct seq_file *m, void *v)
@@ -5613,8 +5621,10 @@ const struct rtw_proc_hdl adapter_proc_hdls[] = {
 #ifdef CONFIG_P2P_WOWLAN
 	RTW_PROC_HDL_SSEQ("p2p_wowlan_info", proc_get_p2p_wowlan_info, NULL),
 #endif
+#ifdef CONFIG_RTW_DBG_PROC
 	RTW_PROC_HDL_SSEQ("country_code", proc_get_country_code, proc_set_country_code),
 	RTW_PROC_HDL_SSEQ("chan_plan", proc_get_chan_plan, proc_set_chan_plan),
+#endif
 	RTW_PROC_HDL_SSEQ("cap_spt_op_class_ch", proc_get_cap_spt_op_class_ch, proc_set_cap_spt_op_class_ch),
 	RTW_PROC_HDL_SSEQ("reg_spt_op_class_ch", proc_get_reg_spt_op_class_ch, proc_set_reg_spt_op_class_ch),
 	RTW_PROC_HDL_SSEQ("cur_spt_op_class_ch", proc_get_cur_spt_op_class_ch, proc_set_cur_spt_op_class_ch),
@@ -5664,8 +5674,10 @@ const struct rtw_proc_hdl adapter_proc_hdls[] = {
 	RTW_PROC_HDL_SSEQ("tpc_settings", proc_get_tpc_settings, proc_set_tpc_settings),
 	RTW_PROC_HDL_SSEQ("antenna_gain", proc_get_antenna_gain, proc_set_antenna_gain),
 	RTW_PROC_HDL_SSEQ("tx_power_ext_info", proc_get_tx_power_ext_info, proc_set_tx_power_ext_info),
+#ifdef CONFIG_RTW_DBG_PROC
 	RTW_PROC_HDL_SEQ("tx_power_idx", &seq_ops_tx_power_idx, proc_set_tx_power_idx_dump),
 	RTW_PROC_HDL_SEQ("txpwr_total_dbm", &seq_ops_txpwr_total_dbm, proc_set_txpwr_total_dbm_dump),
+#endif
 #ifdef CONFIG_RF_POWER_TRIM
 	RTW_PROC_HDL_SSEQ("tx_gain_offset", NULL, proc_set_tx_gain_offset),
 	RTW_PROC_HDL_SSEQ("kfree_flag", proc_get_kfree_flag, proc_set_kfree_flag),
@@ -5699,7 +5711,9 @@ const struct rtw_proc_hdl adapter_proc_hdls[] = {
 #ifdef CONFIG_PREALLOC_RX_SKB_BUFFER
 	RTW_PROC_HDL_SSEQ("rtkm_info", proc_get_rtkm_info, NULL),
 #endif
+#ifdef CONFIG_RTW_DBG_PROC
 	RTW_PROC_HDL_SSEQ("efuse_map", proc_get_efuse_map, NULL),
+#endif
 #ifdef CONFIG_IEEE80211W
 	RTW_PROC_HDL_SSEQ("11w_tx_sa_query", proc_get_tx_sa_query, proc_set_tx_sa_query),
 	RTW_PROC_HDL_SSEQ("11w_tx_deauth", proc_get_tx_deauth, proc_set_tx_deauth),
@@ -5721,7 +5735,9 @@ const struct rtw_proc_hdl adapter_proc_hdls[] = {
 	RTW_PROC_HDL_SSEQ("rx_stat", proc_get_rx_stat, NULL),
 
 	RTW_PROC_HDL_SSEQ("tx_stat", proc_get_tx_stat, NULL),
+#ifdef CONFIG_RTW_DBG_PROC
 	RTW_PROC_HDL_SSEQ("sta_tx_stat", proc_get_sta_tx_stat, proc_set_sta_tx_stat),
+#endif
 	/**** PHY Capability ****/
 	RTW_PROC_HDL_SSEQ("phy_cap", proc_get_phy_cap, NULL),
 #ifdef CONFIG_80211N_HT
@@ -5965,6 +5981,7 @@ ssize_t proc_set_odm_adaptivity(struct file *file, const char __user *buffer, si
 	return count;
 }
 
+#ifdef CONFIG_RTW_DBG_PROC
 static char *phydm_msg = NULL;
 #define PHYDM_MSG_LEN	80*24*4
 
@@ -6031,6 +6048,7 @@ ssize_t proc_set_phydm_cmd(struct file *file, const char __user *buffer, size_t 
 
 	return count;
 }
+#endif
 
 /*
 * rtw_odm_proc:
@@ -6038,7 +6056,9 @@ ssize_t proc_set_phydm_cmd(struct file *file, const char __user *buffer, size_t 
 */
 const struct rtw_proc_hdl odm_proc_hdls[] = {
 	RTW_PROC_HDL_SSEQ("adaptivity", proc_get_odm_adaptivity, proc_set_odm_adaptivity),
+#ifdef CONFIG_RTW_DBG_PROC
 	RTW_PROC_HDL_SZSEQ("cmd", proc_get_phydm_cmd, proc_set_phydm_cmd, PHYDM_MSG_LEN),
+#endif
 };
 
 const int odm_proc_hdls_num = sizeof(odm_proc_hdls) / sizeof(struct rtw_proc_hdl);
@@ -6178,10 +6198,12 @@ void rtw_odm_proc_deinit(_adapter	*adapter)
 
 	adapter->dir_odm = NULL;
 
+#ifdef CONFIG_RTW_DBG_PROC
 	if (phydm_msg) {
 		rtw_mfree(phydm_msg, PHYDM_MSG_LEN);
 		phydm_msg = NULL;
 	}
+#endif
 }
 
 #ifdef CONFIG_MCC_MODE

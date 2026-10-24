@@ -358,8 +358,13 @@ static struct snd_soc_component_driver tegra_alt_pcm_platform = {
 	.hw_free	= tegra_alt_pcm_hw_free,
 	.pointer	= tegra_alt_pcm_pointer,
 	.mmap		= tegra_alt_pcm_mmap,
+#if defined(NV_SND_SOC_COMPONENT_DRIVER_STRUCT_HAS_PCM_NEW_AND_FREE) /* Linux v7.1 */
+	.pcm_new	= tegra_alt_pcm_new,
+	.pcm_free	= tegra_alt_pcm_free,
+#else
 	.pcm_construct	= tegra_alt_pcm_new,
 	.pcm_destruct	= tegra_alt_pcm_free,
+#endif
 	.probe		= tegra_alt_pcm_probe,
 #ifdef CONFIG_DEBUG_FS
 	.debugfs_prefix = "pcm",

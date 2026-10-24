@@ -852,7 +852,7 @@ void rtw_exec_lps(_adapter *padapter, u8 ps_mode)
 
 	if (ps_mode == PS_MODE_ACTIVE) {
 #ifdef CONFIG_LPS_ACK
-		_enter_critical_mutex(&pwrpriv->lps_ack_mutex, NULL);
+		_enter_critical_mutex_lock(&pwrpriv->lps_ack_mutex, NULL);
 		rtw_sctx_init(&pwrpriv->lps_ack_sctx, 100);
 #endif /* CONFIG_LPS_ACK */
 
@@ -911,7 +911,7 @@ void rtw_lps_rfon_ctrl(_adapter *padapter, u8 rfon_ctrl)
 #endif /* CONFIG_LPS_LCLK */
 
 #ifdef CONFIG_LPS_ACK
-			_enter_critical_mutex(&pwrpriv->lps_ack_mutex, NULL);
+			_enter_critical_mutex_lock(&pwrpriv->lps_ack_mutex, NULL);
 			rtw_sctx_init(&pwrpriv->lps_ack_sctx, 100);
 #endif /* CONFIG_LPS_ACK */
 

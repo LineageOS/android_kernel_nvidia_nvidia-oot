@@ -272,7 +272,7 @@ void rtw_txpwr_init_regd(struct rf_ctl_t *rfctl)
 	struct txpwr_lmt_ent *ent;
 	_irqL irqL;
 
-	_enter_critical_mutex(&rfctl->txpwr_lmt_mutex, &irqL);
+	_enter_critical_mutex_lock(&rfctl->txpwr_lmt_mutex, &irqL);
 
 	for (band = 0; band < BAND_MAX; band++)
 		rfctl->txpwr_lmt_name[band] = NULL;
@@ -8349,7 +8349,7 @@ s32 dump_mgntframe_and_wait_ack_timeout(_adapter *padapter, struct xmit_frame *p
 		return -1;
 	}
 
-	_enter_critical_mutex(&pxmitpriv->ack_tx_mutex, NULL);
+	_enter_critical_mutex_lock(&pxmitpriv->ack_tx_mutex, NULL);
 	pxmitpriv->ack_tx = _TRUE;
 	pxmitpriv->seq_no = seq_no++;
 	pmgntframe->ack_report = 1;
@@ -15696,7 +15696,7 @@ void rtw_leave_opch(_adapter *adapter)
 		return;
 #endif
 
-	_enter_critical_mutex(&rfctl->offch_mutex, NULL);
+	_enter_critical_mutex_lock(&rfctl->offch_mutex, NULL);
 
 	if (rfctl->offch_state == OFFCHS_NONE) {
 		/* prepare to leave operating channel */
@@ -15724,7 +15724,7 @@ void rtw_back_opch(_adapter *adapter)
 		return;
 #endif
 
-	_enter_critical_mutex(&rfctl->offch_mutex, NULL);
+	_enter_critical_mutex_lock(&rfctl->offch_mutex, NULL);
 
 	if (rfctl->offch_state != OFFCHS_NONE) {
 		rfctl->offch_state = OFFCHS_BACKING_OP;
@@ -15825,7 +15825,7 @@ void sitesurvey_set_offch_state(_adapter *adapter, u8 scan_state)
 {
 	struct rf_ctl_t *rfctl = adapter_to_rfctl(adapter);
 
-	_enter_critical_mutex(&rfctl->offch_mutex, NULL);
+	_enter_critical_mutex_lock(&rfctl->offch_mutex, NULL);
 
 	switch (scan_state) {
 	case SCAN_DISABLE:
@@ -16836,7 +16836,7 @@ u8 set_tx_beacon_cmd(_adapter *padapter, u8 flags)
 
 	if (res == _SUCCESS && (flags & RTW_CMDF_WAIT_ACK)) {
 		rtw_sctx_wait(&sctx, __func__);
-		_enter_critical_mutex(&pcmdpriv->sctx_mutex, NULL);
+		_enter_critical_mutex_lock(&pcmdpriv->sctx_mutex, NULL);
 		if (sctx.status == RTW_SCTX_SUBMITTED)
 			ph2c->sctx = NULL;
 		_exit_critical_mutex(&pcmdpriv->sctx_mutex, NULL);

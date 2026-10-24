@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only
- * SPDX-FileCopyrightText: Copyright (c) 2023-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2023-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * Header file for NVIDIA Security Engine driver.
  */
@@ -18,6 +18,14 @@
 #include <crypto/sha1.h>
 #include <crypto/sha3.h>
 #include <crypto/skcipher.h>
+
+/* CRYPTO_ALG_TYPE_* is set by the crypto core during registration. */
+#define TEGRA_SE_SKCIPHER_FLAGS			\
+	(CRYPTO_ALG_ASYNC | CRYPTO_ALG_ALLOCATES_MEMORY)
+#define TEGRA_SE_AHASH_FLAGS				\
+	(CRYPTO_ALG_ASYNC | CRYPTO_ALG_ALLOCATES_MEMORY)
+#define TEGRA_SE_AEAD_FLAGS				\
+	(CRYPTO_ALG_ASYNC | CRYPTO_ALG_ALLOCATES_MEMORY)
 
 #define SE_OWNERSHIP					0x14
 #define SE_OWNERSHIP_UID(x)				FIELD_GET(GENMASK(7, 0), x)

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2017-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2017-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 /* Tegra VI test pattern generator driver */
 
 #include <linux/init.h>
@@ -238,8 +238,7 @@ static int get_tpg_settings_t23x(struct tegra_csi_port *port,
 	flags |= (emb_data == true) ? NVCSI_TPG_FLAG_EMBEDDED_PATTERN_CONFIG_INFO : 0;
 	flags |= (phy == true) ? NVCSI_TPG_FLAG_PHY_MODE_CPHY : 0;
 
-	strncpy(param_name, pattern, PARAM_STRING_LENGTH);
-	param_name[PARAM_STRING_LENGTH - 1] = '\0';
+	strscpy(param_name, pattern, sizeof(param_name));
 	temp = strstrip(param_name);
 
 	if (strcmp(temp, "PATCH") == 0) {

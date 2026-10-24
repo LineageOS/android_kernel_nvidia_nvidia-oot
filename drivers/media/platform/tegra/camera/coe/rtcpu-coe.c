@@ -15,6 +15,7 @@
 
 #include <nvidia/conftest.h>
 
+#include <linux/bitmap.h>
 #include <linux/device.h>
 #include <linux/dev_printk.h>
 #include <linux/printk.h>
@@ -53,7 +54,7 @@
 /** Corresponds to max number of Virtual DMA channels in MGBE device HW */
 #define MAX_HW_CHANS_PER_DEVICE	48U
 /** How many capture channels can actually be opened on each MGBE device */
-#define MAX_ACTIVE_CHANS_PER_DEVICE	8U
+#define MAX_ACTIVE_CHANS_PER_DEVICE	14U
 #define MAX_NUM_COE_DEVICES	4U
 #define MAX_ACTIVE_COE_CHANNELS	(MAX_ACTIVE_CHANS_PER_DEVICE * MAX_NUM_COE_DEVICES)
 
@@ -65,7 +66,8 @@
 #define COE_MAX_PKT_HEADER_SIZE		64U
 
 /** Maximum number of Rx descriptors in a Rx ring for a single channel */
-#define COE_MGBE_MAX_RXDESC_NUM		16384U
+#define COE_MGBE_MAX_RXDESC_NUM		65536U
+#define COE_MGBE_MIN_RXDESC_NUM		256U
 
 /** Buffer offset field in CoE header is 28 bits wide (bits 0-27) */
 #define COE_MGBE_MAX_BUF_SIZE		(1U << 28U)
@@ -80,7 +82,12 @@
 
 #define CAPTURE_COE_CHAN_INVALID_HW_ID	U8_C(0xFF)
 
-#define COE_CHAN_CAPTURE_QUEUE_LEN	16U
+/*
+ * CoE hardware supports at most 4 captures in flight, with 4 unique
+ * buffers. Once DMA starts, the same 4 buffers must be used as per
+ * bug 5084356, so limit the capture queue depth to 4.
+ */
+#define COE_CHAN_CAPTURE_QUEUE_LEN	4U
 /** Max number of physical DMA channel for each Eth controller */
 #define COE_MGBE_MAX_NUM_PDMA_CHANS	10U
 #define COE_MGBE_PDMA_CHAN_INVALID	COE_MGBE_MAX_NUM_PDMA_CHANS
@@ -121,7 +128,7 @@ struct coe_state {
 
 	struct list_head channels;
 	/* Number of Rx descriptors in a descriptors ring for each channel */
-	u16 rx_ring_size;
+	u32 rx_ring_size;
 	/* Number of Rx Packet Info descriptors */
 	u16 rx_pktinfo_ring_size;
 
@@ -140,6 +147,9 @@ struct coe_state {
 
 	/** MGBE IRQ ID which must be handled by camera CPU */
 	u8 mgbe_irq_id;
+
+	/** Offset (min of DT nvidia,vm-channels) to densify RCE channels[] slots */
+	u8 coe_chan_offset;
 
 	/** Number of active COE channels on this MGBE instance */
 	atomic_t active_channels;
@@ -513,6 +523,7 @@ static int coe_channel_open_on_rce(struct coe_channel_state *ch,
 	config->mgbe_instance_id = ch->parent->mgbe_id;
 	config->mgbe_irq_num = ch->parent->mgbe_irq_id;
 	config->dma_chan = ch->dma_chan;
+	config->coe_channels_offset = ch->parent->coe_chan_offset;
 	config->pdma_chan_id = ch->pdma_id;
 	memcpy(config->mac_addr, sensor_mac_addr, ETH_ALEN);
 
@@ -1164,6 +1175,12 @@ static int coe_ioctl_handle_setup_channel(struct coe_channel_state * const ch,
 		rx_desc_shdw_ring[i].rdes3 |= RDES3_OWN;
 	}
 
+	/* Pre-fill the real Rx desc ring as well */
+	memcpy(ch->rx_desc_ring_va, ch->rx_desc_shdw,
+	       (size_t)ch->parent->rx_ring_size * MGBE_RXDESC_SIZE);
+	/* Order descriptor stores before MGBE uses the ring (coherent DMA mem). */
+	dma_wmb();
+
 	/* Clear PIB ring when first VDMA channel opens on this PDMA */
 	if (atomic_inc_return(&parent->pdmas[ch->pdma_id].users_cnt) == 1) {
 		memset(parent->pdmas[ch->pdma_id].rx_pktinfo, 0,
@@ -1814,7 +1831,7 @@ static int32_t coe_mgbe_parse_dt_dmachans(struct coe_state * const s,
 		ret = of_property_read_u32(temp, "nvidia,vm-num", &vm_irq_id);
 		if (ret != 0) {
 			dev_err(&s->pdev->dev, "failed to read VM Number\n");
-			break;
+			goto out_put_child;
 		}
 
 		ret = of_property_read_u32(temp, "nvidia,num-vm-channels",
@@ -1822,27 +1839,94 @@ static int32_t coe_mgbe_parse_dt_dmachans(struct coe_state * const s,
 		if (ret != 0) {
 			dev_err(&s->pdev->dev,
 				"failed to read number of VM channels\n");
-			break;
+			goto out_put_child;
 		}
 
-		if (num_vm_chans > max_num_chans) {
-			dev_warn(&s->pdev->dev, "Too many CoE channels\n");
+		if (num_vm_chans == 0U) {
+			dev_err(&s->pdev->dev, "CoE VM IRQ has no channels\n");
+			ret = -EINVAL;
+			goto out_put_child;
+		}
+
+		if ((num_vm_chans > max_num_chans) ||
+		    (num_vm_chans > MAX_ACTIVE_CHANS_PER_DEVICE)) {
+			dev_warn(&s->pdev->dev, "Too many CoE channels %u\n",
+				 num_vm_chans);
 			ret = -E2BIG;
-			break;
+			goto out_put_child;
 		}
 
 		ret = of_property_read_u32_array(temp, "nvidia,vm-channels",
 						 vm_chans, num_vm_chans);
 		if (ret != 0) {
 			dev_err(&s->pdev->dev, "failed to get VM channels\n");
-			break;
+			goto out_put_child;
+		}
+
+		/*
+		 * RCE addresses its per-device channel array as
+		 * (dma_chan - coe_channels_offset), so the DT channel IDs must
+		 * form a dense contiguous run of unique IDs. Enforce that here:
+		 * a sparse or duplicated set would silently push RCE past the
+		 * end of that array, and the IDs are also used to index
+		 * dmachans_map[] and vdma2pdma_map[] below.
+		 */
+		{
+			DECLARE_BITMAP(seen_chans, MAX_HW_CHANS_PER_DEVICE);
+			u32 min_ch = vm_chans[0];
+			u32 max_ch = vm_chans[0];
+
+			bitmap_zero(seen_chans, MAX_HW_CHANS_PER_DEVICE);
+
+			for (u32 i = 0U; i < num_vm_chans; i++) {
+				if (vm_chans[i] >= MAX_HW_CHANS_PER_DEVICE) {
+					dev_err(&s->pdev->dev,
+						"Bad CoE VM channel ID %u\n",
+						vm_chans[i]);
+					ret = -EINVAL;
+					goto out_put_child;
+				}
+
+				if (test_and_set_bit(vm_chans[i], seen_chans)) {
+					dev_err(&s->pdev->dev,
+						"Duplicate CoE VM channel ID %u\n",
+						vm_chans[i]);
+					ret = -EINVAL;
+					goto out_put_child;
+				}
+
+				if (vm_chans[i] < min_ch) {
+					min_ch = vm_chans[i];
+				}
+				if (vm_chans[i] > max_ch) {
+					max_ch = vm_chans[i];
+				}
+			}
+
+			/* Unique IDs spanning exactly num_vm_chans => contiguous */
+			if ((max_ch - min_ch + 1U) != num_vm_chans) {
+				dev_err(&s->pdev->dev,
+					"CoE VM channels [%u..%u] not contiguous for %u chans\n",
+					min_ch, max_ch, num_vm_chans);
+				ret = -EINVAL;
+				goto out_put_child;
+			}
+
+			s->coe_chan_offset = (u8)min_ch;
 		}
 
 		s->mgbe_irq_id = vm_irq_id;
 		ret = num_vm_chans;
-		break;
+		goto out_put_child;
 	}
 
+	/* Loop ran to completion (no CoE child found); temp is already NULL. */
+	goto out_put_vm_node;
+
+out_put_child:
+	of_node_put(temp);
+out_put_vm_node:
+	of_node_put(vm_node);
 	return ret;
 }
 
@@ -1934,6 +2018,7 @@ static int camrtc_coe_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	int ret;
 	u32 dma_chans_arr[MAX_HW_CHANS_PER_DEVICE];
+	u32 ring_size;
 	int num_coe_channels;
 	const struct coe_state *check_state;
 	/* Bitmap indicating which PDMA channels of the device are used for camera */
@@ -1979,8 +2064,20 @@ static int camrtc_coe_probe(struct platform_device *pdev)
 		goto err_put_devices;
 	}
 
-	/* TODO take from DT?  */
-	s->rx_ring_size = 16384U;
+	ret = of_property_read_u32(dev->of_node, "nvidia,rx-desc-ring-size",
+				   &ring_size);
+	if (ret != 0) {
+		dev_err(dev, "missing nvidia,rx-desc-ring-size\n");
+		goto err_unregister_notifier;
+	}
+	if (ring_size > COE_MGBE_MAX_RXDESC_NUM ||
+	    ring_size < COE_MGBE_MIN_RXDESC_NUM ||
+	    !is_power_of_2(ring_size)) {
+		dev_err(dev, "Invalid Rx ring size %u\n", ring_size);
+		ret = -EINVAL;
+		goto err_unregister_notifier;
+	}
+	s->rx_ring_size = ring_size;
 	s->rx_pktinfo_ring_size = 4096U; /* Can only be 256, 512, 2048 or 4096 */
 
 	ret = of_property_read_u32(s->mgbe_dev->of_node,
@@ -1989,12 +2086,6 @@ static int camrtc_coe_probe(struct platform_device *pdev)
 		dev_info(dev,
 			"DT instance_id missing, setting default to MGBE0\n");
 		s->mgbe_id = 0U;
-	}
-
-	if (s->rx_ring_size > COE_MGBE_MAX_RXDESC_NUM) {
-		dev_err(dev, "Invalid Rx ring size %u\n", s->rx_ring_size);
-		ret = -ENOSPC;
-		goto err_unregister_notifier;
 	}
 
 	if (s->rx_pktinfo_ring_size != 256U &&

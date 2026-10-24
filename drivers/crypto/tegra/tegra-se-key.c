@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2023-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2023-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 /*
  * Crypto driver file to manage keys of NVIDIA Security Engine.
  */
@@ -272,14 +272,17 @@ int tegra_key_submit(struct tegra_se *se, const u8 *key, u32 keylen, u32 alg, u3
 	if (!tegra_key_in_kslt(*keyid)) {
 		*keyid = tegra_keyslot_alloc();
 		if (!(*keyid)) {
-			dev_err(se->dev, "failed to allocate key slot\n");
+			dev_dbg(se->dev, "failed to allocate key slot\n");
 			return -ENOMEM;
 		}
 	}
 
 	ret = tegra_key_insert(se, key, keylen, *keyid, alg);
-	if (ret)
+	if (ret) {
+		tegra_keyslot_free(*keyid);
+		*keyid = 0;
 		return ret;
+	}
 
 	if (!se->hw->support_kds)
 		return 0;
@@ -315,19 +318,59 @@ int tegra_key_submit(struct tegra_se *se, const u8 *key, u32 keylen, u32 alg, u3
 	return 0;
 }
 
+/* Lock ordering: AES before XTS; release in tegra_key_invalidate_reserved(). */
+static DEFINE_MUTEX(rsvd_aes_kslt_lock);
+static DEFINE_MUTEX(rsvd_xts_kslt_lock);
+
+static struct mutex *tegra_reserved_kslt_lock(u32 keyid)
+{
+	switch (keyid) {
+	case TEGRA_AES_RESERVED_KSLT:
+		return &rsvd_aes_kslt_lock;
+	case TEGRA_XTS_RESERVED_KSLT:
+		return &rsvd_xts_kslt_lock;
+	default:
+		return NULL;
+	}
+}
+
 void tegra_key_invalidate_reserved(struct tegra_se *se, u32 keyid, u32 alg)
 {
 	u8 zkey[AES_MAX_KEY_SIZE] = {0};
+	struct mutex *lock;
 
 	if (!keyid)
 		return;
 
+	lock = tegra_reserved_kslt_lock(keyid);
+	if (WARN_ON_ONCE(!lock))
+		return;
+
 	/* Overwrite the key with 0s */
 	tegra_key_insert(se, zkey, AES_MAX_KEY_SIZE, keyid, alg);
+
+	mutex_unlock(lock);
 }
 
 inline int tegra_key_submit_reserved(struct tegra_se *se, const u8 *key,
 				     u32 keylen, u32 alg, u32 *keyid)
 {
-	return tegra_key_insert(se, key, keylen, *keyid, alg);
+	struct mutex *lock;
+	int ret;
+
+	lock = tegra_reserved_kslt_lock(*keyid);
+	if (WARN_ON_ONCE(!lock)) {
+		*keyid = 0;
+		return -EINVAL;
+	}
+
+	mutex_lock(lock);
+
+	ret = tegra_key_insert(se, key, keylen, *keyid, alg);
+	if (ret) {
+		mutex_unlock(lock);
+		*keyid = 0;
+	}
+
+	return ret;
 }

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2023-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2023-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 /*
  * Crypto driver to handle block cipher algorithms using NVIDIA Security Engine.
  */
@@ -706,7 +706,7 @@ static struct tegra_se_alg tegra_aes_algs[] = {
 				.cra_name = "cbc(aes)",
 				.cra_driver_name = "cbc-aes-tegra",
 				.cra_priority = 500,
-				.cra_flags = CRYPTO_ALG_TYPE_SKCIPHER | CRYPTO_ALG_ASYNC,
+				.cra_flags = TEGRA_SE_SKCIPHER_FLAGS,
 				.cra_blocksize = AES_BLOCK_SIZE,
 				.cra_ctxsize = sizeof(struct tegra_aes_ctx),
 				.cra_alignmask = 0xf,
@@ -733,7 +733,7 @@ static struct tegra_se_alg tegra_aes_algs[] = {
 				.cra_name = "ecb(aes)",
 				.cra_driver_name = "ecb-aes-tegra",
 				.cra_priority = 500,
-				.cra_flags = CRYPTO_ALG_TYPE_SKCIPHER | CRYPTO_ALG_ASYNC,
+				.cra_flags = TEGRA_SE_SKCIPHER_FLAGS,
 				.cra_blocksize = AES_BLOCK_SIZE,
 				.cra_ctxsize = sizeof(struct tegra_aes_ctx),
 				.cra_alignmask = 0xf,
@@ -761,7 +761,7 @@ static struct tegra_se_alg tegra_aes_algs[] = {
 				.cra_name = "ctr(aes)",
 				.cra_driver_name = "ctr-aes-tegra",
 				.cra_priority = 500,
-				.cra_flags = CRYPTO_ALG_TYPE_SKCIPHER | CRYPTO_ALG_ASYNC,
+				.cra_flags = TEGRA_SE_SKCIPHER_FLAGS,
 				.cra_blocksize = 1,
 				.cra_ctxsize = sizeof(struct tegra_aes_ctx),
 				.cra_alignmask = 0xf,
@@ -789,6 +789,7 @@ static struct tegra_se_alg tegra_aes_algs[] = {
 				.cra_name = "xts(aes)",
 				.cra_driver_name = "xts-aes-tegra",
 				.cra_priority = 500,
+				.cra_flags = TEGRA_SE_SKCIPHER_FLAGS,
 				.cra_blocksize = AES_BLOCK_SIZE,
 				.cra_ctxsize	   = sizeof(struct tegra_aes_ctx),
 				.cra_alignmask	   = (__alignof__(u64) - 1),
@@ -1446,7 +1447,7 @@ static int tegra_ccm_do_one_req(struct crypto_engine *engine, void *areq)
 	if (rctx->encrypt)
 		rctx->cryptlen = req->cryptlen;
 	else
-		rctx->cryptlen = req->cryptlen - ctx->authsize;
+		rctx->cryptlen = req->cryptlen - rctx->authsize;
 
 	/* Keys in ctx might be stored in KDS. Copy it to local keyslot */
 	if (ctx->key_id)
@@ -1479,7 +1480,7 @@ static int tegra_ccm_do_one_req(struct crypto_engine *engine, void *areq)
 
 	ret = tegra_ccm_crypt_init(req, se, rctx);
 	if (ret)
-		goto out;
+		goto outbuf_free;
 
 	if (rctx->encrypt) {
 
@@ -1539,8 +1540,7 @@ static int tegra_gcm_do_one_req(struct crypto_engine *engine, void *areq)
 	if (rctx->encrypt)
 		rctx->cryptlen = req->cryptlen;
 	else
-		rctx->cryptlen = req->cryptlen - ctx->authsize;
-
+		rctx->cryptlen = req->cryptlen - rctx->authsize;
 
 	/* Keys in ctx might be stored in KDS. Copy it to local keyslot */
 	if (ctx->key_id)
@@ -1551,7 +1551,7 @@ static int tegra_gcm_do_one_req(struct crypto_engine *engine, void *areq)
 		ret = tegra_key_submit_reserved_aes(ctx->se, ctx->key,
 					ctx->keylen, ctx->alg, &rctx->key_id);
 		if (ret)
-			goto key_err;
+			goto out;
 	}
 
 	/* Allocate buffers required */
@@ -1560,7 +1560,7 @@ static int tegra_gcm_do_one_req(struct crypto_engine *engine, void *areq)
 					     &rctx->inbuf.addr, GFP_KERNEL);
 	if (!rctx->inbuf.buf) {
 		ret = -ENOMEM;
-		goto out_finalize;
+		goto key_free;
 	}
 
 	rctx->outbuf.size = rctx->assoclen + rctx->authsize + rctx->cryptlen;
@@ -1568,7 +1568,7 @@ static int tegra_gcm_do_one_req(struct crypto_engine *engine, void *areq)
 					      &rctx->outbuf.addr, GFP_KERNEL);
 	if (!rctx->outbuf.buf) {
 		ret = -ENOMEM;
-		goto outbuf_err;
+		goto inbuf_free;
 	}
 
 	memcpy(rctx->iv, req->iv, GCM_AES_IV_SIZE);
@@ -1578,14 +1578,14 @@ static int tegra_gcm_do_one_req(struct crypto_engine *engine, void *areq)
 	if (rctx->assoclen) {
 		ret = tegra_gcm_do_gmac(ctx, rctx);
 		if (ret)
-			goto out;
+			goto outbuf_free;
 	}
 
 	/* GCM Encryption/Decryption operation */
 	if (rctx->cryptlen) {
 		ret = tegra_gcm_do_crypt(ctx, rctx);
 		if (ret)
-			goto out;
+			goto outbuf_free;
 	}
 
 	/* GCM_FINAL operation */
@@ -1593,26 +1593,24 @@ static int tegra_gcm_do_one_req(struct crypto_engine *engine, void *areq)
 	if (rctx->encrypt || !se->hw->support_aad_verify) {
 		ret = tegra_gcm_do_final(ctx, rctx);
 		if (ret)
-			goto out;
+			goto outbuf_free;
 	}
 
 	if (!rctx->encrypt)
 		ret = tegra_gcm_do_verify(ctx, rctx);
 
-out:
+outbuf_free:
+	dma_free_coherent(ctx->se->dev, rctx->outbuf.size,
+			  rctx->outbuf.buf, rctx->outbuf.addr);
+inbuf_free:
+	dma_free_coherent(ctx->se->dev, rctx->inbuf.size,
+			  rctx->inbuf.buf, rctx->inbuf.addr);
+key_free:
 	if (tegra_key_is_reserved(rctx->key_id))
 		tegra_key_invalidate_reserved(ctx->se, rctx->key_id, ctx->alg);
 	else if (rctx->key_id != ctx->key_id)
 		tegra_key_invalidate(ctx->se, rctx->key_id, ctx->alg);
-key_err:
-	dma_free_coherent(ctx->se->dev, rctx->outbuf.size,
-			  rctx->outbuf.buf, rctx->outbuf.addr);
-outbuf_err:
-	dma_free_coherent(ctx->se->dev, rctx->inbuf.size,
-			  rctx->inbuf.buf, rctx->inbuf.addr);
-
-out_finalize:
-	/* Finalize the request if there are no errors */
+out:
 	crypto_finalize_aead_request(ctx->se->engine, req, ret);
 
 	return 0;
@@ -2261,6 +2259,7 @@ static struct tegra_se_alg tegra_aead_algs[] = {
 				.cra_name = "gcm(aes)",
 				.cra_driver_name = "gcm-aes-tegra",
 				.cra_priority = 500,
+				.cra_flags = TEGRA_SE_AEAD_FLAGS,
 				.cra_blocksize = 1,
 				.cra_ctxsize = sizeof(struct tegra_aead_ctx),
 				.cra_alignmask = 0xf,
@@ -2289,6 +2288,7 @@ static struct tegra_se_alg tegra_aead_algs[] = {
 				.cra_name = "ccm(aes)",
 				.cra_driver_name = "ccm-aes-tegra",
 				.cra_priority = 500,
+				.cra_flags = TEGRA_SE_AEAD_FLAGS,
 				.cra_blocksize = 1,
 				.cra_ctxsize = sizeof(struct tegra_aead_ctx),
 				.cra_alignmask = 0xf,
@@ -2322,7 +2322,7 @@ static struct tegra_se_alg tegra_cmac_algs[] = {
 				.cra_name = "cmac(aes)",
 				.cra_driver_name = "cmac-aes-tegra",
 				.cra_priority = 300,
-				.cra_flags = CRYPTO_ALG_TYPE_AHASH,
+				.cra_flags = TEGRA_SE_AHASH_FLAGS,
 				.cra_blocksize = AES_BLOCK_SIZE,
 				.cra_ctxsize = sizeof(struct tegra_cmac_ctx),
 				.cra_alignmask = 0,

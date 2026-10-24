@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/*
- * SPDX-FileCopyrightText: Copyright (c) 2017-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- */
+// SPDX-FileCopyrightText: Copyright (c) 2017-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include <nvidia/conftest.h>
 
@@ -827,7 +825,26 @@ static void tegra_display_hub_destroy_state(struct drm_private_obj *obj,
 	kfree(hub_state);
 }
 
+#if defined(NV_DRM_ATOMIC_PRIVATE_OBJ_INIT_REMOVED_STATE_ARG) /* Linux v7.1 */
+static struct drm_private_state *
+tegra_display_hub_create_state(struct drm_private_obj *obj)
+{
+	struct tegra_display_hub_state *state;
+
+	state = kzalloc(sizeof(*state), GFP_KERNEL);
+	if (!state)
+		return ERR_PTR(-ENOMEM);
+
+	__drm_atomic_helper_private_obj_create_state(obj, &state->base);
+
+	return &state->base;
+}
+#endif
+
 static const struct drm_private_state_funcs tegra_display_hub_state_funcs = {
+#if defined(NV_DRM_ATOMIC_PRIVATE_OBJ_INIT_REMOVED_STATE_ARG) /* Linux v7.1 */
+	.atomic_create_state = tegra_display_hub_create_state,
+#endif
 	.atomic_duplicate_state = tegra_display_hub_duplicate_state,
 	.atomic_destroy_state = tegra_display_hub_destroy_state,
 };
@@ -943,6 +960,11 @@ static int tegra_display_hub_init(struct host1x_client *client)
 	struct tegra_display_hub *hub = to_tegra_display_hub(client);
 	struct drm_device *drm = dev_get_drvdata(client->host);
 	struct tegra_drm *tegra = drm->dev_private;
+
+#if defined(NV_DRM_ATOMIC_PRIVATE_OBJ_INIT_REMOVED_STATE_ARG) /* Linux v7.1 */
+	drm_atomic_private_obj_init(drm, &hub->base,
+				    &tegra_display_hub_state_funcs);
+#else
 	struct tegra_display_hub_state *state;
 
 	state = kzalloc(sizeof(*state), GFP_KERNEL);
@@ -951,6 +973,7 @@ static int tegra_display_hub_init(struct host1x_client *client)
 
 	drm_atomic_private_obj_init(drm, &hub->base, &state->base,
 				    &tegra_display_hub_state_funcs);
+#endif
 
 	tegra->hub = hub;
 

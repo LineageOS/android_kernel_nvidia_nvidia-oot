@@ -424,6 +424,10 @@ struct tegra_sor {
 	struct tegra_output output;
 	struct device *dev;
 
+#if defined(NV_TEGRA_PMC_IO_PAD_POWER_ENABLE_PRESENT) /* Linux v7.2 */
+	struct tegra_pmc *pmc;
+#endif
+
 	const struct tegra_sor_soc *soc;
 	void __iomem *regs;
 	unsigned int index;
@@ -2283,7 +2287,11 @@ static void tegra_sor_hdmi_disable(struct drm_encoder *encoder)
 	if (err < 0)
 		dev_err(sor->dev, "failed to power down SOR: %d\n", err);
 
+#if defined(NV_TEGRA_PMC_IO_PAD_POWER_ENABLE_PRESENT) /* Linux v7.2 */
+	err = tegra_pmc_io_pad_power_disable(sor->pmc, sor->pad);
+#else
 	err = tegra_io_pad_power_disable(sor->pad);
+#endif
 	if (err < 0)
 		dev_err(sor->dev, "failed to power off I/O pad: %d\n", err);
 
@@ -2323,7 +2331,11 @@ static void tegra_sor_hdmi_enable(struct drm_encoder *encoder)
 
 	div = clk_get_rate(sor->clk) / 1000000 * 4;
 
+#if defined(NV_TEGRA_PMC_IO_PAD_POWER_ENABLE_PRESENT) /* Linux v7.2 */
+	err = tegra_pmc_io_pad_power_enable(sor->pmc, sor->pad);
+#else
 	err = tegra_io_pad_power_enable(sor->pad);
+#endif
 	if (err < 0)
 		dev_err(sor->dev, "failed to power on I/O pad: %d\n", err);
 
@@ -2751,7 +2763,11 @@ static void tegra_sor_dp_disable(struct drm_encoder *encoder)
 	if (err < 0)
 		dev_err(sor->dev, "failed to power down SOR: %d\n", err);
 
+#if defined(NV_TEGRA_PMC_IO_PAD_POWER_ENABLE_PRESENT) /* Linux v7.2 */
+	err = tegra_pmc_io_pad_power_disable(sor->pmc, sor->pad);
+#else
 	err = tegra_io_pad_power_disable(sor->pad);
+#endif
 	if (err < 0)
 		dev_err(sor->dev, "failed to power off I/O pad: %d\n", err);
 
@@ -2793,7 +2809,11 @@ static void tegra_sor_dp_enable(struct drm_encoder *encoder)
 	if (err < 0)
 		dev_err(sor->dev, "failed to set safe parent clock: %d\n", err);
 
+#if defined(NV_TEGRA_PMC_IO_PAD_POWER_ENABLE_PRESENT) /* Linux v7.2 */
+	err = tegra_pmc_io_pad_power_enable(sor->pmc, sor->pad);
+#else
 	err = tegra_io_pad_power_enable(sor->pad);
+#endif
 	if (err < 0)
 		dev_err(sor->dev, "failed to power on LVDS rail: %d\n", err);
 
@@ -3783,6 +3803,13 @@ static int tegra_sor_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	sor->num_settings = sor->soc->num_settings;
+
+#if defined(NV_TEGRA_PMC_IO_PAD_POWER_ENABLE_PRESENT) /* Linux v7.2 */
+	sor->pmc = devm_tegra_pmc_get(&pdev->dev);
+	if (IS_ERR(sor->pmc))
+		return dev_err_probe(&pdev->dev, PTR_ERR(sor->pmc),
+				     "failed to get PMC\n");
+#endif
 
 	np = of_parse_phandle(pdev->dev.of_node, "nvidia,dpaux", 0);
 	if (np) {

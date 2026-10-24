@@ -230,20 +230,28 @@ static int vic_riscv_boot(struct vic *vic)
 static int vic_set_rate(struct vic *vic, unsigned long rate)
 {
 	unsigned long dev_rate;
-	u32 emc_kbps;
+	u64 emc_kbps;
 	int err;
 
 	err = clk_set_rate(vic->clk, rate);
 	if (err < 0)
 		return err;
 
-	if (pm_runtime_suspended(vic->dev))
+	/*
+	 * Skip ICC BW update when the device is not fully active. Using
+	 * pm_runtime_suspended() is insufficient because it misses the
+	 * RPM_SUSPENDING state: an in-flight actmon IRQ can race with
+	 * vic_runtime_suspend() after icc_set_bw(0,0) but before
+	 * clk_disable_unprepare(), restoring non-zero BW and leaving it
+	 * set after suspend completes.
+	 */
+	if (!pm_runtime_active(vic->dev))
 		return 0;
 
 	dev_rate = clk_get_rate(vic->clk);
 
 	if (vic->icc_write) {
-		emc_kbps = dev_rate * VIC_AXI_RW_BANDWIDTH / 1024;
+		emc_kbps = (u64)dev_rate * VIC_AXI_RW_BANDWIDTH / 1024;
 		err = icc_set_bw(vic->icc_write, 0, kbps_to_icc(emc_kbps));
 		if (err)
 			dev_warn(vic->dev, "failed to set icc bw: %d\n", err);
@@ -684,6 +692,17 @@ static int __maybe_unused vic_runtime_resume(struct device *dev)
 	if (err < 0) {
 		dev_err(dev, "failed to set clock rate: %d\n", err);
 		goto disable;
+	}
+
+	/* vic_set_rate skips ICC BW during RPM_RESUMING; set it explicitly here. */
+	if (vic->icc_write) {
+		u64 emc_kbps = (u64)clk_get_rate(vic->clk) * VIC_AXI_RW_BANDWIDTH / 1024;
+
+		err = icc_set_bw(vic->icc_write, 0, kbps_to_icc(emc_kbps));
+		if (err) {
+			dev_warn(dev, "failed to set icc bw: %d\n", err);
+			goto disable;
+		}
 	}
 
 	usleep_range(10, 20);

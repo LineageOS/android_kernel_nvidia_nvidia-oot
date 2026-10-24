@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2015-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2015-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 /*
  * nv_imx274.c - imx274 sensor driver
  */
@@ -8,14 +8,13 @@
 
 #include <linux/slab.h>
 #include <linux/uaccess.h>
-#include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/module.h>
 #include <linux/debugfs.h>
 
 #include <linux/seq_file.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
-#include <linux/of_gpio.h>
 
 #include <media/tegra_v4l2_camera.h>
 #include <media/tegracam_core.h>
@@ -711,12 +710,8 @@ static int imx274_power_on(struct camera_common_data *s_data)
 		return err;
 	}
 
-	if (pw->reset_gpio)
-		gpio_set_value(pw->reset_gpio, 0);
-	if (pw->af_gpio)
-		gpio_set_value(pw->af_gpio, 1);
-	if (pw->pwdn_gpio)
-		gpio_set_value(pw->pwdn_gpio, 0);
+	if (pw->reset_gpiod)
+		gpiod_set_value(pw->reset_gpiod, 0);
 	usleep_range(10, 20);
 
 	if (pw->dvdd)
@@ -739,10 +734,8 @@ static int imx274_power_on(struct camera_common_data *s_data)
 	if (pdata && pdata->avdd_latency)
 		usleep_range(pdata->avdd_latency, pdata->avdd_latency + 10);
 
-	if (pw->reset_gpio)
-		gpio_set_value(pw->reset_gpio, 1);
-	if (pw->pwdn_gpio)
-		gpio_set_value(pw->pwdn_gpio, 1);
+	if (pw->reset_gpiod)
+		gpiod_set_value(pw->reset_gpiod, 1);
 
 	/* 1.2v input is generated on module board, adds more latency */
 	usleep_range(10000, 10010);
@@ -759,9 +752,6 @@ imx274_iovdd_fail:
 		regulator_disable(pw->dvdd);
 
 imx274_dvdd_fail:
-	if (pw->af_gpio)
-		gpio_set_value(pw->af_gpio, 0);
-
 	dev_err(dev, "%s failed.\n", __func__);
 	return -ENODEV;
 }
@@ -785,12 +775,8 @@ static int imx274_power_off(struct camera_common_data *s_data)
 	}
 
 	usleep_range(1, 2);
-	if (pw->reset_gpio)
-		gpio_set_value(pw->reset_gpio, 0);
-	if (pw->af_gpio)
-		gpio_set_value(pw->af_gpio, 0);
-	if (pw->pwdn_gpio)
-		gpio_set_value(pw->pwdn_gpio, 0);
+	if (pw->reset_gpiod)
+		gpiod_set_value(pw->reset_gpiod, 0);
 	usleep_range(1, 2);
 
 	if (pw->avdd)
@@ -824,9 +810,8 @@ static int imx274_power_put(struct tegracam_device *tc_dev)
 	pw->dvdd = NULL;
 	pw->iovdd = NULL;
 
-	gpio_free(pw->pwdn_gpio);
-	gpio_free(pw->reset_gpio);
-	gpio_free(pw->af_gpio);
+	if (pw->reset_gpiod)
+		gpiod_put(pw->reset_gpiod);
 
 	return 0;
 }
@@ -873,30 +858,19 @@ static int imx274_power_get(struct tegracam_device *tc_dev)
 	if (pdata->regulators.dvdd != NULL)
 		err |= camera_common_regulator_get(dev,
 			&pw->dvdd, pdata->regulators.dvdd);
+	if (err)
+		return err;
 
-	if (!err) {
-		pw->reset_gpio = pdata->reset_gpio;
-		pw->af_gpio = pdata->af_gpio;
-		pw->pwdn_gpio = pdata->pwdn_gpio;
+	pw->reset_gpiod = gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
+	if (IS_ERR(pw->reset_gpiod)) {
+		dev_dbg(dev, "%s can't request reset_gpio %ld\n", __func__,
+			PTR_ERR(pw->reset_gpiod));
+		pw->reset_gpiod = NULL;
 	}
 
-	ret = gpio_request(pw->reset_gpio, "cam_reset_gpio");
-	if (ret < 0)
-		dev_dbg(dev, "%s can't request reset_gpio %d\n", __func__, ret);
-	gpio_direction_output(pw->reset_gpio, 1);
-
-	ret = gpio_request(pw->af_gpio, "cam_af_gpio");
-	if (ret < 0)
-		dev_dbg(dev, "%s can't request af_gpio %d\n", __func__, ret);
-	gpio_direction_output(pw->af_gpio, 1);
-
-	ret = gpio_request(pw->pwdn_gpio, "cam_pwdn_gpio");
-	if (ret < 0)
-		dev_dbg(dev, "%s can't request pwdn_gpio %d\n",	__func__, ret);
-	gpio_direction_output(pw->pwdn_gpio, 1);
-
 	pw->state = SWITCH_OFF;
-	return err;
+
+	return 0;
 }
 
 static
@@ -926,9 +900,6 @@ struct camera_common_pdata *imx274_parse_dt(struct tegracam_device *tc_dev)
 				      &board_priv_pdata->mclk_name);
 	if (err)
 		dev_err(dev, "mclk not in DT\n");
-
-	board_priv_pdata->reset_gpio = of_get_named_gpio(node,
-			"reset-gpios", 0);
 
 	err = of_property_read_string(node, "avdd-reg",
 			&board_priv_pdata->regulators.avdd);
@@ -1290,7 +1261,7 @@ static int imx274_probe(struct i2c_client *client,
 
 	priv->i2c_client = tc_dev->client = client;
 	tc_dev->dev = dev;
-	strncpy(tc_dev->name, "imx274", sizeof(tc_dev->name));
+	strscpy(tc_dev->name, "imx274", sizeof(tc_dev->name));
 	tc_dev->dev_regmap_config = &sensor_regmap_config;
 	tc_dev->sensor_ops = &imx274_common_ops;
 	tc_dev->v4l2sd_internal_ops = &imx274_subdev_internal_ops;

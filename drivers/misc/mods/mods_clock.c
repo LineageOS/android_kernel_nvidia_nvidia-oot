@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* SPDX-FileCopyrightText: Copyright (c) 2011-2023, NVIDIA CORPORATION.  All rights reserved. */
+/* SPDX-FileCopyrightText: Copyright (c) 2011-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
 
 #include "mods_internal.h"
 #include <linux/clk.h>
@@ -79,7 +79,7 @@ void mods_init_clock_api(void)
 		pp->length = 0;
 		goto err;
 	}
-	strncpy(pp->value, okay_value, size_value);
+	memcpy(pp->value, okay_value, size_value);
 	pp->length = size_value;
 
 err:
@@ -277,6 +277,14 @@ int esc_mods_get_rst_handle(struct mods_client *client,
 
 	LOG_ENT();
 
+	if (strscpy(reset_data.name, p->reset_name,
+		    sizeof(reset_data.name)) < 0) {
+		cl_error(
+		"reset name %s is too large to store in reset array\n",
+		reset_data.name);
+		goto err;
+	}
+
 	mods_np = find_clocks_node("mods-clocks");
 	if (!mods_np || !of_device_is_available(mods_np)) {
 		cl_warn("'mods-clocks' node not found in device tree\n");
@@ -286,23 +294,15 @@ int esc_mods_get_rst_handle(struct mods_client *client,
 	if (IS_ERR(pp)) {
 		cl_error(
 		"No 'reset-names' prop in 'mods-clocks' node for dev %s\n",
-			p->reset_name);
+			reset_data.name);
 		goto err;
 	}
 
-	p_reset_ctrl = of_reset_control_get(mods_np, p->reset_name);
+	p_reset_ctrl = of_reset_control_get(mods_np, reset_data.name);
 
 	if (IS_ERR(p_reset_ctrl))
-		cl_error("reset (%s) not found\n", p->reset_name);
+		cl_error("reset (%s) not found\n", reset_data.name);
 	else {
-		strncpy(reset_data.name, p->reset_name,
-			sizeof(reset_data.name) - 1);
-		if (reset_data.name[sizeof(reset_data.name) - 1] != '\0') {
-			cl_error(
-			"reset name %sis too large to store in reset array\n",
-			reset_data.name);
-			goto err;
-		}
 		reset_data.rst = p_reset_ctrl;
 		p->reset_handle = get_reset_handle(reset_data);
 		if (p->reset_handle == -1) {

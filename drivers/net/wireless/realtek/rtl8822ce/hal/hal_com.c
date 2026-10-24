@@ -1705,7 +1705,7 @@ int c2h_customer_str_rpt_hdl(_adapter *adapter, u8 *data, u8 len)
 	if (DBG_CUSTOMER_STR_RPT_HANDLE)
 		RTW_PRINT_DUMP("customer_str_rpt: ", data, CUSTOMER_STR_RPT_LEN);
 
-	_enter_critical_mutex(&dvobj->customer_str_mutex, NULL);
+	_enter_critical_mutex_lock(&dvobj->customer_str_mutex, NULL);
 
 	if (dvobj->customer_str_sctx != NULL) {
 		if (dvobj->customer_str_sctx->status != RTW_SCTX_SUBMITTED)
@@ -1737,7 +1737,7 @@ int c2h_customer_str_rpt_2_hdl(_adapter *adapter, u8 *data, u8 len)
 	if (DBG_CUSTOMER_STR_RPT_HANDLE)
 		RTW_PRINT_DUMP("customer_str_rpt_2: ", data, CUSTOMER_STR_RPT_2_LEN);
 
-	_enter_critical_mutex(&dvobj->customer_str_mutex, NULL);
+	_enter_critical_mutex_lock(&dvobj->customer_str_mutex, NULL);
 
 	if (dvobj->customer_str_sctx != NULL) {
 		if (dvobj->customer_str_sctx->status != RTX_SCTX_CSTR_WAIT_RPT2)
@@ -1762,7 +1762,7 @@ s32 rtw_hal_customer_str_read(_adapter *adapter, u8 *cs)
 	struct submit_ctx sctx;
 	s32 ret = _SUCCESS;
 
-	_enter_critical_mutex(&dvobj->customer_str_mutex, NULL);
+	_enter_critical_mutex_lock(&dvobj->customer_str_mutex, NULL);
 	if (dvobj->customer_str_sctx != NULL)
 		ret = _FAIL;
 	else {
@@ -1779,7 +1779,7 @@ s32 rtw_hal_customer_str_read(_adapter *adapter, u8 *cs)
 	ret = rtw_customer_str_req_cmd(adapter);
 	if (ret != _SUCCESS) {
 		RTW_WARN("%s read cmd fail\n", __func__);
-		_enter_critical_mutex(&dvobj->customer_str_mutex, NULL);
+		_enter_critical_mutex_lock(&dvobj->customer_str_mutex, NULL);
 		dvobj->customer_str_sctx = NULL;
 		_exit_critical_mutex(&dvobj->customer_str_mutex, NULL);
 		goto exit;
@@ -1788,7 +1788,7 @@ s32 rtw_hal_customer_str_read(_adapter *adapter, u8 *cs)
 	/* wait till rpt done or timeout */
 	rtw_sctx_wait(&sctx, __func__);
 
-	_enter_critical_mutex(&dvobj->customer_str_mutex, NULL);
+	_enter_critical_mutex_lock(&dvobj->customer_str_mutex, NULL);
 	dvobj->customer_str_sctx = NULL;
 	if (sctx.status == RTW_SCTX_DONE_SUCCESS)
 		_rtw_memcpy(cs, dvobj->customer_str, RTW_CUSTOMER_STR_LEN);
@@ -1845,7 +1845,7 @@ s32 rtw_hal_customer_str_write(_adapter *adapter, const u8 *cs)
 	struct submit_ctx sctx;
 	s32 ret = _SUCCESS;
 
-	_enter_critical_mutex(&dvobj->customer_str_mutex, NULL);
+	_enter_critical_mutex_lock(&dvobj->customer_str_mutex, NULL);
 	if (dvobj->customer_str_sctx != NULL)
 		ret = _FAIL;
 	else {
@@ -1862,7 +1862,7 @@ s32 rtw_hal_customer_str_write(_adapter *adapter, const u8 *cs)
 	ret = rtw_customer_str_write_cmd(adapter, cs);
 	if (ret != _SUCCESS) {
 		RTW_WARN("%s write cmd fail\n", __func__);
-		_enter_critical_mutex(&dvobj->customer_str_mutex, NULL);
+		_enter_critical_mutex_lock(&dvobj->customer_str_mutex, NULL);
 		dvobj->customer_str_sctx = NULL;
 		_exit_critical_mutex(&dvobj->customer_str_mutex, NULL);
 		goto exit;
@@ -1871,7 +1871,7 @@ s32 rtw_hal_customer_str_write(_adapter *adapter, const u8 *cs)
 	ret = rtw_customer_str_req_cmd(adapter);
 	if (ret != _SUCCESS) {
 		RTW_WARN("%s read cmd fail\n", __func__);
-		_enter_critical_mutex(&dvobj->customer_str_mutex, NULL);
+		_enter_critical_mutex_lock(&dvobj->customer_str_mutex, NULL);
 		dvobj->customer_str_sctx = NULL;
 		_exit_critical_mutex(&dvobj->customer_str_mutex, NULL);
 		goto exit;
@@ -1880,7 +1880,7 @@ s32 rtw_hal_customer_str_write(_adapter *adapter, const u8 *cs)
 	/* wait till rpt done or timeout */
 	rtw_sctx_wait(&sctx, __func__);
 
-	_enter_critical_mutex(&dvobj->customer_str_mutex, NULL);
+	_enter_critical_mutex_lock(&dvobj->customer_str_mutex, NULL);
 	dvobj->customer_str_sctx = NULL;
 	if (sctx.status == RTW_SCTX_DONE_SUCCESS) {
 		if (_rtw_memcmp(cs, dvobj->customer_str, RTW_CUSTOMER_STR_LEN) != _TRUE) {
@@ -2343,7 +2343,7 @@ u32 rtw_sec_read_cam(_adapter *adapter, u8 addr)
 	u8 timeout = 0;
 	u8 sr = 0;
 
-	_enter_critical_mutex(mutex, NULL);
+	_enter_critical_mutex_lock(mutex, NULL);
 
 	rtw_write32(adapter, REG_CAMCMD, CAM_POLLINIG | addr);
 
@@ -2385,7 +2385,7 @@ void rtw_sec_write_cam(_adapter *adapter, u8 addr, u32 wdata)
 	u8 timeout = 0;
 	u8 sr = 0;
 
-	_enter_critical_mutex(mutex, NULL);
+	_enter_critical_mutex_lock(mutex, NULL);
 
 	rtw_write32(adapter, REG_CAMWRITE, wdata);
 	rtw_write32(adapter, REG_CAMCMD, CAM_POLLINIG | CAM_WRITE | addr);
@@ -10169,7 +10169,7 @@ static u32 _rtw_wow_pattern_read_cam(_adapter *adapter, u8 addr)
 	u8 timeout = 0;
 	u8 rst = _FALSE;
 
-	_enter_critical_mutex(mutex, NULL);
+	_enter_critical_mutex_lock(mutex, NULL);
 
 	rtw_write32(adapter, REG_WKFMCAM_CMD, BIT_WKFCAM_POLLING_V1 | BIT_WKFCAM_ADDR_V2(addr));
 
@@ -10239,7 +10239,7 @@ static void _rtw_wow_pattern_write_cam(_adapter *adapter, u8 addr, u32 wdata)
 	u8 timeout = 0;
 
 	/*RTW_INFO("%s ==> addr:0x%02x , wdata:0x%08x\n", __func__, addr, wdata);*/
-	_enter_critical_mutex(mutex, NULL);
+	_enter_critical_mutex_lock(mutex, NULL);
 
 	rtw_write32(adapter, REG_WKFMCAM_RWD, wdata);
 	rtw_write32(adapter, REG_WKFMCAM_CMD, BIT_WKFCAM_POLLING_V1 | BIT_WKFCAM_WE | BIT_WKFCAM_ADDR_V2(addr));
@@ -10308,7 +10308,7 @@ static u8 _rtw_wow_pattern_clean_cam(_adapter *adapter)
 	u8 timeout = 0;
 	u8 rst = _FAIL;
 
-	_enter_critical_mutex(mutex, NULL);
+	_enter_critical_mutex_lock(mutex, NULL);
 	rtw_write32(adapter, REG_WKFMCAM_CMD, BIT_WKFCAM_POLLING_V1 | BIT_WKFCAM_CLR_V1);
 
 	start = rtw_get_current_time();
@@ -16767,7 +16767,7 @@ static inline void rtw_enter_protsel(struct protsel *protsel, u32 sel)
 {
 	int refcnt;
 
-	_enter_critical_mutex(&protsel->mutex, NULL);
+	_enter_critical_mutex_lock(&protsel->mutex, NULL);
 
 	refcnt = ATOMIC_INC_RETURN(&protsel->refcnt);
 
@@ -16782,7 +16782,7 @@ static inline void rtw_leave_protsel(struct protsel *protsel)
 {
 	int refcnt;
 
-	_enter_critical_mutex(&protsel->mutex, NULL);
+	_enter_critical_mutex_lock(&protsel->mutex, NULL);
 
 	refcnt = ATOMIC_DEC_RETURN(&protsel->refcnt);
 

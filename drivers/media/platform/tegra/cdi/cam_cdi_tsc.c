@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
-/* SPDX-FileCopyrightText: Copyright (c) 2023-2025 NVIDIA CORPORATION.  All rights reserved. */
+// SPDX-License-Identifier: GPL-2.0-only
+/* SPDX-FileCopyrightText: Copyright (c) 2023-2026 NVIDIA CORPORATION.  All rights reserved. */
 /*
  * cam_cdi_tsc.c - tsc driver.
  */
@@ -13,6 +13,8 @@
 #include <linux/device.h>
 #include <linux/debugfs.h>
 #include <linux/err.h>
+#include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/io.h>
 #include <linux/lcm.h>
 #include <linux/list.h>
@@ -21,7 +23,9 @@
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/of_device.h>
+#if defined(NV_LINUX_OF_GPIO_H_PRESENT)
 #include <linux/of_gpio.h>
+#endif
 #include <linux/platform_device.h>
 #include <linux/pm.h>
 
@@ -125,7 +129,8 @@ struct tsc_signal_generator {
 		u32 freq_hz;
 		u32 duty_cycle;
 		u32 offset_ms;
-		u32 gpio_pinmux;
+		int gpio_pinmux;
+		bool gpio_requested;
 	} config;
 	struct {
 		struct debugfs_regset32 regset_ro;
@@ -214,6 +219,7 @@ static int cdi_tsc_find_and_add_generators(struct tsc_signal_controller *control
 	struct tsc_signal_generator *generator;
 	struct device_node *np;
 	struct resource res;
+	struct gpio_desc *gpiod;
 	const char *node_status;
 	int err;
 
@@ -221,6 +227,7 @@ static int cdi_tsc_find_and_add_generators(struct tsc_signal_controller *control
 		err = of_property_read_string(np, "status", &node_status);
 		if (err != 0) {
 			dev_err(controller->dev, "Failed to read generator status: %d\n", err);
+			of_node_put(np);
 			return err;
 		}
 		if (strcmp("okay", node_status) != 0) {
@@ -232,41 +239,81 @@ static int cdi_tsc_find_and_add_generators(struct tsc_signal_controller *control
 		dev_dbg(controller->dev, "Generator found: %s\n", np->full_name);
 
 		generator = devm_kzalloc(controller->dev, sizeof(*generator), GFP_KERNEL);
-		if (!generator)
+		if (!generator) {
+			of_node_put(np);
 			return -ENOMEM;
+		}
 
-		/* Read pinmux gpio from DT */
-		generator->config.gpio_pinmux = of_get_named_gpio(np, "gpio_pinmux", 0);
+		/*
+		 * Read pinmux gpio from DT. Prefer the standard
+		 * "pinmux-gpios" property name and fall back to the legacy
+		 * literal "gpio_pinmux" name for compatibility with older
+		 * device-trees.
+		 */
+		gpiod = fwnode_gpiod_get_index(of_fwnode_handle(np), "pinmux",
+					       0, GPIOD_ASIS, "tsc-gen");
+		if (IS_ERR(gpiod)) {
+			err = PTR_ERR(gpiod);
+		} else {
+			err = desc_to_gpio(gpiod);
+			gpiod_put(gpiod);
+		}
+
+		if (err < 0) {
+#if defined(NV_LINUX_OF_GPIO_H_PRESENT)
+			if (err == -ENOENT)
+				err = of_get_named_gpio(np, "gpio_pinmux", 0);
+#endif
+
+			if (err == -EPROBE_DEFER) {
+				of_node_put(np);
+				return err;
+			}
+
+			if (err < 0 && err != -ENOENT)
+				dev_err(controller->dev,
+					"Failed to read gpio_pinmux: %d\n", err);
+		}
+
+		generator->config.gpio_pinmux = err;
 
 		generator->of = np;
 		INIT_LIST_HEAD(&generator->list);
 
-		if (of_address_to_resource(np, 0, &res))
+		if (of_address_to_resource(np, 0, &res)) {
+			of_node_put(np);
 			return -EINVAL;
+		}
 
 		generator->base = devm_ioremap(controller->dev, res.start,
 					       resource_size(&res));
-		if (!generator->base)
+		if (!generator->base) {
+			of_node_put(np);
 			return -ENOMEM;
+                }
 
 		err = of_property_read_u32(np, "freq_hz", &generator->config.freq_hz);
 		if (err != 0) {
 			dev_err(controller->dev, "Failed to read generator frequency: %d\n", err);
+			of_node_put(np);
 			return err;
 		}
 
 		if (generator->config.freq_hz == 0) {
 			dev_err(controller->dev, "Frequency must be non-zero\n");
+			of_node_put(np);
 			return -EINVAL;
 		}
 
 		err = of_property_read_u32(np, "duty_cycle", &generator->config.duty_cycle);
 		if (err != 0) {
 			dev_err(controller->dev, "Failed to read generator duty cycle: %d\n", err);
+			of_node_put(np);
 			return err;
 		}
 		if (generator->config.duty_cycle >= 100) {
 			dev_err(controller->dev, "Duty cycle must be < 100%%\n");
+			of_node_put(np);
 			return -EINVAL;
 		}
 
@@ -274,6 +321,7 @@ static int cdi_tsc_find_and_add_generators(struct tsc_signal_controller *control
 			err = of_property_read_u32(np, "offset_ms", &generator->config.offset_ms);
 			if (err != 0) {
 				dev_err(controller->dev, "Failed to read generator offset: %d\n", err);
+				of_node_put(np);
 				return err;
 			}
 		}
@@ -405,8 +453,12 @@ static int cdi_tsc_start_generators(struct tsc_signal_controller *controller)
 
 	/* A generator must be idle (e.g. neither running nor waiting) before starting */
 	list_for_each_entry(generator, &controller->generators, list) {
-		/* Try to free the gpio, so it can act as TSC */
-		gpio_free(generator->config.gpio_pinmux);
+		/* Release the gpio so it can act as TSC */
+		if (generator->config.gpio_requested) {
+			gpio_free(generator->config.gpio_pinmux);
+			generator->config.gpio_requested = false;
+		}
+
 		if (!cdi_tsc_generator_is_idle(generator)) {
 			dev_err(controller->dev, "Generator %s is not idle\n", generator->of->full_name);
 			return -EBUSY;
@@ -434,6 +486,8 @@ static int cdi_tsc_stop_generators(struct tsc_signal_controller *controller)
 
 	dev_info(controller->dev, "%s: TSC Gen Stop ...\n", __func__);
 	list_for_each_entry(generator, &controller->generators, list) {
+		int gpio = generator->config.gpio_pinmux;
+
 		cdi_tsc_generator_writel(generator, TSC_GENX_CTRL, TSC_GENX_CTRL_RST);
 
 		/* Ensure the generator has stopped */
@@ -442,9 +496,19 @@ static int cdi_tsc_stop_generators(struct tsc_signal_controller *controller)
 				generator->of->full_name);
 			return -EIO;
 		}
-		/* To avoid pin state in "high", When tsc gen stopped. Which inturn causes
-		 * inconsistency in sensor streaming */
-		gpio_request(generator->config.gpio_pinmux, "tsc-gen");
+
+		/*
+		 * To avoid pin state in "high", When tsc gen stopped.
+		 * Which inturn causes inconsistency in sensor streaming
+		 */
+		if (gpio_is_valid(gpio) && !generator->config.gpio_requested) {
+			if (!gpio_request(gpio, "tsc-gen"))
+				generator->config.gpio_requested = true;
+			else
+				dev_warn(controller->dev,
+					 "Failed to request gpio %d for %s\n",
+					 gpio, generator->of->full_name);
+		}
 	}
 
 	return 0;
@@ -627,6 +691,8 @@ static int cdi_tsc_probe(struct platform_device *pdev)
 static int cdi_tsc_remove(struct platform_device *pdev)
 {
 	struct tsc_signal_controller *controller = platform_get_drvdata(pdev);
+	struct tsc_signal_generator *generator;
+	int err;
 
 #ifdef CONFIG_DEBUG_FS
 	cdi_tsc_debugfs_remove(controller);
@@ -640,7 +706,16 @@ static int cdi_tsc_remove(struct platform_device *pdev)
 
 	// Unregister the major number
 	unregister_chrdev(majorNumber, DEVICE_NAME);
-	return cdi_tsc_stop_generators(controller);
+	err = cdi_tsc_stop_generators(controller);
+
+	list_for_each_entry(generator, &controller->generators, list) {
+		if (generator->config.gpio_requested) {
+			gpio_free(generator->config.gpio_pinmux);
+			generator->config.gpio_requested = false;
+		}
+	}
+
+	return err;
 }
 
 static int __maybe_unused cdi_tsc_suspend(struct device *dev)

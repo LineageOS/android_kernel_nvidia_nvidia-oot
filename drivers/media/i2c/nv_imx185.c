@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2016-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2016-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 /*
  * nv_imx185.c - imx185 sensor driver
  */
@@ -8,12 +8,11 @@
 
 #include <linux/slab.h>
 #include <linux/uaccess.h>
-#include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/module.h>
 #include <linux/seq_file.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
-#include <linux/of_gpio.h>
 
 #include <media/tegra_v4l2_camera.h>
 #include <media/tegracam_core.h>
@@ -488,10 +487,10 @@ static int imx185_power_on(struct camera_common_data *s_data)
 	}
 
 	/*exit reset mode: XCLR */
-	if (pw->reset_gpio) {
-		gpio_set_value(pw->reset_gpio, 0);
+	if (pw->reset_gpiod) {
+		gpiod_set_value(pw->reset_gpiod, 0);
 		usleep_range(30, 50);
-		gpio_set_value(pw->reset_gpio, 1);
+		gpiod_set_value(pw->reset_gpiod, 1);
 		usleep_range(30, 50);
 	}
 
@@ -521,8 +520,8 @@ static int imx185_power_off(struct camera_common_data *s_data)
 	}
 	/* enter reset mode: XCLR */
 	usleep_range(1, 2);
-	if (pw->reset_gpio)
-		gpio_set_value(pw->reset_gpio, 0);
+	if (pw->reset_gpiod)
+		gpiod_set_value(pw->reset_gpiod, 0);
 
 power_off_done:
 	pw->state = SWITCH_OFF;
@@ -555,9 +554,9 @@ static int imx185_power_get(struct tegracam_device *tc_dev)
 			dev_dbg(dev, "%s failed to set parent clock\n", __func__);
 	}
 
-	pw->reset_gpio = pdata->reset_gpio;
-
+	pw->reset_gpiod = pdata->reset_gpiod;
 	pw->state = SWITCH_OFF;
+
 	return 0;
 }
 
@@ -579,7 +578,6 @@ static struct camera_common_pdata *imx185_parse_dt(struct tegracam_device *tc_de
 	struct camera_common_pdata *board_priv_pdata;
 	const struct of_device_id *match;
 	struct camera_common_pdata *ret = NULL;
-	int gpio;
 
 	if (!np)
 		return NULL;
@@ -599,14 +597,14 @@ static struct camera_common_pdata *imx185_parse_dt(struct tegracam_device *tc_de
 				      &board_priv_pdata->mclk_name))
 		dev_err(dev, "mclk not in DT\n");
 
-	gpio = of_get_named_gpio(np, "reset-gpios", 0);
-	if (gpio < 0) {
-		if (gpio == -EPROBE_DEFER)
+	board_priv_pdata->reset_gpiod = devm_gpiod_get(dev, "reset", GPIOD_OUT_LOW);
+	if (IS_ERR(board_priv_pdata->reset_gpiod)) {
+		if (PTR_ERR(board_priv_pdata->reset_gpiod) == -EPROBE_DEFER)
 			ret = ERR_PTR(-EPROBE_DEFER);
-		dev_err(dev, "reset-gpios not found %d\n", gpio);
+		dev_err(dev, "Failed to get reset GPIO: %ld\n",
+			PTR_ERR(board_priv_pdata->reset_gpiod));
 		goto error;
 	}
-	board_priv_pdata->reset_gpio = (unsigned int)gpio;
 
 	return board_priv_pdata;
 
@@ -804,7 +802,7 @@ static int imx185_probe(struct i2c_client *client,
 
 	priv->i2c_client = tc_dev->client = client;
 	tc_dev->dev = dev;
-	strncpy(tc_dev->name, "imx185", sizeof(tc_dev->name));
+	strscpy(tc_dev->name, "imx185", sizeof(tc_dev->name));
 	tc_dev->dev_regmap_config = &sensor_regmap_config;
 	tc_dev->sensor_ops = &imx185_common_ops;
 	tc_dev->v4l2sd_internal_ops = &imx185_subdev_internal_ops;

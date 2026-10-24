@@ -253,7 +253,7 @@ static void rtw_rfctl_chset_apply_regd_reqs(struct rf_ctl_t *rfctl, u8 d_flags, 
 
 	/* apply regd reqs */
 	if (req_lock)
-		_rtw_mutex_lock_interruptible(&rfctl->regd_req_mutex);
+		_rtw_mutex_lock(&rfctl->regd_req_mutex);
 
 	head = &rfctl->regd_req_list;
 	cur = get_next(head);
@@ -759,7 +759,7 @@ static void rtw_edcca_mode_update_by_regd_reqs(struct dvobj_priv *dvobj, bool re
 		mode[band] = RTW_EDCCA_MODE_NUM;
 
 	if (req_lock)
-		_rtw_mutex_lock_interruptible(&rfctl->regd_req_mutex);
+		_rtw_mutex_lock(&rfctl->regd_req_mutex);
 
 	head = &rfctl->regd_req_list;
 	cur = get_next(head);
@@ -1297,7 +1297,7 @@ void rtw_txpwr_update_cur_lmt_regs(struct dvobj_priv *dvobj, bool req_lock)
 	_rtw_memset(names_len, 0, sizeof(names_len));
 
 	if (req_lock)
-		_rtw_mutex_lock_interruptible(&rfctl->regd_req_mutex);
+		_rtw_mutex_lock(&rfctl->regd_req_mutex);
 
 	head = &rfctl->regd_req_list;
 	cur = get_next(head);
@@ -1811,7 +1811,7 @@ void dump_country_ie_slave_records(void *sel, struct rf_ctl_t *rfctl, bool skip_
 	);
 
 	if (lock)
-		_rtw_mutex_lock_interruptible(&rfctl->regd_req_mutex);
+		_rtw_mutex_lock(&rfctl->regd_req_mutex);
 
 	for (i = 0; i < CONFIG_IFACE_NUMBER; i++) {
 		for (j = 0; j < RTW_RLINK_MAX; j++) {
@@ -2493,7 +2493,7 @@ void rtw_regd_req_list_free(struct rf_ctl_t *rfctl)
 	struct regd_req_t *req;
 	_list *cur, *head;
 
-	_rtw_mutex_lock_interruptible(&rfctl->regd_req_mutex);
+	_rtw_mutex_lock(&rfctl->regd_req_mutex);
 
 	head = &rfctl->regd_req_list;
 	cur = get_next(head);
@@ -4222,7 +4222,7 @@ u8 rtw_set_chplan_hdl(_adapter *adapter, u8 *pbuf)
 
 	param = (struct SetChannelPlan_param *)pbuf;
 
-	_rtw_mutex_lock_interruptible(&rfctl->regd_req_mutex);
+	_rtw_mutex_lock(&rfctl->regd_req_mutex);
 
 	if (!rtw_chplan_req_prehdl(adapter, param, __func__)) {
 		_rtw_mutex_unlock(&rfctl->regd_req_mutex);
@@ -4367,7 +4367,7 @@ static u8 _rtw_set_chplan_cmd(_adapter *adapter, int flags
 
 		if (res == _SUCCESS && (flags & RTW_CMDF_WAIT_ACK)) {
 			rtw_sctx_wait(&sctx, __func__);
-			_rtw_mutex_lock_interruptible(&pcmdpriv->sctx_mutex);
+			_rtw_mutex_lock(&pcmdpriv->sctx_mutex);
 			if (sctx.status == RTW_SCTX_SUBMITTED)
 				cmdobj->sctx = NULL;
 			_rtw_mutex_unlock(&pcmdpriv->sctx_mutex);
@@ -4988,7 +4988,7 @@ u8 rtw_get_chplan_cmd(_adapter *adapter, int flags, struct get_chplan_resp **chp
 
 		if (res == _SUCCESS) {
 			rtw_sctx_wait(&sctx, __func__);
-			_rtw_mutex_lock_interruptible(&pcmdpriv->sctx_mutex);
+			_rtw_mutex_lock(&pcmdpriv->sctx_mutex);
 			if (sctx.status == RTW_SCTX_SUBMITTED)
 				cmdobj->sctx = NULL;
 			_rtw_mutex_unlock(&pcmdpriv->sctx_mutex);

@@ -1702,7 +1702,7 @@ int rtw_hw_set_ch_bw(struct _ADAPTER *a, struct _ADAPTER_LINK *alink,
 	chdef.bw = bw;
 	chdef.offset = offset;
 
-	_rtw_mutex_lock_interruptible(&dvobj->setch_mutex);
+	_rtw_mutex_lock(&dvobj->setch_mutex);
 #ifdef DBG_CONFIG_CMD_DISP
 	if (a->cmd_type == 0xFF) {
 		cmd_type = PHL_CMD_DIRECTLY;

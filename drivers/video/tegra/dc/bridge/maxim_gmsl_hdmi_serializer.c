@@ -1,22 +1,24 @@
 // SPDX-License-Identifier: GPL-2.0-only
+// SPDX-FileCopyrightText: Copyright (c) 2023-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 /*
  * MAXIM HDMI Serializer driver for MAXIM GMSL Serializers
- *
- * Copyright (c) 2023, NVIDIA CORPORATION.  All rights reserved.
  */
 
 #include <nvidia/conftest.h>
 
 #include <linux/device.h>
 #include <linux/fwnode.h>
-#include <linux/gpio/driver.h>
+#include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/i2c.h>
 #include <linux/i2c-mux.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/of_graph.h>
 #include <linux/regmap.h>
+#if defined(NV_LINUX_OF_GPIO_H_PRESENT) /* Removed in Linux v7.1 */
 #include <linux/of_gpio.h>
+#endif
 #include <linux/of_device.h>
 #include <linux/of.h>
 #include <linux/version.h>
@@ -198,7 +200,11 @@ static int maxim_gmsl_hdmi_ser_parse_dt(struct maxim_gmsl_hdmi_ser_priv *priv)
 
 	dev_info(dev, "%s: parsing serializer device tree:\n", __func__);
 
+#if defined(NV_LINUX_OF_GPIO_H_PRESENT) /* Removed in Linux v7.1 */
 	priv->ser_pwrdn = of_get_named_gpio(ser, "maxim_gmsl_hdmi_ser-pwrdn", 0);
+#else
+	priv->ser_pwrdn = -ENODEV;
+#endif
 
 	if (priv->ser_pwrdn < 0) {
 		err = priv->ser_pwrdn;
@@ -208,7 +214,11 @@ static int maxim_gmsl_hdmi_ser_parse_dt(struct maxim_gmsl_hdmi_ser_priv *priv)
 	}
 
 	priv->enable_rclkout = of_property_read_bool(ser, "enable_rclkout");
+#if defined(NV_LINUX_OF_GPIO_H_PRESENT) /* Removed in Linux v7.1 */
 	priv->ser_errb = of_get_named_gpio(ser, "ser-errb", 0);
+#else
+	priv->ser_errb = -ENODEV;
+#endif
 
 	if (priv->ser_errb < 0) {
 		err = priv->ser_errb;
@@ -269,24 +279,23 @@ static int maxim_gmsl_hdmi_ser_probe(struct i2c_client *client)
 	dev_info(dev, "%s: mapping gpio to irq and interrupt handler:\n", __func__);
 
 	/* maps gpio to irq and interrupt handler */
-	if (gpio_is_valid(priv->ser_errb)) {
-		priv->ser_irq = gpio_to_irq(priv->ser_errb);
-		if (priv->ser_irq < 0) {
-			ret = priv->ser_irq;
-			dev_err(dev, "%s: GPIO not configure for interrupts: %d\n",
-				__func__, ret);
-			return ret;
-		}
-		ret = request_threaded_irq(priv->ser_irq, NULL,
+	ret = gpio_to_irq(priv->ser_errb);
+	if (ret < 0) {
+		dev_err(dev, "%s: GPIO not configure for interrupts: %d\n",
+			__func__, ret);
+		return ret;
+	}
+
+	priv->ser_irq = ret;
+
+	ret = devm_request_threaded_irq(&client->dev, priv->ser_irq, NULL,
 					maxim_gmsl_hdmi_ser_irq_handler,
 					IRQF_TRIGGER_FALLING
 					| IRQF_ONESHOT, "SER", priv);
-		if (ret < 0) {
-			dev_err(dev, "%s: Unable to register IRQ handler ret: %d\n",
-				__func__, ret);
-			return ret;
-		}
-
+	if (ret < 0) {
+		dev_err(dev, "%s: Unable to register IRQ handler ret: %d\n",
+			__func__, ret);
+		return ret;
 	}
 
 	/* Enable Remote Side Error */

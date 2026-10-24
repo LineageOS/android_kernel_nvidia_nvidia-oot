@@ -27,9 +27,10 @@
 #include <linux/net_tstamp.h>
 #include <linux/pm_runtime.h>
 #include <linux/interrupt.h>
+#include <linux/notifier.h>
 #include <linux/workqueue.h>
 #include <linux/spinlock.h>
-#include <linux/of_gpio.h>
+#include <linux/gpio.h>
 #include <linux/of_mdio.h>
 #include <linux/if_vlan.h>
 #include <linux/thermal.h>
@@ -74,6 +75,13 @@
 #include <uapi/linux/ip.h>
 #include <net/udp.h>
 #endif /* ETHER_NVGRO */
+#ifdef CONFIG_XDP_SOCKETS
+#include <linux/u64_stats_sync.h>
+#include <linux/filter.h>
+#include <net/xdp.h>
+#include <net/xdp_sock_drv.h>
+#include "ether_xdp.h"
+#endif /* CONFIG_XDP_SOCKETS */
 
 /**
  * @brief Define for default DMA bit mask
@@ -292,6 +300,7 @@
 
 /* Clear the field in the tx_swcx structure */
 #define CLEAR_TX_SWCX(tx_swcx, field, val) ((tx_swcx)->field = (val))
+#define CLEAR_TX_SWCX_FLAGS(tx_swcx, val) ((tx_swcx)->flags = (val))
 
 #define ETHER_INVALID_CHAN_NUM		0xFFU
 /**
@@ -370,6 +379,20 @@ static inline int ether_avail_txdesc_cnt(struct osi_dma_priv_data *osi_dma,
  */
 #define ETHER_TS_MS_TIMER			1U
 
+/**
+ * @brief Max chunked-poll resume cycles before forcing a fresh lane bringup.
+ *
+ * OSI runs the XPCS FLT/RLU link poll in short chunks: when the link is down
+ * each chunk polls for ~10ms and then yields with OSI_SET_SPEED_IN_PROGRESS,
+ * and the set_speed workqueue re-arms ~10ms later (msecs_to_jiffies(10)). A
+ * resume cycle therefore costs ~20ms (in-chunk poll + re-arm), so this many
+ * cycles bounds a single poll session to ~1s (comparable to the legacy
+ * blocking-poll worst case) before we ask OSI for a fresh full bringup. The
+ * bound is approximate; jiffies/HZ rounding makes the exact wall time
+ * platform dependent.
+ */
+#define ETHER_SET_SPEED_RESUME_MAX		50U
+
 #define ETHER_VM_IRQ_TX_CHAN_MASK(x)	BIT((x) * 2U)
 #define ETHER_VM_IRQ_RX_CHAN_MASK(x)	BIT(((x) * 2U) + 1U)
 #define ETHER_SENTRY_MODE		1U
@@ -398,6 +421,8 @@ static inline int ether_avail_txdesc_cnt(struct osi_dma_priv_data *osi_dma,
 struct ether_tx_napi {
 	/** Transmit channel number */
 	unsigned int chan;
+	/** Netdev queue index mapped to transmit channel */
+	unsigned int ndev_queue_index;
 	/** OSD private data */
 	struct ether_priv_data *pdata;
 	/** NAPI instance associated with transmit channel */
@@ -409,16 +434,84 @@ struct ether_tx_napi {
 };
 
 /**
- *@brief DMA Receive Channel NAPI
+ * @brief DMA Receive Channel NAPI
+ *
+ * Contains NAPI context and XDP RX queue info for driver-mode XDP.
+ * xdp_rxq is registered in ether_open and unregistered in ether_close.
  */
 struct ether_rx_napi {
 	/** Receive channel number */
 	unsigned int chan;
+	/** Netdev queue index mapped to receive channel */
+	unsigned int ndev_queue_index;
 	/** OSD private data */
 	struct ether_priv_data *pdata;
-	/** NAPI instance associated with transmit channel */
+	/** NAPI instance associated with receive channel */
 	struct napi_struct napi;
+#ifdef CONFIG_XDP_SOCKETS
+	/**
+	 * XDP RX queue info - associates this RX queue with XDP/BPF.
+	 * Required for XDP program execution and AF_XDP zero-copy.
+	 * Registered in ether_xdp_rxq_setup(), unregistered in ether_xdp_rxq_teardown().
+	 */
+	struct xdp_rxq_info xdp_rxq;
+	/** Synchronizes 64-bit XDP stats updates with ethtool reads */
+	struct u64_stats_sync xdp_stats_syncp;
+	/** XDP packets passed to stack (XDP_PASS) for this queue */
+	u64_stats_t xdp_pass;
+	/** XDP packets dropped (XDP_DROP) for this queue */
+	u64_stats_t xdp_drop;
+	/** XDP packets redirected (XDP_REDIRECT) for this queue */
+	u64_stats_t xdp_redirect;
+	/** Set when XDP_REDIRECT occurred; ether_napi_poll_rx calls xdp_do_flush */
+	bool xdp_redirect_pending;
+	/** XSK buffer pool for AF_XDP zero-copy RX/TX on this queue; NULL when inactive */
+	struct xsk_buff_pool *xsk_pool;
+#endif /* CONFIG_XDP_SOCKETS */
 };
+
+#ifdef CONFIG_XDP_SOCKETS
+static inline void ether_xdp_stats_init(struct ether_rx_napi *rx_napi)
+{
+	u64_stats_init(&rx_napi->xdp_stats_syncp);
+	u64_stats_set(&rx_napi->xdp_pass, 0);
+	u64_stats_set(&rx_napi->xdp_drop, 0);
+	u64_stats_set(&rx_napi->xdp_redirect, 0);
+	rx_napi->xdp_redirect_pending = false;
+}
+
+static inline void ether_xdp_stats_reset(struct ether_rx_napi *rx_napi)
+{
+	u64_stats_update_begin(&rx_napi->xdp_stats_syncp);
+	u64_stats_set(&rx_napi->xdp_pass, 0);
+	u64_stats_set(&rx_napi->xdp_drop, 0);
+	u64_stats_set(&rx_napi->xdp_redirect, 0);
+	rx_napi->xdp_redirect_pending = false;
+	u64_stats_update_end(&rx_napi->xdp_stats_syncp);
+}
+
+static inline void ether_xdp_stats_inc(struct ether_rx_napi *rx_napi,
+				       u64_stats_t *stat)
+{
+	u64_stats_update_begin(&rx_napi->xdp_stats_syncp);
+	u64_stats_inc(stat);
+	u64_stats_update_end(&rx_napi->xdp_stats_syncp);
+}
+
+static inline u64 ether_xdp_stats_read(const struct ether_rx_napi *rx_napi,
+				       const u64_stats_t *stat)
+{
+	unsigned int start;
+	u64 val;
+
+	do {
+		start = u64_stats_fetch_begin(&rx_napi->xdp_stats_syncp);
+		val = u64_stats_read(stat);
+	} while (u64_stats_fetch_retry(&rx_napi->xdp_stats_syncp, start));
+
+	return val;
+}
+#endif /* CONFIG_XDP_SOCKETS */
 
 /**
  * @brief VM Based IRQ data
@@ -619,8 +712,8 @@ struct ether_priv_data {
 	unsigned int mac_loopback_mode;
 	/** Array of MTL queue TX priority */
 	unsigned int txq_prio[OSI_MGBE_MAX_NUM_PDMA_CHANS];
-	/** Spin lock for Tx/Rx interrupt enable registers */
-	raw_spinlock_t rlock;
+	/** Spin lock for per-channel Tx/Rx interrupt enable registers */
+	raw_spinlock_t dma_ch_lock[OSI_MGBE_MAX_NUM_CHANS];
 	/** max address register count, 2*mac_addr64_sel */
 	int num_mac_addr_regs;
 	/** Last address reg filter index added in last call*/
@@ -666,6 +759,10 @@ struct ether_priv_data {
 #ifdef ETHER_PAGE_POOL
 	/** Pointer to page pool */
 	struct page_pool *page_pool[OSI_MGBE_MAX_NUM_CHANS];
+#endif
+#ifdef CONFIG_XDP_SOCKETS
+	/** XDP program; hot-swapped via RCU, no interface restart */
+	struct bpf_prog __rcu *xdp_prog;
 #endif
 #ifdef CONFIG_DEBUG_FS
 	/** Debug fs directory pointer */
@@ -755,6 +852,14 @@ struct ether_priv_data {
 	atomic_t tx_ts_ref_cnt;
 	/** Ref count for set_speed_work_func */
 	atomic_t set_speed_ref_cnt;
+	/** Chunked-poll resume-cycle counter for OSI_SET_SPEED_IN_PROGRESS.
+	 * Written only from set_speed_work_func() (workqueue, serialized by
+	 * set_speed_ref_cnt), so a plain unsigned int is sufficient. Counts
+	 * how many times OSI has yielded mid-poll; on reaching
+	 * ETHER_SET_SPEED_RESUME_MAX (~1s at the fixed 10ms cadence) the
+	 * driver asks OSI for a fresh full lane bringup.
+	 */
+	unsigned int poll_resume_count;
 	/** flag to enable logs using ethtool */
 	u32 msg_enable;
 	/** flag to indicate to start/stop the Tx */
@@ -795,6 +900,14 @@ struct ether_priv_data {
 	struct osi_mgbe_coe mgbe_coe;
 	/** wol configs */
 	struct ethtool_wolinfo wol;
+	/** Flag to track system shutdown for WoL handling */
+	unsigned int is_shutdown;
+#if defined(CONFIG_PM) && !defined(OSI_STRIPPED_LIB)
+	/** Reboot notifier to configure deferred WoL before poweroff */
+	struct notifier_block reboot_notifier;
+	/** Reboot notifier registration status */
+	bool reboot_notifier_registered;
+#endif
 };
 
 /**
@@ -979,10 +1092,9 @@ static inline nveu64_t update_stats_counter(nveu64_t last_value, nveu64_t incr)
 {
 	nveu64_t temp = last_value + incr;
 
-	if (temp < last_value) {
-		/* Stats overflow, so reset it to zero */
-		temp = 0UL;
-	}
+	if (temp < last_value)
+		/* Start the new interval with the current contribution. */
+		temp = incr;
 
 	return temp;
 }

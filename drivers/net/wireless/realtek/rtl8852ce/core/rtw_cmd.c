@@ -358,7 +358,7 @@ post_process:
 	if (pcmd_callback)
 		pcmd_callback(pcmd->padapter, pcmd);
 
-	_rtw_mutex_lock_interruptible(&pcmdpriv->sctx_mutex);
+	_rtw_mutex_lock(&pcmdpriv->sctx_mutex);
 	if (pcmd->sctx) {
 		if (0)
 			RTW_PRINT(FUNC_ADPT_FMT" pcmd->sctx\n", FUNC_ADPT_ARG(pcmd->padapter));
@@ -499,7 +499,7 @@ _next:
 
 post_process:
 
-		_rtw_mutex_lock_interruptible(&(pcmd->padapter->cmdpriv.sctx_mutex));
+		_rtw_mutex_lock(&(pcmd->padapter->cmdpriv.sctx_mutex));
 		if (pcmd->sctx) {
 			if (0)
 				RTW_PRINT(FUNC_ADPT_FMT" pcmd->sctx\n", FUNC_ADPT_ARG(pcmd->padapter));
@@ -554,7 +554,7 @@ post_process:
 				rtw_mfree(extra_parm->pbuf, extra_parm->size);
 		}
 
-		_rtw_mutex_lock_interruptible(&(pcmd->padapter->cmdpriv.sctx_mutex));
+		_rtw_mutex_lock(&(pcmd->padapter->cmdpriv.sctx_mutex));
 		if (pcmd->sctx) {
 			if (0)
 				RTW_PRINT(FUNC_ADPT_FMT" pcmd->sctx\n", FUNC_ADPT_ARG(pcmd->padapter));
@@ -870,7 +870,7 @@ u8 rtw_disassoc_cmd(_adapter *padapter, u32 deauth_timeout_ms, int flags) /* for
 		}
 		if (flags & RTW_CMDF_WAIT_ACK) {
 			rtw_sctx_wait(&sctx, __func__);
-			_rtw_mutex_lock_interruptible(&cmdpriv->sctx_mutex);
+			_rtw_mutex_lock(&cmdpriv->sctx_mutex);
 			if (sctx.status == RTW_SCTX_SUBMITTED)
 				cmdobj->sctx = NULL;
 			_rtw_mutex_unlock(&cmdpriv->sctx_mutex);
@@ -931,7 +931,7 @@ u8 rtw_stop_ap_cmd(_adapter *adapter, u8 flags)
 
 		if (res == _SUCCESS && (flags & RTW_CMDF_WAIT_ACK)) {
 			rtw_sctx_wait(&sctx, __func__);
-			_rtw_mutex_lock_interruptible(&pcmdpriv->sctx_mutex);
+			_rtw_mutex_lock(&pcmdpriv->sctx_mutex);
 			if (sctx.status == RTW_SCTX_SUBMITTED)
 				cmdobj->sctx = NULL;
 			_rtw_mutex_unlock(&pcmdpriv->sctx_mutex);
@@ -1020,7 +1020,7 @@ u8 rtw_setopmode_cmd(_adapter  *adapter, NDIS_802_11_NETWORK_INFRASTRUCTURE netw
 
 		if (res == _SUCCESS && (flags & RTW_CMDF_WAIT_ACK)) {
 			rtw_sctx_wait(&sctx, __func__);
-			_rtw_mutex_lock_interruptible(&pcmdpriv->sctx_mutex);
+			_rtw_mutex_lock(&pcmdpriv->sctx_mutex);
 			if (sctx.status == RTW_SCTX_SUBMITTED)
 				cmdobj->sctx = NULL;
 			_rtw_mutex_unlock(&pcmdpriv->sctx_mutex);
@@ -1423,7 +1423,7 @@ u8 rtw_free_assoc_resources_cmd(_adapter *padapter, u8 lock_scanned_queue, int f
 
 		if (res == _SUCCESS && (flags & RTW_CMDF_WAIT_ACK)) {
 			rtw_sctx_wait(&sctx, __func__);
-			_rtw_mutex_lock_interruptible(&pcmdpriv->sctx_mutex);
+			_rtw_mutex_lock(&pcmdpriv->sctx_mutex);
 			if (sctx.status == RTW_SCTX_SUBMITTED)
 				cmd->sctx = NULL;
 			_rtw_mutex_unlock(&pcmdpriv->sctx_mutex);
@@ -1529,7 +1529,7 @@ u8 rtw_set_chbw_cmd(_adapter *padapter, struct _ADAPTER_LINK *padapter_link,
 
 		if (res == _SUCCESS && (flags & RTW_CMDF_WAIT_ACK)) {
 			rtw_sctx_wait(&sctx, __func__);
-			_rtw_mutex_lock_interruptible(&pcmdpriv->sctx_mutex);
+			_rtw_mutex_lock(&pcmdpriv->sctx_mutex);
 			if (sctx.status == RTW_SCTX_SUBMITTED)
 				pcmdobj->sctx = NULL;
 			_rtw_mutex_unlock(&pcmdpriv->sctx_mutex);
@@ -1614,7 +1614,7 @@ u8 rtw_tdls_cmd(_adapter *padapter, u8 *addr, u8 option, u8 flags)
 
 	if (res == _SUCCESS && (flags & RTW_CMDF_WAIT_ACK)) {
 		rtw_sctx_wait(&sctx, __func__);
-		_rtw_mutex_lock_interruptible(&pcmdpriv->sctx_mutex);
+		_rtw_mutex_lock(&pcmdpriv->sctx_mutex);
 		if (sctx.status == RTW_SCTX_SUBMITTED)
 			pcmdobj->sctx = NULL;
 		_rtw_mutex_unlock(&pcmdpriv->sctx_mutex);
@@ -1884,7 +1884,7 @@ u8 rtw_ctrl_txss_wk_cmd(_adapter *adapter, struct sta_info *sta, bool tx_1ss, u8
 		res = rtw_enqueue_cmd(pcmdpriv, cmdobj);
 		if (res == _SUCCESS && (flag & RTW_CMDF_WAIT_ACK)) {
 			rtw_sctx_wait(&sctx, __func__);
-			_rtw_mutex_lock_interruptible(&pcmdpriv->sctx_mutex);
+			_rtw_mutex_lock(&pcmdpriv->sctx_mutex);
 			if (sctx.status == RTW_SCTX_SUBMITTED)
 				cmdobj->sctx = NULL;
 			_rtw_mutex_unlock(&pcmdpriv->sctx_mutex);
@@ -2413,7 +2413,7 @@ static u8 _p2p_roch_cmd(_adapter *adapter
 
 		if (res == _SUCCESS && (flags & RTW_CMDF_WAIT_ACK)) {
 			rtw_sctx_wait(&sctx, __func__);
-			_rtw_mutex_lock_interruptible(&pcmdpriv->sctx_mutex);
+			_rtw_mutex_lock(&pcmdpriv->sctx_mutex);
 			if (sctx.status == RTW_SCTX_SUBMITTED)
 				cmdobj->sctx = NULL;
 			_rtw_mutex_unlock(&pcmdpriv->sctx_mutex);
@@ -2488,7 +2488,7 @@ inline u8 rtw_mgnt_tx_cmd(_adapter *adapter, u8 tx_band, u8 tx_ch, u8 no_cck, co
 
 		if (res == _SUCCESS && (flags & RTW_CMDF_WAIT_ACK)) {
 			rtw_sctx_wait(&sctx, __func__);
-			_rtw_mutex_lock_interruptible(&pcmdpriv->sctx_mutex);
+			_rtw_mutex_lock(&pcmdpriv->sctx_mutex);
 			if (sctx.status == RTW_SCTX_SUBMITTED)
 				cmdobj->sctx = NULL;
 			_rtw_mutex_unlock(&pcmdpriv->sctx_mutex);
@@ -4395,7 +4395,7 @@ u8 rtw_mp_cmd(_adapter *adapter, u8 mp_cmd_id, u8 flags)
 
 		if (res == _SUCCESS && (flags & RTW_CMDF_WAIT_ACK)) {
 			rtw_sctx_wait(&sctx, __func__);
-			_rtw_mutex_lock_interruptible(&pcmdpriv->sctx_mutex);
+			_rtw_mutex_lock(&pcmdpriv->sctx_mutex);
 			if (sctx.status == RTW_SCTX_SUBMITTED)
 				cmdobj->sctx = NULL;
 			_rtw_mutex_unlock(&pcmdpriv->sctx_mutex);
@@ -4474,7 +4474,7 @@ static u8 rtw_customer_str_cmd(_adapter *adapter, u8 write, const u8 *cstr)
 
 	if (res == _SUCCESS) {
 		rtw_sctx_wait(&sctx, __func__);
-		_rtw_mutex_lock_interruptible(&pcmdpriv->sctx_mutex);
+		_rtw_mutex_lock(&pcmdpriv->sctx_mutex);
 		if (sctx.status == RTW_SCTX_SUBMITTED)
 			cmdobj->sctx = NULL;
 		_rtw_mutex_unlock(&pcmdpriv->sctx_mutex);
@@ -4582,7 +4582,7 @@ static u8 _rtw_run_in_thread_cmd(_adapter *adapter, void (*func)(void *), void *
 
 	if (res == _SUCCESS && timeout_ms >= 0) {
 		rtw_sctx_wait(&sctx, __func__);
-		_rtw_mutex_lock_interruptible(&cmdpriv->sctx_mutex);
+		_rtw_mutex_lock(&cmdpriv->sctx_mutex);
 		if (sctx.status == RTW_SCTX_SUBMITTED)
 			cmdobj->sctx = NULL;
 		_rtw_mutex_unlock(&cmdpriv->sctx_mutex);

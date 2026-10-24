@@ -1,16 +1,14 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2024-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 /*
  * NVDISP SERDES driver for Display Serializers and DeSerializers
- *
- * Copyright (c) 2024-2025, NVIDIA CORPORATION.  All rights reserved.
  */
 #include <nvidia/conftest.h>
 
 #include <linux/device.h>
 #include <linux/fwnode.h>
+#include <linux/gpio.h>
 #include <linux/gpio/consumer.h>
-#include <linux/gpio/driver.h>
 #include <linux/i2c.h>
 #include <linux/i2c-mux.h>
 #include <linux/module.h>
@@ -18,7 +16,9 @@
 #include <linux/of_graph.h>
 #include <linux/slab.h>
 #include <linux/regmap.h>
+#if defined(NV_LINUX_OF_GPIO_H_PRESENT) /* Removed in Linux v7.1 */
 #include <linux/of_gpio.h>
+#endif
 #include <linux/workqueue.h>
 #include <linux/of_device.h>
 #include <linux/of.h>
@@ -1300,7 +1300,11 @@ static int nvdisp_serdes_probe(struct i2c_client *client)
 	}
 
 	/* Get the PWRDN GPIO pin */
+#if defined(NV_LINUX_OF_GPIO_H_PRESENT) /* Removed in Linux v7.1 */
 	priv->serdes_pwrdn = of_get_named_gpio(ser, "nvdisp-serdes-pwrdn", 0);
+#else
+	priv->serdes_pwrdn = -ENODEV;
+#endif
 	if (!gpio_is_valid(priv->serdes_pwrdn)) {
 		dev_err(dev, "%s: nvdisp-serdes-pwrdn GPIO not valid\n", __func__);
 		/* Continue even if GPIO is not valid - don't return error */
@@ -1347,7 +1351,11 @@ static int nvdisp_serdes_probe(struct i2c_client *client)
 	}
 	dev_info(priv->chardev, "Character device created\n");
 
+#if defined(NV_LINUX_OF_GPIO_H_PRESENT) /* Removed in Linux v7.1 */
 	priv->serdes_errb = of_get_named_gpio(ser, "nvdisp-serdes-errb", 0);
+#else
+	priv->serdes_errb = -ENODEV;
+#endif
 	if (!gpio_is_valid(priv->serdes_errb)) {
 		dev_info(priv->chardev, "No valid 'nvdisp-serdes-errb' GPIO found.\n");
 		priv->ser_irq = -1;

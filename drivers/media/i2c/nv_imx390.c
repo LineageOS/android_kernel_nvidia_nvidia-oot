@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2018-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2018-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 /*
  * imx390.c - imx390 sensor driver
  * Copyright (c) 2020, RidgeRun. All rights reserved.
@@ -10,17 +10,15 @@
 
 #include <linux/slab.h>
 #include <linux/uaccess.h>
-#include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/module.h>
 #include <linux/seq_file.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
-#include <linux/of_gpio.h>
 
 #include <media/tegra_v4l2_camera.h>
 #include <media/tegracam_core.h>
 
-#include "../platform/tegra/camera/camera_gpio.h"
 #include "imx390_mode_tbls.h"
 
 /* imx390 sensor register address */
@@ -332,11 +330,11 @@ static int imx390_power_on(struct camera_common_data *s_data)
 		return err;
 	}
 
-	if (gpio_is_valid(pw->reset_gpio)) {
-		if (gpiod_cansleep(gpio_to_desc(pw->reset_gpio)))
-			gpio_set_value_cansleep(pw->reset_gpio, 0);
+	if (pw->reset_gpiod) {
+		if (gpiod_cansleep(pw->reset_gpiod))
+			gpiod_set_value_cansleep(pw->reset_gpiod, 0);
 		else
-			gpio_set_value(pw->reset_gpio, 0);
+			gpiod_set_value(pw->reset_gpiod, 0);
 	}
 
 	if (unlikely(!(pw->avdd || pw->iovdd || pw->dvdd)))
@@ -365,11 +363,11 @@ static int imx390_power_on(struct camera_common_data *s_data)
 	usleep_range(10, 20);
 
 skip_power_seqn:
-	if (gpio_is_valid(pw->reset_gpio)) {
-		if (gpiod_cansleep(gpio_to_desc(pw->reset_gpio)))
-			gpio_set_value_cansleep(pw->reset_gpio, 1);
+	if (pw->reset_gpiod) {
+		if (gpiod_cansleep(pw->reset_gpiod))
+			gpiod_set_value_cansleep(pw->reset_gpiod, 1);
 		else
-			gpio_set_value(pw->reset_gpio, 1);
+			gpiod_set_value(pw->reset_gpiod, 1);
 	}
 
 	/* Need to wait for t4 + t5 + t9 + t10 time as per the data sheet */
@@ -408,11 +406,11 @@ static int imx390_power_off(struct camera_common_data *s_data)
 			return err;
 		}
 	} else {
-		if (pw->reset_gpio) {
-			if (gpiod_cansleep(gpio_to_desc(pw->reset_gpio)))
-				gpio_set_value_cansleep(pw->reset_gpio, 0);
+		if (pw->reset_gpiod) {
+			if (gpiod_cansleep(pw->reset_gpiod))
+				gpiod_set_value_cansleep(pw->reset_gpiod, 0);
 			else
-				gpio_set_value(pw->reset_gpio, 0);
+				gpiod_set_value(pw->reset_gpiod, 0);
 		}
 
 		usleep_range(10, 10);
@@ -451,8 +449,8 @@ static int imx390_power_put(struct tegracam_device *tc_dev)
 	pw->avdd = NULL;
 	pw->iovdd = NULL;
 
-	if (likely(pw->reset_gpio))
-		gpio_free(pw->reset_gpio);
+	if (likely(pw->reset_gpiod))
+		gpiod_put(pw->reset_gpiod);
 
 	return 0;
 }

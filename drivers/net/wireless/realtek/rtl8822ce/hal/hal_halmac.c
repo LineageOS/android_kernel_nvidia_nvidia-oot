@@ -4147,7 +4147,7 @@ int rtw_halmac_send_h2c(struct dvobj_priv *d, u8 *h2c)
 		return err;
 	}
 
-	_enter_critical_mutex(&d->h2c_fwcmd_mutex, NULL);
+	_enter_critical_mutex_lock(&d->h2c_fwcmd_mutex, NULL);
 
 	/* pay attention to if race condition happened in H2C cmd setting */
 	h2c_box_num = hal->LastHMEBoxNum;

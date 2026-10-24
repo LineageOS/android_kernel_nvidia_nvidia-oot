@@ -390,8 +390,10 @@ ssize_t proc_set_ap_linking_test(struct file *file, const char __user *buffer, s
 
 int proc_get_rx_stat(struct seq_file *m, void *v);
 int proc_get_tx_stat(struct seq_file *m, void *v);
+#ifdef CONFIG_RTW_DBG_PROC
 int proc_get_sta_tx_stat(struct seq_file *m, void *v);
 ssize_t proc_set_sta_tx_stat(struct file *file, const char __user *buffer, size_t count, loff_t *pos, void *data);
+#endif
 #ifdef CONFIG_AP_MODE
 int proc_get_all_sta_info(struct seq_file *m, void *v);
 #endif /* CONFIG_AP_MODE */
@@ -620,8 +622,10 @@ int proc_get_tx_auth(struct seq_file *m, void *v);
 
 #endif /* CONFIG_PROC_DEBUG */
 
+#ifdef CONFIG_RTW_DBG_PROC
 int proc_get_efuse_map(struct seq_file *m, void *v);
 ssize_t proc_set_efuse_map(struct file *file, const char __user *buffer, size_t count, loff_t *pos, void *data);
+#endif
 
 #ifdef CONFIG_CUSTOMER01_SMART_ANTENNA
 int proc_get_pathb_phase(struct seq_file *m, void *v);

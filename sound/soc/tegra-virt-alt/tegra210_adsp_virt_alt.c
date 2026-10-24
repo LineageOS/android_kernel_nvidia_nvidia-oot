@@ -5106,8 +5106,13 @@ static struct snd_soc_component_driver tegra210_adsp_cmpnt = {
 	.controls		= tegra210_adsp_controls,
 	.num_controls		= ARRAY_SIZE(tegra210_adsp_controls),
 	.probe			= tegra210_adsp_component_probe,
+#if defined(NV_SND_SOC_COMPONENT_DRIVER_STRUCT_HAS_PCM_NEW_AND_FREE) /* Linux v7.1 */
+	.pcm_new		= tegra210_adsp_pcm_construct,
+	.pcm_free		= tegra210_adsp_pcm_destruct,
+#else
 	.pcm_construct		= tegra210_adsp_pcm_construct,
 	.pcm_destruct		= tegra210_adsp_pcm_destruct,
+#endif
 
 	/* PCM ops */
 	.open			= tegra210_adsp_pcm_open,

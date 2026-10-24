@@ -26,6 +26,7 @@ ccflags-y += -DMACSEC_SUPPORT
 ccflags-y += -DBW_TEST
 
 nvethernet-objs:= ether_linux.o \
+		  ether_xdp.o \
 		  osd.o \
 		  ethtool.o \
 		  ether_tc.o \

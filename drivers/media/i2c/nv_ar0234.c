@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2018-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2018-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 /*
  * ar0234.c - ar0234 sensor driver
  */
@@ -9,13 +9,12 @@
 #define DEBUG 1
 #include <linux/slab.h>
 #include <linux/uaccess.h>
-#include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/module.h>
 
 #include <linux/seq_file.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
-#include <linux/of_gpio.h>
 
 #include <media/max9295.h>
 #include <media/max9296.h>
@@ -451,12 +450,12 @@ static int ar0234_power_on(struct camera_common_data *s_data)
 		return err;
 	}
 
-	if (pw->reset_gpio > 0)
-		gpio_set_value(pw->reset_gpio, 1);
+	if (pw->reset_gpiod)
+		gpiod_set_value(pw->reset_gpiod, 1);
 
 	usleep_range(1000, 2000);
-	if (pw->reset_gpio > 0)
-		gpio_set_value(pw->reset_gpio, 1);
+	if (pw->reset_gpiod)
+		gpiod_set_value(pw->reset_gpiod, 1);
 
 	usleep_range(10000, 20000);
 	pw->state = SWITCH_ON;
@@ -520,11 +519,8 @@ static int ar0234_power_get(struct tegracam_device *tc_dev)
 					__func__, err);
 		}
 	}
-	if (!err) {
-		pw->reset_gpio = pdata->reset_gpio;
-		pw->af_gpio = pdata->af_gpio;
-		pw->pwdn_gpio = pdata->pwdn_gpio;
-	}
+	if (!err)
+		pw->reset_gpiod = pdata->reset_gpiod;
 
 	pw->state = SWITCH_OFF;
 
@@ -836,7 +832,7 @@ static struct camera_common_pdata *ar0234_parse_dt(struct tegracam_device *tc_de
 	struct camera_common_pdata *board_priv_pdata;
 	const struct of_device_id *match;
 	int err;
-	int gpio = 0;
+	struct gpio_desc *pwr_gpio;
 
 	if (!node)
 		return NULL;
@@ -854,18 +850,23 @@ static struct camera_common_pdata *ar0234_parse_dt(struct tegracam_device *tc_de
 	if (err)
 		dev_err(dev, "mclk not in DT\n");
 
-	board_priv_pdata->reset_gpio = of_get_named_gpio(node,
-			"reset-gpios", 0);
-	gpio_direction_output(board_priv_pdata->reset_gpio, 1);
+	board_priv_pdata->reset_gpiod = devm_gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
+	if (IS_ERR(board_priv_pdata->reset_gpiod)) {
+		dev_dbg(dev, "Failed to get reset GPIO: %ld\n",
+			PTR_ERR(board_priv_pdata->reset_gpiod));
+		board_priv_pdata->reset_gpiod = NULL;
+	}
 
-	gpio = of_get_named_gpio(node,
-			"pwdn-gpios", 0);
+	board_priv_pdata->pwdn_gpiod = devm_gpiod_get(dev, "pwdn", GPIOD_OUT_HIGH);
+	if (IS_ERR(board_priv_pdata->pwdn_gpiod)) {
+		dev_dbg(dev, "Failed to get pwdn GPIO: %ld\n",
+			PTR_ERR(board_priv_pdata->pwdn_gpiod));
+		board_priv_pdata->pwdn_gpiod = NULL;
+	}
 
-	gpio_direction_output(gpio, 1);
-	gpio = of_get_named_gpio(node,
-			"pwr-gpios", 0);
-
-	gpio_direction_output(gpio, 1);
+	pwr_gpio = devm_gpiod_get(dev, "pwr", GPIOD_OUT_HIGH);
+	if (IS_ERR(pwr_gpio))
+		dev_dbg(dev, "Failed to get pwr GPIO: %ld\n", PTR_ERR(pwr_gpio));
 
 	board_priv_pdata->has_eeprom =
 		of_property_read_bool(node, "has-eeprom");
@@ -993,7 +994,7 @@ static int ar0234_eeprom_device_init(struct ar0234 *priv)
 		priv->eeprom[i].adap = i2c_get_adapter(
 				priv->i2c_client->adapter->nr);
 		memset(&priv->eeprom[i].brd, 0, sizeof(priv->eeprom[i].brd));
-		strncpy(priv->eeprom[i].brd.type, dev_name,
+		strscpy(priv->eeprom[i].brd.type, dev_name,
 				sizeof(priv->eeprom[i].brd.type));
 
 		if (priv->sync_sensor_index == 1)
@@ -1112,7 +1113,7 @@ static int ar0234_probe(struct i2c_client *client,
 
 	priv->i2c_client = tc_dev->client = client;
 	tc_dev->dev = dev;
-	strncpy(tc_dev->name, "ar0234", sizeof(tc_dev->name));
+	strscpy(tc_dev->name, "ar0234", sizeof(tc_dev->name));
 	tc_dev->dev_regmap_config = &sensor_regmap_config;
 	tc_dev->sensor_ops = &ar0234_common_ops;
 	tc_dev->v4l2sd_internal_ops = &ar0234_subdev_internal_ops;

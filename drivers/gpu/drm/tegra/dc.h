@@ -85,6 +85,9 @@ struct tegra_dc {
 	struct device *dev;
 
 	struct drm_crtc base;
+#if defined(NV_TEGRA_PMC_POWERGATE_POWER_OFF_PRESENT) /* Linux v7.0 */
+	struct tegra_pmc *pmc;
+#endif
 	unsigned int powergate;
 	int pipe;
 

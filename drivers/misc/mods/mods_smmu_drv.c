@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* SPDX-FileCopyrightText: Copyright (c) 2019-2024, NVIDIA CORPORATION.  All rights reserved. */
+/* SPDX-FileCopyrightText: Copyright (c) 2019-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
 
 #include <linux/kernel.h>
 #include <linux/device.h>
@@ -79,23 +79,25 @@ static int mods_smmu_driver_probe(struct platform_device *pdev)
 			  mods_smmu_dev_num);
 	if (mods_smmu_dev_num < MODS_MAX_SMMU_DEVICES) {
 		dev_idx = mods_smmu_dev_num;
-		mods_smmu_dev_num++;
 	} else {
 		mods_error_printk("Max Number of MODS Smmu Device Reached\n");
 		LOG_EXT();
 		return -ENOMEM;
 	}
 	mods_smmu_devs[dev_idx].dev = &pdev->dev;
-	strncpy(mods_smmu_devs[dev_idx].dev_name,
-		dev_name,
-		MAX_DT_SIZE - 1);
+	if (strscpy(mods_smmu_devs[dev_idx].dev_name, dev_name,
+		    MAX_DT_SIZE) < 0) {
+		mods_error_printk("dev_name %s is too long\n", dev_name);
+		return -E2BIG;
+	}
 #ifdef MODS_ENABLE_BPMP_MRQ_API
 	mods_smmu_devs[dev_idx].bpmp = tegra_bpmp_get(dev);
 #endif
 
+	mods_smmu_dev_num++;
 
 	LOG_EXT();
-	return err;
+	return 0;
 }
 
 #if KERNEL_VERSION(6, 11, 0) <= MODS_KERNEL_VERSION

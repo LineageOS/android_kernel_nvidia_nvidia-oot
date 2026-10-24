@@ -52,6 +52,9 @@ struct gr3d {
 #if defined(NV_DEVM_PM_DOMAIN_ATTACH_LIST_PRESENT) /* Linux v6.13 */
 	struct dev_pm_domain_list *pd_list;
 #endif
+#if defined(NV_TEGRA_PMC_POWERGATE_POWER_OFF_PRESENT) /* Linux v7.2 */
+	struct tegra_pmc *pmc;
+#endif
 
 	DECLARE_BITMAP(addr_regs, GR3D_NUM_REGS);
 };
@@ -358,7 +361,12 @@ static int gr3d_power_up_legacy_domain(struct device *dev, const char *name,
 	if (err) {
 		dev_err(dev, "failed to acquire %s reset: %d\n", name, err);
 	} else {
+#if defined(NV_TEGRA_PMC_POWERGATE_POWER_OFF_PRESENT) /* Linux v7.2 */
+		err = tegra_pmc_powergate_sequence_power_up(gr3d->pmc, id,
+							    clk, reset);
+#else
 		err = tegra_powergate_sequence_power_up(id, clk, reset);
+#endif
 		reset_control_release(reset);
 	}
 
@@ -403,6 +411,13 @@ static int gr3d_init_power(struct device *dev, struct gr3d *gr3d)
 	if (err < 0) {
 		if (err != -ENOENT)
 			return err;
+
+#if defined(NV_TEGRA_PMC_POWERGATE_POWER_OFF_PRESENT) /* Linux v7.2 */
+		gr3d->pmc = devm_tegra_pmc_get(dev);
+		if (IS_ERR(gr3d->pmc))
+			return dev_err_probe(dev, PTR_ERR(gr3d->pmc),
+					     "failed to get PMC\n");
+#endif
 
 		/*
 		 * Older device-trees don't use GENPD. In this case we should

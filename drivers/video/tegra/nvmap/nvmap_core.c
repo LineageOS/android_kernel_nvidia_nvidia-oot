@@ -121,8 +121,13 @@ void *__nvmap_mmap(struct nvmap_handle *h)
 	} else {
 #if defined(CONFIG_GENERIC_IOREMAP)
 #if defined(NV_IOREMAP_PROT_HAS_PGPROT_T_ARG) /* Linux v6.15 */
+#if defined(NV___IOREMAP_PROT_PRESENT) /* Linux v7.0 */
+		vaddr = (__force void *)__ioremap_prot(nvmap_get_heap_block_base(h->carveout),
+						adj_size, prot);
+#else
 		vaddr = (__force void *)ioremap_prot(nvmap_get_heap_block_base(h->carveout),
 						adj_size, prot);
+#endif /* NV___IOREMAP_PROT_PRESENT */
 #else
 		vaddr = (__force void *)ioremap_prot(nvmap_get_heap_block_base(h->carveout),
 						adj_size, pgprot_val(prot));

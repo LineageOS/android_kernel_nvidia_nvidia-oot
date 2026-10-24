@@ -3404,7 +3404,7 @@ int netdev_vir_if_open(struct net_device *pnetdev)
 	int ret;
 	_adapter *padapter = (_adapter *)rtw_netdev_priv(pnetdev);
 
-	_enter_critical_mutex(&(adapter_to_dvobj(padapter)->hw_init_mutex), NULL);
+	_enter_critical_mutex_lock(&(adapter_to_dvobj(padapter)->hw_init_mutex), NULL);
 	ret = _netdev_vir_if_open(pnetdev);
 	_exit_critical_mutex(&(adapter_to_dvobj(padapter)->hw_init_mutex), NULL);
 
@@ -4225,7 +4225,7 @@ int netdev_open(struct net_device *pnetdev)
 		return 0;
 	}
 
-	_enter_critical_mutex(&(adapter_to_dvobj(padapter)->hw_init_mutex), NULL);
+	_enter_critical_mutex_lock(&(adapter_to_dvobj(padapter)->hw_init_mutex), NULL);
 #ifdef CONFIG_NEW_NETDEV_HDL
 	ret = _netdev_open(pnetdev);
 #else
@@ -4448,7 +4448,7 @@ int pm_netdev_open(struct net_device *pnetdev, u8 bnormal)
 	_adapter *padapter = (_adapter *)rtw_netdev_priv(pnetdev);
 
 	if (_TRUE == bnormal) {
-		_enter_critical_mutex(&(adapter_to_dvobj(padapter)->hw_init_mutex), NULL);
+		_enter_critical_mutex_lock(&(adapter_to_dvobj(padapter)->hw_init_mutex), NULL);
 		#ifdef CONFIG_NEW_NETDEV_HDL
 		status = _mi_pm_netdev_open(pnetdev);
 		#else

@@ -13,6 +13,7 @@
 #include <linux/debugfs.h>
 #include <linux/delay.h>
 #include <linux/fs.h>
+#include <linux/gpio/consumer.h>
 #include <linux/i2c.h>
 #include <linux/kernel.h>
 #include <linux/regmap.h>
@@ -53,9 +54,8 @@ struct camera_common_power_rail {
 	struct regulator *iovdd;
 	struct regulator *vcmvdd;
 	struct clk *mclk;
-	unsigned int pwdn_gpio;
-	unsigned int reset_gpio;
-	unsigned int af_gpio;
+	struct gpio_desc *pwdn_gpiod;
+	struct gpio_desc *reset_gpiod;
 	bool state;
 };
 
@@ -69,9 +69,8 @@ struct camera_common_regulators {
 struct camera_common_pdata {
 	const char *mclk_name; /* NULL for default default_mclk */
 	const char *parentclk_name; /* NULL for no parent clock*/
-	unsigned int pwdn_gpio;
-	unsigned int reset_gpio;
-	unsigned int af_gpio;
+	struct gpio_desc *pwdn_gpiod;
+	struct gpio_desc *reset_gpiod;
 	bool ext_reg;
 	int (*power_on)(struct camera_common_power_rail *pw);
 	int (*power_off)(struct camera_common_power_rail *pw);

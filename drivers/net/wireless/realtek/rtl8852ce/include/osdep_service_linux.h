@@ -23,11 +23,13 @@
 #include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/module.h>
+#include <linux/capability.h>
 #include <linux/namei.h>
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 5))
 #include <linux/kref.h>
 #endif
 /* #include <linux/smp_lock.h> */
+
 #include <linux/netdevice.h>
 #include <linux/inetdevice.h>
 #include <linux/skbuff.h>
@@ -398,14 +400,12 @@ static inline void _rtw_mutex_free(_mutex *pmutex)
 }
 __inline static int _rtw_mutex_lock_interruptible(_mutex *pmutex)
 {
-	int ret = 0;
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 37))
-	/* mutex_lock(pmutex); */
-	ret = mutex_lock_interruptible(pmutex);
+	return mutex_lock_interruptible(pmutex);
 #else
-	ret = down_interruptible(pmutex);
+	down(pmutex);
+	return 0;
 #endif
-	return ret;
 }
 
 __inline static int _rtw_mutex_lock(_mutex *pmutex)
@@ -1278,5 +1278,50 @@ static inline void rtw_dump_stack(void)
 			ATOMIC_INC(&rtw_warn_on_cnt); \
 		} \
 	} while (0)
+
+static inline bool rtw_is_net_admin(void)
+{
+	return capable(CAP_NET_ADMIN);
+}
+
+/*
+ * Copy count bytes from a user-space procfs write buffer and NUL-terminate.
+ * Requires count < dst_len to ensure room for the NUL.  Returns the number
+ * of bytes copied on success, or -EINVAL for NULL buffer, zero-length write,
+ * or oversized write.  Does NOT include a capability check — callers must
+ * gate on rtw_proc_require_net_admin().
+ */
+static inline ssize_t rtw_proc_copy_from_user(char *dst, size_t dst_len,
+	const char __user *buffer, size_t count)
+{
+	if (!buffer || count < 1 || count >= dst_len)
+		return -EINVAL;
+
+	if (copy_from_user(dst, buffer, count))
+		return -EFAULT;
+
+	dst[count] = '\0';
+	return (ssize_t)count;
+}
+
+/* Returns 0 if CAP_NET_ADMIN is held, -EPERM otherwise. */
+static inline ssize_t rtw_proc_require_net_admin(void)
+{
+	if (!rtw_is_net_admin())
+		return -EPERM;
+
+	return 0;
+}
+
+/* Strip trailing whitespace (\n, \r, space, tab) in-place and NUL-terminate. */
+static inline size_t rtw_proc_stripped_len(char *buf, size_t len)
+{
+	while (len && (buf[len - 1] == '\n' || buf[len - 1] == '\r' ||
+		       buf[len - 1] == ' '  || buf[len - 1] == '\t'))
+		len--;
+
+	buf[len] = '\0';
+	return len;
+}
 
 #endif /* __OSDEP_LINUX_SERVICE_H_ */

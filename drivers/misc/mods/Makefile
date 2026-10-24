@@ -30,6 +30,7 @@ mods-y                             += mods_mem.o
 mods-$(CONFIG_ACPI)                += mods_acpi.o
 mods-$(CONFIG_ARCH_TEGRA)          += mods_adsp.o
 mods-$(HAVE_ARM_FFA)               += mods_arm_ffa.o
+mods-$(CONFIG_HAVE_ARM_SMCCC)      += mods_arm_smccc.o
 mods-$(CONFIG_TEGRA_IVC)           += mods_bpmpipc.o
 mods-$(CONFIG_COMMON_CLK)          += mods_clock.o
 mods-$(CONFIG_DEBUG_FS)            += mods_debugfs.o

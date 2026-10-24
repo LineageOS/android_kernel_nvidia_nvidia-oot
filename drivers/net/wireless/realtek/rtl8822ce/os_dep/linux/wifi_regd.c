@@ -661,7 +661,7 @@ static void async_regd_change_work_hdl(_workitem *work)
 	_list *list, *head = &wiphy_data->async_regd_change_list;
 
 	while (1) {
-		_enter_critical_mutex(&wiphy_data->async_regd_change_mutex, &irqL);
+		_enter_critical_mutex_lock(&wiphy_data->async_regd_change_mutex, &irqL);
 		list = rtw_is_list_empty(head) ? NULL : get_next(head);
 		if (list)
 			rtw_list_delete(list);
@@ -718,7 +718,7 @@ static void rtw_regd_async_regd_change_list_free(struct wiphy *wiphy)
 	_irqL irqL;
 	_list *cur, *head;
 
-	_enter_critical_mutex(&wiphy_data->async_regd_change_mutex, &irqL);
+	_enter_critical_mutex_lock(&wiphy_data->async_regd_change_mutex, &irqL);
 
 	head = &wiphy_data->async_regd_change_list;
 	cur = get_next(head);
@@ -780,7 +780,7 @@ int rtw_regd_change_complete_async(struct wiphy *wiphy, struct get_chplan_resp *
 	evt->wiphy = wiphy;
 	evt->chplan = chplan;
 
-	_enter_critical_mutex(&wiphy_data->async_regd_change_mutex, &irqL);
+	_enter_critical_mutex_lock(&wiphy_data->async_regd_change_mutex, &irqL);
 
 	rtw_list_insert_tail(&evt->list, &wiphy_data->async_regd_change_list);
 

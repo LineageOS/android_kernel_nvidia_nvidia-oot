@@ -1450,7 +1450,9 @@ static int nvpps_probe(struct platform_device *pdev)
 	pdev_data->print_sec_ptp_failed = true;
 
 	/* Initialize work queue */
-	pdev_data->wq = alloc_workqueue("nvpps_wq", WQ_MEM_RECLAIM | WQ_HIGHPRI | WQ_FREEZABLE, 1);
+	pdev_data->wq = alloc_workqueue("nvpps_wq", WQ_UNBOUND |
+					WQ_MEM_RECLAIM | WQ_HIGHPRI |
+					WQ_FREEZABLE, 1);
 	if (!pdev_data->wq) {
 		dev_err(&pdev->dev, "Failed to allocate workqueue\n");
 		return -ENOMEM;

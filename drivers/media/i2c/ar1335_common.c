@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2017-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2017-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // Copyright (c) 2022, e-con Systems. All rights reserved.
 /*
  * ar1335_common.c - AR1335 sensor driver
@@ -9,15 +9,13 @@
 
 #include <linux/slab.h>
 #include <linux/uaccess.h>
-#include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/module.h>
 
 #include <linux/seq_file.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
-#include <linux/of_gpio.h>
 #include <media/camera_common.h>
-#include "../platform/tegra/camera/camera_gpio.h"
 
 #include "ar1335.h"
 #include "mcu_firmware.h"
@@ -236,13 +234,6 @@ static int cam_power_put(struct cam *priv)
 
 	pw->avdd = NULL;
 	pw->iovdd = NULL;
-
-	if (priv->pdata->use_cam_gpio)
-		cam_gpio_deregister(&priv->i2c_client->dev, pw->pwdn_gpio);
-	else {
-		gpio_free(pw->pwdn_gpio);
-		gpio_free(pw->reset_gpio);
-	}
 
 	return 0;
 }
@@ -652,7 +643,6 @@ static struct camera_common_pdata *cam_parse_dt(struct i2c_client *client)
 	struct device_node *node = client->dev.of_node;
 	struct camera_common_pdata *board_priv_pdata;
 	const struct of_device_id *match;
-	int gpio;
 	int err;
 
 	if (!node)
@@ -669,24 +659,6 @@ static struct camera_common_pdata *cam_parse_dt(struct i2c_client *client)
 	if (!board_priv_pdata)
 		return NULL;
 
-	gpio = of_get_named_gpio(node, "pwdn-gpios", 0);
-	if (gpio < 0) {
-		dev_err(&client->dev, "pwdn gpios not in DT\n");
-		goto error;
-	}
-	board_priv_pdata->pwdn_gpio = (unsigned int)gpio;
-
-	gpio = of_get_named_gpio(node, "reset-gpios", 0);
-	if (gpio < 0) {
-		/* reset-gpio is not absoluctly needed */
-		dev_dbg(&client->dev, "reset gpios not in DT\n");
-		gpio = 0;
-	}
-	board_priv_pdata->reset_gpio = (unsigned int)gpio;
-
-	board_priv_pdata->use_cam_gpio =
-		of_property_read_bool(node, "cam,use-cam-gpio");
-
 	err = of_property_read_string(node, "avdd-reg",
 			&board_priv_pdata->regulators.avdd);
 	err |= of_property_read_string(node, "iovdd-reg",
@@ -700,10 +672,6 @@ static struct camera_common_pdata *cam_parse_dt(struct i2c_client *client)
 		of_property_read_bool(node, "has-eeprom");
 
 	return board_priv_pdata;
-
-error:
-	devm_kfree(&client->dev, board_priv_pdata);
-	return NULL;
 }
 
 static int cam_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
@@ -773,14 +741,17 @@ static int mcu_bload_ascii2hex(unsigned char ascii)
 	return -1;
 }
 
-static void toggle_gpio(unsigned int gpio, int val)
+static void toggle_gpio(struct gpio_desc *desc, int val)
 {
-	if (gpiod_cansleep(gpio_to_desc(gpio))) {
-		gpio_direction_output(gpio,val);
-		gpio_set_value_cansleep(gpio, val);
-	} else{
-		gpio_direction_output(gpio,val);
-		gpio_set_value(gpio, val);
+	if (!desc)
+		return;
+
+	if (gpiod_cansleep(desc)) {
+		gpiod_direction_output(desc, val);
+		gpiod_set_value_cansleep(desc, val);
+	} else {
+		gpiod_direction_output(desc, val);
+		gpiod_set_value(desc, val);
 	}
 }
 
@@ -1290,9 +1261,8 @@ static int mcu_get_ctrl_ui(struct i2c_client *client,
 		goto exit;
 	}
 
-	strncpy((char *)mcu_ui_info->ctrl_ui_data.ctrl_ui_info.ctrl_name, &mc_ret_data[2],
-		MAX_CTRL_UI_STRING_LEN - 1);
-	mcu_ui_info->ctrl_ui_data.ctrl_ui_info.ctrl_name[MAX_CTRL_UI_STRING_LEN-1] = '\0';
+	strscpy((char *)mcu_ui_info->ctrl_ui_data.ctrl_ui_info.ctrl_name,
+		&mc_ret_data[2], MAX_CTRL_UI_STRING_LEN);
 
 	mcu_ui_info->ctrl_ui_data.ctrl_ui_info.ctrl_ui_type = mc_ret_data[34];
 	mcu_ui_info->ctrl_ui_data.ctrl_ui_info.ctrl_ui_flags = mc_ret_data[35] << 8 |
@@ -2377,72 +2347,40 @@ static int cam_probe(struct i2c_client *client,
 {
 	struct camera_common_data *common_data;
 	struct device_node *node = client->dev.of_node;
+	struct gpio_desc *reset_gpiod = NULL;
+	struct gpio_desc *pwdn_gpiod = NULL;
 	struct cam *priv;
 	uint32_t mipi_lane = 0;
 	int retry = 10;
 	unsigned char fw_version[32] = {0}, txt_fw_version[32] = {0};
 	int ret, frm_fmt_size = 0, loop;
-	uint16_t sensor_id = 0, reset_gpio = 0, pwdn_gpio = 0;
-
+	uint16_t sensor_id = 0;
 	int err = 0, pwdn_gpio_toggle = 0;
+
 	if (!IS_ENABLED(CONFIG_OF) || !node)
 		return -EINVAL;
-
-	reset_gpio = of_get_named_gpio(node, "reset-gpios", 0);
-
-	if (err < 0) {
-		dev_err(&client->dev, "Unable to toggle GPIO\n");
-		return -EINVAL;
-	}
-
-	pwdn_gpio = of_get_named_gpio(node, "pwdn-gpios", 0);
-
-	if (err < 0) {
-		dev_err(&client->dev, "Unable to toggle GPIO\n");
-		gpio_free(reset_gpio);
-		return -EINVAL;
-	}
-
-	err = gpio_request(reset_gpio, "cam-reset");
-	if (err < 0) {
-		dev_err(&client->dev, "%s[%d]:GPIO reset Fail, err:%d\n",
-				__func__, __LINE__, err);
-		goto exit;
-	}
-
-	err = gpio_request(pwdn_gpio, "cam-boot");
-	if (err < 0) {
-		dev_err(&client->dev, "%s[%d]:%dGPIO boot Fail\n",
-				__func__, __LINE__, err);
-		goto exit;
-	}
 
 	err = of_property_read_u32(node, "camera_mipi_lanes", &mipi_lane);
 	if (err < 0) {
 		dev_err(&client->dev, "Can not get Camera MIPI Lanes\n");
-		goto exit;
+		return err;
 	}
 
 	common_data = devm_kzalloc(&client->dev, sizeof(struct camera_common_data),
 					GFP_KERNEL);
-	if (!common_data) {
-		err = -ENOMEM;
-		goto exit;
-	}
+	if (!common_data)
+		return -ENOMEM;
 
 	priv = devm_kzalloc(&client->dev, sizeof(struct cam) +
 			 sizeof(struct v4l2_ctrl *) * AR1335_NUM_CONTROLS /**num_ctrls*/,
 			 GFP_KERNEL);
-	if (!priv) {
-		err = -ENOMEM;
-		goto exit;
-	}
+	if (!priv)
+		return -ENOMEM;
 
 	priv->pdata = cam_parse_dt(client);
 	if (!priv->pdata) {
 		dev_err(&client->dev, "unable to get platform data\n");
-		err = -EFAULT;
-		goto exit;
+		return -EFAULT;
 	}
 
 	priv->i2c_client = client;
@@ -2452,6 +2390,18 @@ static int cam_probe(struct i2c_client *client,
 	priv->s_data->dev = &client->dev;
 	priv->mipi_lane_config = mipi_lane;
 	common_data->priv = (void *)priv;
+
+	reset_gpiod = devm_gpiod_get(&client->dev, "reset", GPIOD_ASIS);
+	if (IS_ERR(reset_gpiod)) {
+		dev_err(&client->dev, "Unable to get reset GPIO\n");
+		return PTR_ERR(reset_gpiod);
+	}
+
+	pwdn_gpiod = devm_gpiod_get(&client->dev, "pwdn", GPIOD_ASIS);
+	if (IS_ERR(pwdn_gpiod)) {
+		dev_err(&client->dev, "Unable to get pwdn GPIO\n");
+		return PTR_ERR(pwdn_gpiod);
+	}
 
 	err = cam_power_get(priv);
 	if (err) {
@@ -2466,21 +2416,21 @@ static int cam_probe(struct i2c_client *client,
 	}
 
 	/* Reset Release for MCU */
-	toggle_gpio(pwdn_gpio, 0);
+	toggle_gpio(pwdn_gpiod, 0);
 	msleep(10);
-	toggle_gpio(reset_gpio, 0);
+	toggle_gpio(reset_gpiod, 0);
 	msleep(10);
-	toggle_gpio(reset_gpio, 1);
+	toggle_gpio(reset_gpiod, 1);
 	msleep(100);
 
 	ret = mcu_get_fw_version(client, fw_version, txt_fw_version);
 	if (ret != 0) {
 		dev_err(&client->dev, "Trying to Detect Bootloader mode\n");
-		toggle_gpio(reset_gpio, 0);
+		toggle_gpio(reset_gpiod, 0);
 		msleep(10);
-		toggle_gpio(pwdn_gpio, 1);
+		toggle_gpio(pwdn_gpiod, 1);
 		msleep(100);
-		toggle_gpio(reset_gpio, 1);
+		toggle_gpio(reset_gpiod, 1);
 		msleep(100);
 
 		for (loop = 0;loop < 10; loop++) {
@@ -2507,8 +2457,8 @@ static int cam_probe(struct i2c_client *client,
 			goto exit;
 		}
 
-		if ( pwdn_gpio_toggle == 1)
-			toggle_gpio(pwdn_gpio, 0);
+		if (pwdn_gpio_toggle == 1)
+			toggle_gpio(pwdn_gpiod, 0);
 
 		/* Allow FW Updated Driver to reboot */
 		msleep(500);
@@ -2778,11 +2728,7 @@ static int cam_probe(struct i2c_client *client,
 	return 0;
 
 exit:
-
-	gpio_free(reset_gpio);
-	gpio_free(pwdn_gpio);
 	return err;
-
 }
 
 #define FREE_SAFE(dev, ptr) \
@@ -2798,9 +2744,7 @@ static void cam_remove(struct i2c_client *client)
 {
 	struct camera_common_data *s_data = to_camera_common_data(&client->dev);
 	struct cam *priv;
-	struct device_node *node = client->dev.of_node;
 	int loop = 0;
-	int reset_gpio = 0, pwdn_gpio = 0;
 
 	if (!s_data) {
 		dev_err(&client->dev, "camera common data is NULL\n");
@@ -2811,31 +2755,6 @@ static void cam_remove(struct i2c_client *client)
 #endif
 	}
 	priv = (struct cam *)s_data->priv;
-
-	/* Release the Gpios */
-	reset_gpio = of_get_named_gpio(node, "reset-gpios", 0);
-	if (reset_gpio < 0) {
-		dev_err(&client->dev, "Unable to get reset GPIO\n");
-#if defined(NV_I2C_DRIVER_STRUCT_REMOVE_RETURN_TYPE_INT) /* Linux 6.1 */
-		return -EINVAL;
-#else
-		return;
-#endif
-	}
-
-	pwdn_gpio = of_get_named_gpio(node, "pwdn-gpios", 0);
-	if (pwdn_gpio < 0) {
-		dev_err(&client->dev, "Unable to get power GPIO\n");
-		gpio_free(reset_gpio);
-#if defined(NV_I2C_DRIVER_STRUCT_REMOVE_RETURN_TYPE_INT) /* Linux 6.1 */
-		return -EINVAL;
-#else
-		return;
-#endif
-	}
-
-	gpio_free(reset_gpio);
-	gpio_free(pwdn_gpio);
 
 	if (!priv || !priv->pdata)
 #if defined(NV_I2C_DRIVER_STRUCT_REMOVE_RETURN_TYPE_INT) /* Linux 6.1 */

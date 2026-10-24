@@ -2004,7 +2004,7 @@ void sitesurvey_set_offch_state(_adapter *adapter, u8 scan_state)
 {
 	struct rf_ctl_t *rfctl = adapter_to_rfctl(adapter);
 
-	_rtw_mutex_lock_interruptible(&rfctl->offch_mutex);
+	_rtw_mutex_lock(&rfctl->offch_mutex);
 
 	switch (scan_state) {
 	case SCAN_DISABLE:
@@ -2783,7 +2783,8 @@ static int scan_issue_pbreq_wnm_cb(void *priv, struct rtw_phl_scan_param *param,
 		return 0;
 
 	padapter_link = GET_PRIMARY_LINK(padapter);
-	rtw_btm_notify_scan_probe_req(padapter->fsmpriv.btmpriv.btm, scan_ch);
+	if (padapter->fsmpriv.btmpriv.btm)
+		rtw_btm_notify_scan_probe_req(padapter->fsmpriv.btmpriv.btm, scan_ch);
 
 	return 0;
 }

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2022-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2022-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 /*
  * nv_hawk_owl.c.c - ar0234 sensor driver
  */
@@ -9,12 +9,11 @@
 #define DEBUG 0
 #include <linux/slab.h>
 #include <linux/uaccess.h>
-#include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/module.h>
 #include <linux/seq_file.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
-#include <linux/of_gpio.h>
 #include <media/max9295.h>
 #include <media/max9296.h>
 #include <media/nv_hawk_owl.h>
@@ -594,8 +593,8 @@ static int ar0234_power_on(struct camera_common_data *s_data)
 			pw->state = SWITCH_ON;
 		return err;
 	}
-	if (pw->reset_gpio > 0)
-		gpio_set_value(pw->reset_gpio, 1);
+	if (pw->reset_gpiod)
+		gpiod_set_value(pw->reset_gpiod, 1);
 	usleep_range(1000, 2000);
 	pw->state = SWITCH_ON;
 	/*i2c address trans for Hawk & Owl*/
@@ -648,10 +647,10 @@ static int ar0234_power_get(struct tegracam_device *tc_dev)
 			clk_set_parent(pw->mclk, parent);
 	}
 	if (!err) {
-		pw->reset_gpio = pdata->reset_gpio;
-		pw->af_gpio = pdata->af_gpio;
-		pw->pwdn_gpio = pdata->pwdn_gpio;
+		pw->reset_gpiod = pdata->reset_gpiod;
+		pw->pwdn_gpiod = pdata->pwdn_gpiod;
 	}
+
 	pw->state = SWITCH_OFF;
 	return err;
 }
@@ -926,7 +925,7 @@ static struct camera_common_pdata *ar0234_parse_dt(struct tegracam_device *tc_de
 	struct camera_common_pdata *board_priv_pdata;
 	const struct of_device_id *match;
 	int err;
-	int pwr_gpio = 0;
+	struct gpio_desc *pwr_gpiod;
 	if (!node)
 		return NULL;
 	match = of_match_device(ar0234_of_match, dev);
@@ -940,26 +939,25 @@ static struct camera_common_pdata *ar0234_parse_dt(struct tegracam_device *tc_de
 	if (err)
 		dev_err(dev, "mclk not in DT\n");
 
-	board_priv_pdata->reset_gpio = of_get_named_gpio(node,
-			"reset-gpios", 0);
-	if (board_priv_pdata->reset_gpio > 0)
-		gpio_direction_output(board_priv_pdata->reset_gpio, 1);
-	else
-		dev_dbg(dev, "failed to read reset_gpio\n");
+	board_priv_pdata->reset_gpiod = devm_gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
+	if (IS_ERR(board_priv_pdata->reset_gpiod)) {
+		err = PTR_ERR(board_priv_pdata->reset_gpiod);
+		dev_dbg(dev, "failed to get reset_gpio: %d\n", err);
+		board_priv_pdata->reset_gpiod = NULL;
+	}
 
-	board_priv_pdata->pwdn_gpio = of_get_named_gpio(node,
-			"pwdn-gpios", 0);
-	if (board_priv_pdata->pwdn_gpio > 0)
-		gpio_direction_output(board_priv_pdata->pwdn_gpio, 1);
-	else
-		dev_dbg(dev, "failed to read pwdn_gpio\n");
+	board_priv_pdata->pwdn_gpiod = devm_gpiod_get(dev, "pwdn", GPIOD_OUT_HIGH);
+	if (IS_ERR(board_priv_pdata->pwdn_gpiod)) {
+		err = PTR_ERR(board_priv_pdata->pwdn_gpiod);
+		dev_dbg(dev, "failed to get pwdn_gpio: %d\n", err);
+		board_priv_pdata->pwdn_gpiod = NULL;
+	}
 
-	pwr_gpio = of_get_named_gpio(node,
-			"pwr-gpios", 0);
-	if (pwr_gpio > 0)
-		gpio_direction_output(pwr_gpio, 1);
-	else
-		dev_dbg(dev, "failed to read pwr_gpio\n");
+	pwr_gpiod = devm_gpiod_get(dev, "pwr", GPIOD_OUT_HIGH);
+	if (IS_ERR(pwr_gpiod)) {
+		dev_dbg(dev, "failed to get pwr_gpio\n");
+		pwr_gpiod = NULL;
+	}
 
 	board_priv_pdata->has_eeprom =
 		of_property_read_bool(node, "has-eeprom");
@@ -1069,7 +1067,7 @@ static int ar0234_eeprom_device_init(struct ar0234 *priv)
 		priv->eeprom[i].adap = i2c_get_adapter(
 				priv->i2c_client->adapter->nr);
 		memset(&priv->eeprom[i].brd, 0, sizeof(priv->eeprom[i].brd));
-		strncpy(priv->eeprom[i].brd.type, dev_name,
+		strscpy(priv->eeprom[i].brd.type, dev_name,
 				sizeof(priv->eeprom[i].brd.type));
 
 		/* assign the EEPROM addrs which is read from DT */
@@ -1526,7 +1524,7 @@ static int ar0234_probe(struct i2c_client *client,
 
 	priv->i2c_client = tc_dev->client = client;
 	tc_dev->dev = dev;
-	strncpy(tc_dev->name, "ar0234", sizeof(tc_dev->name));
+	strscpy(tc_dev->name, "ar0234", sizeof(tc_dev->name));
 	tc_dev->dev_regmap_config = &sensor_regmap_config;
 	tc_dev->sensor_ops = &ar0234_common_ops;
 	tc_dev->v4l2sd_internal_ops = &ar0234_subdev_internal_ops;

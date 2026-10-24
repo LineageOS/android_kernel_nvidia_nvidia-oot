@@ -2705,7 +2705,7 @@ u8 rtw_mesh_set_plink_state_cmd(_adapter *adapter, const u8 *mac, u8 plink_state
 	res = rtw_enqueue_cmd(cmdpriv, cmdobj);
 	if (res == _SUCCESS) {
 		rtw_sctx_wait(&sctx, __func__);
-		_rtw_mutex_lock_interruptible(&cmdpriv->sctx_mutex, NULL);
+		_rtw_mutex_lock(&cmdpriv->sctx_mutex);
 		if (sctx.status == RTW_SCTX_SUBMITTED)
 			cmdobj->sctx = NULL;
 		_rtw_mutex_unlock(&cmdpriv->sctx_mutex, NULL);

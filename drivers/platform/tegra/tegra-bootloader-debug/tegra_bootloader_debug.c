@@ -215,6 +215,8 @@ size_t tegra_bl_add_profiler_entry(const char *buf, size_t len)
 {
 	int count = 0;
 	int i = 0;
+	size_t j;
+	char __iomem *profiler_str;
 	struct profiler_record *profiler_data;
 
 	if (len > MAX_PROFILE_STRLEN) {
@@ -250,12 +252,14 @@ size_t tegra_bl_add_profiler_entry(const char *buf, size_t len)
 		profiler_data[i].timestamp = arch_timer_get_us();
 	}
 
-	strncpy(profiler_data[i].str, buf, len);
-	profiler_data[i].str[len] = '\0';
+	profiler_str = (char __force __iomem *)profiler_data[i].str;
+	for (j = 0; j < len; j++)
+		writeb(buf[j], &profiler_str[j]);
+
+	writeb('\0', &profiler_str[len]);
 	/* Trim trailing '\n' in case 'echo' command is used */
-	if (profiler_data[i].str[len - 1] == '\n') {
-		profiler_data[i].str[len - 1] = '\0';
-	}
+	if (len && buf[len - 1] == '\n')
+		writeb('\0', &profiler_str[len - 1]);
 
 	buff_content_valid = false;
 	spin_unlock(&tegra_bl_lock);

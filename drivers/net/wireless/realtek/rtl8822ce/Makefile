@@ -97,6 +97,7 @@ CONFIG_RTW_UP_MAPPING_RULE = tos
 CONFIG_RTW_MBO = y
 CONFIG_WAKE_ON_BT = n
 CONFIG_RTW_NBI = n
+CONFIG_RTW_DBG_PROC = n
 
 ########################## Android ###########################
 # CONFIG_RTW_ANDROID - 0: no Android, 4/5/6/7/8/9/10/11 : Android version
@@ -1361,6 +1362,10 @@ endif
 
 ifeq ($(CONFIG_RTW_NBI), y)
 EXTRA_CFLAGS += -DCONFIG_RTW_NBI
+endif
+
+ifeq ($(CONFIG_RTW_DBG_PROC), y)
+EXTRA_CFLAGS += -DCONFIG_RTW_DBG_PROC
 endif
 
 ifeq ($(CONFIG_SECURITY_MEM), y)

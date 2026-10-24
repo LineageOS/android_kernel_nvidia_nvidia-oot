@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: Copyright (c) 2023-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2023-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 PATH="${PATH}:/bin:/sbin:/usr/bin"
 
@@ -1890,6 +1890,24 @@ compile_test() {
             fi
         ;;
 
+        drm_atomic_commit_struct_present)
+            #
+            # Determine if 'struct drm_atomic_commit' is present (i.e. the
+            # rename from 'struct drm_atomic_state' has happened).
+            #
+            # Upstream Linux change info:
+            # - Commit 5164f7e7ff8e ("drm: Rename struct drm_atomic_state to drm_atomic_commit").
+            # - Renamed in Linux v7.2.
+            #
+            CODE="
+            #include <drm/drm_atomic.h>
+            void conftest_drm_atomic_commit_struct_present(void) {
+                struct drm_atomic_commit state;
+            }"
+
+            compile_check_conftest "$CODE" "NV_DRM_ATOMIC_COMMIT_STRUCT_PRESENT" "" "types"
+        ;;
+
         drm_bus_present)
             #
             # Determine if the 'struct drm_bus' type is present.
@@ -3306,6 +3324,24 @@ compile_test() {
             }"
 
             compile_check_conftest "$CODE" "NV_DRM_ATOMIC_STATE_REF_COUNTING_PRESENT" "" "functions"
+        ;;
+
+        drm_atomic_private_obj_init_removed_state_arg)
+            #
+            # Determine if the 'state' argument has been removed from
+            # drm_atomic_private_obj_init().
+            #
+            # Upstream Linux change info:
+            # - Commit 3590a52f0d09 ("drm/atomic: Remove state argument to drm_atomic_private_obj_init").
+            # - Removed in Linux v7.1.
+            #
+            CODE="
+            #include <drm/drm_atomic.h>
+            void conftest_drm_atomic_private_obj_init_removed_state_arg(void) {
+                drm_atomic_private_obj_init(NULL, NULL, NULL);
+            }"
+
+            compile_check_conftest "$CODE" "NV_DRM_ATOMIC_PRIVATE_OBJ_INIT_REMOVED_STATE_ARG" "" "types"
         ;;
 
         vm_ops_fault_removed_vma_arg)
@@ -7219,6 +7255,24 @@ compile_test() {
             compile_check_conftest "$CODE" "NV_DMA_BUF_OPS_HAS_CACHE_SGT_MAPPING" "" "types"
         ;;
 
+        dma_fence_struct_has_extern_lock)
+            #
+            # Determine if 'struct dma_fence' has the 'extern_lock' member.
+            #
+            # Upstream Linux change info:
+            # - Commit 1f32f310a13c ("dma-buf: inline spinlock for fence protection v5").
+            # - Added in Linux v7.1.
+            #
+            CODE="
+            #include <linux/dma-fence.h>
+            int conftest_dma_fence_struct_has_extern_lock(void) {
+                return offsetof(struct dma_fence, extern_lock);
+            }"
+
+            compile_check_conftest "$CODE" \
+                    "NV_DMA_FENCE_STRUCT_HAS_EXTERN_LOCK" "" "types"
+        ;;
+
         dma_slave_config_struct_has_slave_id)
             #
             # Determine if 'struct dma_slave_config' has the 'slave_id' member.
@@ -7599,9 +7653,8 @@ compile_test() {
             #
             CODE="
             #include <drm/drm_modeset_helper_vtables.h>
-            void conftest(struct drm_plane_helper_funcs *f) {
-                    int (*fn)(struct drm_plane *plane,
-                              struct drm_atomic_state *state, bool flip) = f->atomic_async_check;
+            void conftest(struct drm_plane_helper_funcs *f, struct drm_plane *plane, bool flip) {
+                f->atomic_async_check(plane, (void *)0, flip);
             }"
 
             compile_check_conftest "$CODE" "NV_DRM_PLANE_HELPER_FUNCS_STRUCT_ATOMIC_ASYNC_CHECK_HAS_BOOL_ARG" "" "types"
@@ -8065,6 +8118,27 @@ compile_test() {
             compile_check_conftest "$CODE" "NV_IOREMAP_PROT_HAS_PGPROT_T_ARG" "" "types" $1
         ;;
 
+        __ioremap_prot)
+            #
+            # Determine if __ioremap_prot() is available (arm64). When present,
+            # ioremap_prot() rejects kernel pgprots that lack PTE_USER
+            # (WARN_ON_ONCE() + returns NULL) and keeps only the memory type
+            # bits, so in-kernel callers must use the unfiltered __ioremap_prot()
+            # instead.
+            #
+            # Upstream Linux change info:
+            # - Commit 8f098037139b ("arm64: io: Extract user memory type in ioremap_prot()").
+            # - Added in Linux v7.0.
+            #
+            CODE="
+            #include <linux/io.h>
+            void conftest___ioremap_prot(void) {
+                __ioremap_prot();
+            }"
+
+            compile_check_conftest "$CODE" "NV___IOREMAP_PROT_PRESENT" "" "functions"
+        ;;
+
         iio_dev_opaque_has_mlock)
             #
             # Determine if the 'iio_dev_opaque' structure has 'mlock' field.
@@ -8169,6 +8243,24 @@ compile_test() {
             compile_check_conftest "$CODE" "NV_MM_STRUCT_STRUCT_HAS_PERCPU_COUNTER_RSS_STAT" "" "types"
         ;;
 
+        mm_struct_struct_has_percpu_counter_tree_rss_stat)
+            #
+            # Determine if the 'rss_stat' member of the 'mm_struct' structure is
+            # defined with 'percpu_counter_tree'.
+            #
+            # Upstream Linux change info:
+            # - Commit c4991634f14b ("mm: improve RSS counter approximation accuracy for proc interfaces")
+            # - Added in Linux v7.1
+            #
+            CODE="
+            #include <linux/mm_types.h>
+            void conftest_mm_struct_struct_has_percpu_counter_tree_rss_stat(struct mm_struct *mm) {
+                struct percpu_counter_tree *rss_stat = &mm->rss_stat[0];
+            }"
+
+            compile_check_conftest "$CODE" "NV_MM_STRUCT_STRUCT_HAS_PERCPU_COUNTER_TREE_RSS_STAT" "" "types"
+        ;;
+
         module_import_ns_calls_stringify)
            #
            # Determine if the MODULE_IMPORT_NS macro takes a string literal as
@@ -8201,6 +8293,56 @@ compile_test() {
 	    static struct mrq_pcie_request req;"
 
             compile_check_conftest "$CODE" "NV_MRQ_PCIE_REQUEST_STRUCT_PRESENT" "" "symbols"
+        ;;
+
+        net_device_struct_has_xdp_features)
+            #
+            # Determine if 'struct net_device' has the xdp_features member.
+            #
+            # Added with the Linux XDP feature-advertisement API.
+            #
+            CODE="
+            #include <linux/stddef.h>
+            #include <linux/netdevice.h>
+            int conftest_net_device_struct_has_xdp_features(void)
+            {
+                return offsetof(struct net_device, xdp_features);
+            }"
+
+            compile_check_conftest "$CODE" "NV_NET_DEVICE_STRUCT_HAS_XDP_FEATURES" "" "types"
+        ;;
+
+        net_device_struct_has_xdp_zc_max_segs)
+            #
+            # Determine if 'struct net_device' has the xdp_zc_max_segs member.
+            # Kernels that provide this field use it to report how many AF_XDP
+            # zero-copy segments the driver supports for one packet.
+            #
+            CODE="
+            #include <linux/stddef.h>
+            #include <linux/netdevice.h>
+            int conftest_net_device_struct_has_xdp_zc_max_segs(void)
+            {
+                return offsetof(struct net_device, xdp_zc_max_segs);
+            }"
+
+            compile_check_conftest "$CODE" "NV_NET_DEVICE_STRUCT_HAS_XDP_ZC_MAX_SEGS" "" "types"
+        ;;
+
+        netdev_xdp_act_xsk_zerocopy_present)
+            #
+            # Determine if NETDEV_XDP_ACT_XSK_ZEROCOPY is present.
+            # Vendor kernels may backport struct net_device.xdp_features
+            # without every feature bit from the upstream API.
+            #
+            CODE="
+            #include <linux/netdevice.h>
+            int conftest_netdev_xdp_act_xsk_zerocopy_present(void)
+            {
+                return NETDEV_XDP_ACT_XSK_ZEROCOPY;
+            }"
+
+            compile_check_conftest "$CODE" "NV_NETDEV_XDP_ACT_XSK_ZEROCOPY_PRESENT" "" "symbols"
         ;;
 
         no_llseek)
@@ -8262,20 +8404,21 @@ compile_test() {
             compile_check_conftest "$CODE" "NV_OF_PROPERTY_PRESENT" "" "functions"
         ;;
 
-        platform_msi_domain_alloc_irqs)
+        page_pool_params_struct_has_netdev)
             #
-            # Determine if the platform_msi_domain_alloc_irqs() API available or not.
+            # Determine if the 'page_pool_params' structure has 'netdev' member.
             #
-            # API platform_msi_domain_free_irqs() is dropped from Linux 6.9
-            # with commit 1a4671ff7a903e87 ("platform-msi: Remove unused interfaces")
+            # Upstream Linux change info:
+            # - Commit 083772c9f972 ("net: page_pool: record pools per netdev")
+            # - Added in Linux v6.8
             #
             CODE="
-            #include <linux/msi.h>
-            void conftest_platform_msi_domain_alloc_irqs(void) {
-                platform_msi_domain_alloc_irqs();
+            #include <include/net/page_pool/types.h>
+            int conftest_page_pool_params_struct_has_netdev(void) {
+                return offsetof(struct page_pool_params, netdev);
             }"
 
-            compile_check_conftest "$CODE" "NV_PLATFORM_MSI_DOMAIN_ALLOC_IRQS_PRESENT" "" "functions"
+            compile_check_conftest "$CODE" "NV_PAGE_POOL_PARAMS_STRUCT_HAS_NETDEV" "" "types"
         ;;
 
         page_struct_has___folio_index)
@@ -8294,20 +8437,26 @@ compile_test() {
             compile_check_conftest "$CODE" "NV_PAGE_STRUCT_HAS___FOLIO_INDEX" "" "types"
         ;;
 
-        platform_msi_domain_free_irqs)
+        platform_device_msi_init_and_alloc_irqs)
             #
-            # Determine if the platform_msi_domain_free_irqs() API available or not.
+            # Determine if the functions platform_device_msi_init_and_alloc_irqs()
+            # and platform_device_msi_free_irqs_all() are present. These functions
+            # were added to replace the legacy platform_msi_domain_alloc_irqs() and
+            # platform_msi_domain_free_irqs function which were removed completely
+            # in Linux v6.9
             #
-            # API platform_msi_domain_free_irqs() is dropped from Linux 6.9
-            # with commit 1a4671ff7a903e87 ("platform-msi: Remove unused interfaces")
+            # Upstream Linux change info:
+            # - Commit c88f9110bfbc ("platform-msi: Prepare for real per device domains")
+            # - Added in Linux v6.9.
             #
             CODE="
             #include <linux/msi.h>
-            void conftest_platform_msi_domain_free_irqs(void) {
-                platform_msi_domain_free_irqs();
+            void conftest_platform_device_msi_init_and_alloc_irqs(void) {
+                platform_device_msi_init_and_alloc_irqs();
             }"
 
-            compile_check_conftest "$CODE" "NV_PLATFORM_MSI_DOMAIN_FREE_IRQS_PRESENT" "" "functions"
+            compile_check_conftest "$CODE" \
+                "NV_PLATFORM_DEVICE_MSI_INIT_AND_ALLOC_IRQS_PRESENT" "" "functions"
         ;;
 
         pwm_chip_struct_has_base_arg)
@@ -8634,6 +8783,24 @@ compile_test() {
             compile_check_conftest "$CODE" "NV_REGISTER_SHRINKER_HAS_FMT_ARG" "" "types"
         ;;
 
+        reserved_mem_ops_struct_has_node_init)
+            #
+            # Determine if 'struct reserved_mem_ops' has the 'node_init'
+            # function pointer.
+            #
+            # Upstream Linux change info:
+            # - Commit c640cad6a538 ("of: reserved_mem: switch to ops based OF_DECLARE()").
+            # - Added in Linux v7.1.
+            #
+            CODE="
+            #include <linux/of_reserved_mem.h>
+            int conftest_reserved_mem_ops_struct_has_node_init(void) {
+                return offsetof(struct reserved_mem_ops, node_init);
+            }"
+
+            compile_check_conftest "$CODE" "NV_RESERVED_MEM_OPS_STRUCT_HAS_NODE_INIT" "" "types"
+        ;;
+
         shrinker_alloc)
             #
             # Determine if the shrinker alloc present or not.
@@ -8729,6 +8896,21 @@ compile_test() {
 
             compile_check_conftest "$CODE" \
                     "NV_SND_SOC_COMPONENT_DRIVER_STRUCT_HAS_NON_LEGACY_DAI_NAMING" "" "types"
+        ;;
+
+        snd_soc_component_driver_struct_has_pcm_new_and_free)
+            #
+            # Determine if 'struct snd_soc_component_driver' has the
+            # 'pcm_new' and 'pcm_free' callbacks.
+            #
+            CODE="
+            #include <sound/soc-component.h>
+            unsigned int conftest_snd_soc_component_driver_struct_has_pcm_new_and_free(void) {
+                return offsetof(struct snd_soc_component_driver, pcm_new);
+            }"
+
+            compile_check_conftest "$CODE" \
+                    "NV_SND_SOC_COMPONENT_DRIVER_STRUCT_HAS_PCM_NEW_AND_FREE" "" "types"
         ;;
 
         snd_soc_component_to_dapm)
@@ -9001,6 +9183,28 @@ compile_test() {
             compile_check_conftest "$CODE" "NV_TEGRA_PMC_IO_PAD_POWER_ENABLE_PRESENT" "" "functions"
         ;;
 
+        tegra_pmc_powergate_power_off)
+            #
+            # Determine if tegra_pmc_powergate_power_off() and
+            # tegra_pmc_powergate_sequence_power_up() are present, replacing
+            # the legacy tegra_powergate_power_off() /
+            # tegra_powergate_sequence_power_up() helpers that take no PMC
+            # context.
+            #
+            # Upstream Linux change info:
+            # - Commit 70f752ebb08c ("soc/tegra: pmc: Add PMC contextual functions").
+            # - Added in Linux v7.2.
+            #
+            CODE="
+            #include <soc/tegra/pmc.h>
+            int conftest_tegra_pmc_powergate_power_off(void) {
+                tegra_pmc_powergate_power_off();
+            }
+            "
+
+            compile_check_conftest "$CODE" "NV_TEGRA_PMC_POWERGATE_POWER_OFF_PRESENT" "" "functions"
+        ;;
+
         tegra_ivc_struct_has_iosys_map)
             #
             # Determine if the 'tegra_ivc' structure has the 'map' argument.
@@ -9117,6 +9321,28 @@ compile_test() {
             compile_check_conftest "$CODE" "NV_TIMER_DELETE_PRESENT" "" "functions"
         ;;
 
+        thermal_of_cooling_device_register_has_cdev_id_arg)
+            #
+            # Determine if thermal_of_cooling_device_register() takes a u32 cdev_id
+            # as its second argument.
+            #
+            # Upstream Linux change info:
+            # - Commit 3570cb58e317 ("thermal/of: Pass cdev_id and introduce devm registration helper").
+            # - Added in Linux v7.2.
+            #
+            CODE="
+            #include <linux/thermal.h>
+            void conftest_thermal_of_cooling_device_register(void) {
+                thermal_of_cooling_device_register((struct device_node *)0,
+                                                   (u32)0,
+                                                   (const char *)0,
+                                                   (void *)0,
+                                                   (const struct thermal_cooling_device_ops *)0);
+            }"
+
+            compile_check_conftest "$CODE" "NV_THERMAL_OF_COOLING_DEVICE_REGISTER_HAS_CDEV_ID_ARG" "" "types"
+        ;;
+
         tty_operations_struct_send_xchar_has_u8_arg)
             #
             # Determine if the struct tty_operations::send_xchar argument is of type u8.
@@ -9208,6 +9434,29 @@ compile_test() {
             }"
 
             compile_check_conftest "$CODE" "NV_UFS_HBA_VARIANT_OPS_HAS_SET_DMA_MASK" "" "types"
+        ;;
+
+        ufs_hba_variant_ops_pwr_change_notify_removed_desired_pwr_mode_arg)
+            #
+            # Determine if the 'desired_pwr_mode' argument has been removed
+            # from the 'pwr_change_notify' function pointer of
+            # 'struct ufs_hba_variant_ops'.
+            #
+            # Upstream Linux change info:
+            # - Commit d3eba21c7170 ("scsi: ufs: core: Introduce a new ufshcd vops negotiate_pwr_mode()").
+            # - Removed in Linux v7.1.
+            #
+            CODE="
+            #include <ufs/ufshcd.h>
+            void conftest_ufs_hba_variant_ops_pwr_change_notify_removed_desired_pwr_mode_arg(
+                struct ufs_hba_variant_ops *ops) {
+                    int (*fn)(struct ufs_hba *hba,
+                              enum ufs_notify_change_status status,
+                              struct ufs_pa_layer_attr *final_params) = ops->pwr_change_notify;
+            }"
+
+            compile_check_conftest "$CODE" \
+                "NV_UFS_HBA_VARIANT_OPS_PWR_CHANGE_NOTIFY_REMOVED_DESIRED_PWR_MODE_ARG" "" "types"
         ;;
 
         ufs_hba_variant_ops_pwr_change_notify_has_const_arg)
@@ -9513,6 +9762,38 @@ compile_test() {
             compile_check_conftest "$CODE" "NV_WORK_ON_CPU_KEY_PRESENT" "" "functions"
         ;;
 
+        xsk_buff_dma_sync_for_cpu_has_pool_arg)
+            #
+            # Determine if xsk_buff_dma_sync_for_cpu() takes an explicit
+            # xsk_buff_pool argument. Newer kernels get the pool from xdp_buff.
+            # This is a static inline helper, so do an exact function-pointer
+            # prototype check instead of using function-conftest inversion.
+            #
+            CODE="
+            #include <net/xdp_sock_drv.h>
+            void conftest_xsk_buff_dma_sync_for_cpu_has_pool_arg(
+                struct xdp_buff *xdp, struct xsk_buff_pool *pool)
+            {
+                void (*fn)(struct xdp_buff *, struct xsk_buff_pool *);
+
+                fn = xsk_buff_dma_sync_for_cpu;
+                fn(xdp, pool);
+            }"
+
+            echo "$CONFTEST_PREAMBLE
+            $CODE" > conftest$$.c
+
+            $CC $CFLAGS -c conftest$$.c > /dev/null 2>&1
+            rm -f conftest$$.c
+
+            if [ -f conftest$$.o ]; then
+                rm -f conftest$$.o
+                echo "#define NV_XSK_BUFF_DMA_SYNC_FOR_CPU_HAS_POOL_ARG" | append_conftest "functions"
+            else
+                echo "#undef NV_XSK_BUFF_DMA_SYNC_FOR_CPU_HAS_POOL_ARG" | append_conftest "functions"
+            fi
+        ;;
+
         of_property_read_reg)
             #
             # Determine if the function of_property_read_reg is present or not.
@@ -9527,6 +9808,23 @@ compile_test() {
             }"
 
             compile_check_conftest "$CODE" "NV_OF_PROPERTY_READ_REG_PRESENT" "" "functions"
+        ;;
+
+        zap_special_vma_range)
+            #
+            # Determine if the function zap_special_vma_range() is present.
+            #
+            # Upstream Linux change info:
+            # - Commit 3e1287771298 ("mm: rename zap_vma_ptes() to zap_special_vma_range()")
+            # - This function was added in Linux v7.1.
+            #
+            CODE="
+            #include <linux/mm.h>
+            int conftest_zap_special_vma_range(void) {
+                zap_special_vma_range();
+            }"
+
+            compile_check_conftest "$CODE" "NV_ZAP_SPECIAL_VMA_RANGE" "" "functions"
         ;;
 
         # When adding a new conftest entry, please use the correct format for

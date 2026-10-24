@@ -129,20 +129,28 @@ static inline u32 nvdec_readl(struct nvdec *nvdec, unsigned int offset)
 static int nvdec_set_rate(struct nvdec *nvdec, unsigned long rate)
 {
 	unsigned long dev_rate;
-	u32 emc_kbps;
+	u64 emc_kbps;
 	int err;
 
 	err = clk_set_rate(nvdec->clks[0].clk, rate);
 	if (err < 0)
 		return err;
 
-	if (pm_runtime_suspended(nvdec->dev))
+	/*
+	 * Skip ICC BW update when the device is not fully active. Using
+	 * pm_runtime_suspended() is insufficient because it misses the
+	 * RPM_SUSPENDING state: an in-flight actmon IRQ can race with
+	 * nvdec_runtime_suspend() after icc_set_bw(0,0) but before
+	 * clk_bulk_disable_unprepare(), restoring non-zero BW and leaving it
+	 * set after suspend completes.
+	 */
+	if (!pm_runtime_active(nvdec->dev))
 		return 0;
 
 	dev_rate = clk_get_rate(nvdec->clks[0].clk);
 
 	if (nvdec->icc_write) {
-		emc_kbps = dev_rate * NVDEC_AXI_RW_BANDWIDTH / 1024;
+		emc_kbps = (u64)dev_rate * NVDEC_AXI_RW_BANDWIDTH / 1024;
 		err = icc_set_bw(nvdec->icc_write, 0, kbps_to_icc(emc_kbps));
 		if (err)
 			dev_warn(nvdec->dev, "failed to set icc bw: %d\n", err);
@@ -639,6 +647,17 @@ static __maybe_unused int nvdec_runtime_resume(struct device *dev)
 	if (err < 0) {
 		dev_err(dev, "failed to set clock rate: %d\n", err);
 		goto disable;
+	}
+
+	/* nvdec_set_rate skips ICC BW during RPM_RESUMING; set it explicitly here. */
+	if (nvdec->icc_write) {
+		u64 emc_kbps = (u64)clk_get_rate(nvdec->clks[0].clk) * NVDEC_AXI_RW_BANDWIDTH / 1024;
+
+		err = icc_set_bw(nvdec->icc_write, 0, kbps_to_icc(emc_kbps));
+		if (err) {
+			dev_warn(dev, "failed to set icc bw: %d\n", err);
+			goto disable;
+		}
 	}
 
 	usleep_range(10, 20);

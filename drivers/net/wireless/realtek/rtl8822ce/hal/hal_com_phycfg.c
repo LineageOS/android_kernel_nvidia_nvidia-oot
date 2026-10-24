@@ -2912,7 +2912,7 @@ s8 phy_get_txpwr_lmt(
 	}
 
 	if (lock)
-		_enter_critical_mutex(&rfctl->txpwr_lmt_mutex, &irqL);
+		_enter_critical_mutex_lock(&rfctl->txpwr_lmt_mutex, &irqL);
 
 	if (!lmt_name) { /* no name specified, use currnet */
 		if (Band < BAND_MAX)
@@ -3118,7 +3118,7 @@ s8 phy_get_txpwr_lmt_sub_chs(_adapter *adapter
 	if (bw_bmp == 0)
 		goto exit;
 
-	_enter_critical_mutex(&rfctl->txpwr_lmt_mutex, &irqL);
+	_enter_critical_mutex_lock(&rfctl->txpwr_lmt_mutex, &irqL);
 
 	/* loop for each possible tx bandwidth to find final limit */
 	for (tmp_bw = CHANNEL_WIDTH_20; tmp_bw <= bw; tmp_bw++) {
@@ -3522,7 +3522,7 @@ static void phy_txpwr_lmt_post_hdl(_adapter *adapter)
 	struct rf_ctl_t *rfctl = adapter_to_rfctl(adapter);
 	_irqL irqL;
 
-	_enter_critical_mutex(&rfctl->txpwr_lmt_mutex, &irqL);
+	_enter_critical_mutex_lock(&rfctl->txpwr_lmt_mutex, &irqL);
 
 #if CONFIG_IEEE80211_BAND_5GHZ
 	if (IS_HARDWARE_TYPE_JAGUAR_ALL(adapter))

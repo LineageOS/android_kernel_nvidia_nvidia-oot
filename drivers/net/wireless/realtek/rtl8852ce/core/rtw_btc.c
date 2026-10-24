@@ -247,7 +247,7 @@ u8 rtw_core_btc_cmd(_adapter *padapter, enum rtw_core_btc_cmd_id btc_cmd_id, u8 
 
 	if (ret == _SUCCESS && (flags & RTW_CMDF_WAIT_ACK)) {
 		rtw_sctx_wait(&sctx, __func__);
-		_rtw_mutex_lock_interruptible(&pcmdpriv->sctx_mutex);
+		_rtw_mutex_lock(&pcmdpriv->sctx_mutex);
 		if (sctx.status == RTW_SCTX_SUBMITTED)
 			pcmdobj->sctx = NULL;
 		_rtw_mutex_unlock(&pcmdpriv->sctx_mutex);

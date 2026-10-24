@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2015-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2015-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include <nvidia/conftest.h>
 
@@ -8,7 +8,7 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/gpio.h>
-#include <linux/of_gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/of.h>
 #include <linux/regmap.h>
 #include <linux/delay.h>
@@ -301,7 +301,7 @@ static int __isc_create_dev(
 	INIT_LIST_HEAD(&isc_dev->list);
 
 	memset(&brd, 0, sizeof(brd));
-	strncpy(brd.type, "isc-dev", sizeof(brd.type));
+	strscpy(brd.type, "isc-dev", sizeof(brd.type));
 	brd.addr = isc_dev->cfg.addr;
 	brd.platform_data = &isc_dev->pdata;
 	isc_dev->client = i2c_new_client_device(isc_mgr->adap, &brd);
@@ -780,7 +780,7 @@ static void isc_mgr_dev_ins(struct work_struct *work)
 	dev_dbg(isc_mgr->dev, "%s - %s\n", __func__, np->full_name);
 	sname = of_get_property(np, "isc-dev", NULL);
 	if (sname)
-		strncpy(d_cfg.drv_name, sname, sizeof(d_cfg.drv_name) - 8);
+		strscpy(d_cfg.drv_name, sname, sizeof(d_cfg.drv_name) - 8);
 
 	for_each_child_of_node(np, subdev) {
 		err = of_property_read_u32(subdev, "addr", &val);
@@ -809,9 +809,8 @@ static void isc_mgr_dev_ins(struct work_struct *work)
 	}
 }
 
-static int isc_mgr_of_get_grp_gpio(
-	struct device *dev, struct device_node *np,
-	const char *name, int size, u32 *grp, u32 *flags)
+static int isc_mgr_of_get_grp_gpio(struct device *dev, const char *name,
+				   int size, u32 *grp, u32 *flags)
 {
 	char prop_name[32]; /* 32 is max size of property name */
 	int num, i;
@@ -820,24 +819,39 @@ static int isc_mgr_of_get_grp_gpio(
 
 	num = gpiod_count(dev, name);
 	dev_dbg(dev, "    num gpios of %s: %d\n", prop_name, num);
-	if (num < 0)
+	if (num == -ENOENT)
 		return 0;
+	if (num < 0)
+		return num;
 
 	for (i = 0; (i < num) && (i < size); i++) {
-#if defined(NV_OF_GET_NAMED_GPIO_FLAGS_PRESENT) /* Linux 6.2 */
-		grp[i] = of_get_named_gpio_flags(np, prop_name, i, &flags[i]);
-#else
-		grp[i] = of_get_named_gpio(np, prop_name, i);
-		flags[i] = 0;
-#endif
-		if ((int)grp[i] < 0) {
+		struct gpio_desc *desc;
+		int gpio;
+
+		desc = gpiod_get_index_optional(dev, name, i, GPIOD_ASIS);
+		if (IS_ERR(desc)) {
+			if (PTR_ERR(desc) != -EPROBE_DEFER)
+				dev_err(dev, "%s: gpio[%d] invalid: %ld\n",
+					__func__, i, PTR_ERR(desc));
+			return PTR_ERR(desc);
+		}
+		if (!desc) {
 			dev_err(dev, "%s: gpio[%d] invalid\n", __func__, i);
 			return -EINVAL;
 		}
+		gpio = desc_to_gpio(desc);
+		if (!gpio_is_valid(gpio)) {
+			dev_err(dev, "%s: gpio[%d] not valid\n", __func__, i);
+			gpiod_put(desc);
+			return -EINVAL;
+		}
+		flags[i] = gpiod_is_active_low(desc) ? 1 : 0;
+		grp[i] = gpio;
+		gpiod_put(desc);
 		dev_dbg(dev, "        [%d] - %d %x\n", i, grp[i], flags[i]);
 	}
 
-	return num;
+	return i;
 }
 
 static int isc_mgr_get_pwr_map(
@@ -932,13 +946,13 @@ static struct isc_mgr_platform_data *of_isc_mgr_pdata(struct platform_device
 	dev_dbg(&pdev->dev, "    csiport: %d\n", pd->csi_port);
 
 	pd->num_pwr_gpios = isc_mgr_of_get_grp_gpio(
-		&pdev->dev, np, "pwdn",
+		&pdev->dev, "pwdn",
 		ARRAY_SIZE(pd->pwr_gpios), pd->pwr_gpios, pd->pwr_flags);
 	if (pd->num_pwr_gpios < 0)
 		return ERR_PTR(pd->num_pwr_gpios);
 
 	pd->num_misc_gpios = isc_mgr_of_get_grp_gpio(
-		&pdev->dev, np, "misc",
+		&pdev->dev, "misc",
 		ARRAY_SIZE(pd->misc_gpios), pd->misc_gpios, pd->misc_flags);
 	if (pd->num_misc_gpios < 0)
 		return ERR_PTR(pd->num_misc_gpios);

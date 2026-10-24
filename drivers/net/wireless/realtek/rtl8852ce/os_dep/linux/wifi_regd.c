@@ -875,7 +875,7 @@ static void async_regd_change_work_hdl(_workitem *work)
 	_list *list, *head = &wiphy_data->async_regd_change_list;
 
 	while (1) {
-		_rtw_mutex_lock_interruptible(&wiphy_data->async_regd_change_mutex);
+		_rtw_mutex_lock(&wiphy_data->async_regd_change_mutex);
 		list = rtw_is_list_empty(head) ? NULL : get_next(head);
 		if (list)
 			rtw_list_delete(list);
@@ -905,7 +905,7 @@ int rtw_regd_change_complete_async(struct wiphy *wiphy, struct get_chplan_resp *
 	evt->wiphy = wiphy;
 	evt->chplan = chplan;
 
-	_rtw_mutex_lock_interruptible(&wiphy_data->async_regd_change_mutex);
+	_rtw_mutex_lock(&wiphy_data->async_regd_change_mutex);
 
 	rtw_list_insert_tail(&evt->list, &wiphy_data->async_regd_change_list);
 
@@ -923,7 +923,7 @@ static void rtw_regd_async_regd_change_list_free(struct wiphy *wiphy)
 	struct get_chplan_resp *chplan;
 	_list *cur, *head;
 
-	_rtw_mutex_lock_interruptible(&wiphy_data->async_regd_change_mutex);
+	_rtw_mutex_lock(&wiphy_data->async_regd_change_mutex);
 
 	head = &wiphy_data->async_regd_change_list;
 	cur = get_next(head);
@@ -992,7 +992,7 @@ static void async_cac_change_work_hdl(_workitem *work)
 	#endif
 
 	while (1) {
-		_rtw_mutex_lock_interruptible(&wiphy_data->async_cac_change_mutex);
+		_rtw_mutex_lock(&wiphy_data->async_cac_change_mutex);
 		list = rtw_is_list_empty(head) ? NULL : get_next(head);
 		if (list)
 			rtw_list_delete(list);
@@ -1034,7 +1034,7 @@ static int cfg80211_cac_event_async(struct net_device *netdev
 	_rtw_memcpy(&evt->chandef, chandef, sizeof(*chandef));
 	evt->event = event;
 
-	_rtw_mutex_lock_interruptible(&wiphy_data->async_cac_change_mutex);
+	_rtw_mutex_lock(&wiphy_data->async_cac_change_mutex);
 
 	rtw_list_insert_tail(&evt->list, &wiphy_data->async_cac_change_list);
 
@@ -1051,7 +1051,7 @@ static void rtw_regd_async_cac_change_list_free(struct wiphy *wiphy)
 	struct async_cac_change_evt *evt;
 	_list *cur, *head;
 
-	_rtw_mutex_lock_interruptible(&wiphy_data->async_cac_change_mutex);
+	_rtw_mutex_lock(&wiphy_data->async_cac_change_mutex);
 
 	head = &wiphy_data->async_cac_change_list;
 	cur = get_next(head);

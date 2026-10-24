@@ -1,16 +1,15 @@
-// SPDX-License-Identifier: GPL-2.0
-// Copyright (c) 2018-2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-FileCopyrightText: Copyright (c) 2018-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 /*
  * max9296.c - max9296 GMSL Deserializer driver
  */
 
 #include <nvidia/conftest.h>
 
-#include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
-#include <linux/of_gpio.h>
 #include <media/camera_common.h>
 #include <linux/module.h>
 #include <media/max9296.h>
@@ -111,7 +110,7 @@ struct max9296 {
 	u8 csi_mode;
 	u8 lane_mp1;
 	u8 lane_mp2;
-	int reset_gpio;
+	struct gpio_desc *reset_gpiod;
 	int pw_ref;
 	struct regulator *vdd_cam_1v2;
 };
@@ -209,8 +208,8 @@ int max9296_power_on(struct device *dev)
 	mutex_lock(&priv->lock);
 	if (priv->pw_ref == 0) {
 		usleep_range(1, 2);
-		if (priv->reset_gpio)
-			gpio_set_value(priv->reset_gpio, 0);
+		if (priv->reset_gpiod)
+			gpiod_set_value(priv->reset_gpiod, 0);
 
 		usleep_range(30, 50);
 
@@ -223,10 +222,10 @@ int max9296_power_on(struct device *dev)
 		usleep_range(30, 50);
 
 		/*exit reset mode: XCLR */
-		if (priv->reset_gpio) {
-			gpio_set_value(priv->reset_gpio, 0);
+		if (priv->reset_gpiod) {
+			gpiod_set_value(priv->reset_gpiod, 0);
 			usleep_range(30, 50);
-			gpio_set_value(priv->reset_gpio, 1);
+			gpiod_set_value(priv->reset_gpiod, 1);
 			usleep_range(30, 50);
 		}
 
@@ -253,8 +252,8 @@ void max9296_power_off(struct device *dev)
 	if (priv->pw_ref == 0) {
 		/* enter reset mode: XCLR */
 		usleep_range(1, 2);
-		if (priv->reset_gpio)
-			gpio_set_value(priv->reset_gpio, 0);
+		if (priv->reset_gpiod)
+			gpiod_set_value(priv->reset_gpiod, 0);
 
 		if (priv->vdd_cam_1v2)
 			regulator_disable(priv->vdd_cam_1v2);
@@ -819,9 +818,11 @@ static int max9296_parse_dt(struct max9296 *priv,
 	}
 	priv->max_src = value;
 
-	priv->reset_gpio = of_get_named_gpio(node, "reset-gpios", 0);
-	if (priv->reset_gpio < 0) {
-		dev_err(&client->dev, "reset-gpios not found %d\n", err);
+	priv->reset_gpiod = devm_gpiod_get(&client->dev, "reset",
+					   GPIOD_OUT_LOW);
+	if (IS_ERR(priv->reset_gpiod)) {
+		err = PTR_ERR(priv->reset_gpiod);
+		dev_err(&client->dev, "failed to get reset GPIO: %d\n", err);
 		return err;
 	}
 

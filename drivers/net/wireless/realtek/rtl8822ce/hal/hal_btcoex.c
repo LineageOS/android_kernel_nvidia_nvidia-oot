@@ -863,7 +863,7 @@ u32 halbtcoutsrc_GetBtPatchVer(PBTC_COEXIST pBtCoexist)
 			_irqL irqL;
 			u8 ret;
 
-			_enter_critical_mutex(&GLBtcBtMpOperLock, &irqL);
+			_enter_critical_mutex_lock(&GLBtcBtMpOperLock, &irqL);
 
 			ret = _btmpoper_cmd(pBtCoexist, BT_OP_GET_BT_VERSION, 0, NULL, 0);
 			if (BT_STATUS_BT_OP_SUCCESS == ret) {
@@ -906,7 +906,7 @@ u32 halbtcoutsrc_GetBtCoexSupportedFeature(void *pBtcContext)
 		u8 op_code;
 		u8 status;
 
-		_enter_critical_mutex(&GLBtcBtMpOperLock, &irqL);
+		_enter_critical_mutex_lock(&GLBtcBtMpOperLock, &irqL);
 
 		op_code = BT_OP_GET_BT_COEX_SUPPORTED_FEATURE;
 		status = _btmpoper_cmd(pBtCoexist, op_code, 0, buf, 0);
@@ -937,7 +937,7 @@ u32 halbtcoutsrc_GetBtCoexSupportedVersion(void *pBtcContext)
 		u8 op_code;
 		u8 status;
 
-		_enter_critical_mutex(&GLBtcBtMpOperLock, &irqL);
+		_enter_critical_mutex_lock(&GLBtcBtMpOperLock, &irqL);
 
 		op_code = BT_OP_GET_BT_COEX_SUPPORTED_VERSION;
 		status = _btmpoper_cmd(pBtCoexist, op_code, 0, buf, 0);
@@ -968,7 +968,7 @@ u32 halbtcoutsrc_GetBtDeviceInfo(void *pBtcContext)
 		u8 op_code;
 		u8 status;
 
-		_enter_critical_mutex(&GLBtcBtMpOperLock, &irqL);
+		_enter_critical_mutex_lock(&GLBtcBtMpOperLock, &irqL);
 
 		op_code = BT_OP_GET_BT_DEVICE_INFO;
 		status = _btmpoper_cmd(pBtCoexist, op_code, 0, buf, 0);
@@ -999,7 +999,7 @@ u32 halbtcoutsrc_GetBtForbiddenSlotVal(void *pBtcContext)
 		u8 op_code;
 		u8 status;
 
-		_enter_critical_mutex(&GLBtcBtMpOperLock, &irqL);
+		_enter_critical_mutex_lock(&GLBtcBtMpOperLock, &irqL);
 
 		op_code = BT_OP_GET_BT_FORBIDDEN_SLOT_VAL;
 		status = _btmpoper_cmd(pBtCoexist, op_code, 0, buf, 0);
@@ -1421,7 +1421,7 @@ u16 halbtcoutsrc_LnaConstrainLvl(void *pBtcContext, u8 *lna_constrain_level)
 		_irqL irqL;
 		u8 op_code;
 
-		_enter_critical_mutex(&GLBtcBtMpOperLock, &irqL);
+		_enter_critical_mutex_lock(&GLBtcBtMpOperLock, &irqL);
 
 		ret = _btmpoper_cmd(pBtCoexist, BT_OP_SET_BT_LANCONSTRAIN_LEVEL, 0, lna_constrain_level, 1);
 
@@ -2501,7 +2501,7 @@ u16 halbtcoutsrc_SetBtReg(void *pBtcContext, u8 RegType, u32 RegAddr, u32 Data)
 		u8 op_code;
 		u8 status;
 
-		_enter_critical_mutex(&GLBtcBtMpOperLock, &irqL);
+		_enter_critical_mutex_lock(&GLBtcBtMpOperLock, &irqL);
 
 		Data = cpu_to_le32(Data);
 		op_code = BT_OP_WRITE_REG_VALUE;
@@ -2571,7 +2571,7 @@ u8 halbtcoutsrc_SetBtTRXMASK(void *pBtcContext, u8 bt_trx_mask)
 				len = 2;
 			}
 
-			_enter_critical_mutex(&GLBtcBtMpOperLock, &irqL);
+			_enter_critical_mutex_lock(&GLBtcBtMpOperLock, &irqL);
 
 			op_code = BT_OP_SET_BT_TRX_MASK;
 			status = _btmpoper_cmd(pBtCoexist, op_code, 0, buf, len);
@@ -2605,7 +2605,7 @@ u16 halbtcoutsrc_GetBtReg_with_status(void *pBtcContext, u8 RegType, u32 RegAddr
 		buf[0] = RegType;
 		*(u16 *)(buf + 1) = cpu_to_le16((u16)RegAddr);
 
-		_enter_critical_mutex(&GLBtcBtMpOperLock, &irqL);
+		_enter_critical_mutex_lock(&GLBtcBtMpOperLock, &irqL);
 
 		op_code = BT_OP_READ_REG;
 		status = _btmpoper_cmd(pBtCoexist, op_code, 0, buf, 3);
@@ -2641,7 +2641,7 @@ u16 halbtcoutsrc_setbttestmode(void *pBtcContext, u8 Type)
 		u8 op_code;
 		u8 status;
 
-		_enter_critical_mutex(&GLBtcBtMpOperLock, &irqL);
+		_enter_critical_mutex_lock(&GLBtcBtMpOperLock, &irqL);
 
 		Type = cpu_to_le32(Type);
 		op_code = BT_OP_SET_BT_TEST_MODE_VAL;
@@ -2836,7 +2836,7 @@ u8 halbtcoutsrc_GetBleScanTypeFromBt(void *pBtcContext)
 		u8 status;
 
 
-		_enter_critical_mutex(&GLBtcBtMpOperLock, &irqL);
+		_enter_critical_mutex_lock(&GLBtcBtMpOperLock, &irqL);
 
 		op_code = BT_OP_GET_BT_BLE_SCAN_TYPE;
 		status = _btmpoper_cmd(pBtCoexist, op_code, 0, buf, 0);
@@ -2869,7 +2869,7 @@ u32 halbtcoutsrc_GetBleScanParaFromBt(void *pBtcContext, u8 scanType)
 		
 		buf[0] = scanType;
 
-		_enter_critical_mutex(&GLBtcBtMpOperLock, &irqL);
+		_enter_critical_mutex_lock(&GLBtcBtMpOperLock, &irqL);
 
 		op_code = BT_OP_GET_BT_BLE_SCAN_PARA;
 		status = _btmpoper_cmd(pBtCoexist, op_code, 0, buf, 1);
@@ -2904,7 +2904,7 @@ u8 halbtcoutsrc_GetBtAFHMapFromBt(void *pBtcContext, u8 mapType, u8 *afhMap)
 	buf[0] = 0;
 	buf[1] = mapType;
 
-	_enter_critical_mutex(&GLBtcBtMpOperLock, &irqL);
+	_enter_critical_mutex_lock(&GLBtcBtMpOperLock, &irqL);
 
 	op_code = BT_LO_OP_GET_AFH_MAP_L;
 	status = _btmpoper_cmd(pBtCoexist, op_code, 0, buf, 0);

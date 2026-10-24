@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// SPDX-FileCopyrightText: Copyright (c) 2014-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2014-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 #include <linux/platform_device.h>
 #include <linux/tegra_nvadsp.h>
@@ -289,9 +289,10 @@ static struct nvadsp_app_service *get_loaded_service(
 static inline void extract_appname(char *appname, const char *appfile)
 {
 	char *token = strstr(appfile, DYN_APP_EXTN);
-	int len = token ? token - appfile : strlen(appfile);
+	size_t len = token ? token - appfile : strlen(appfile);
 
-	strncpy(appname, appfile, len);
+	len = min_t(size_t, len, NVADSP_NAME_SZ - 1);
+	memcpy(appname, appfile, len);
 	appname[len] = '\0';
 }
 

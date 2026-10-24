@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* Copyright (c) 2017-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
-/* Copyright (c) 2017-2022, e-con Systems, All Rights Reserved. */
+/* SPDX-FileCopyrightText: Copyright (c) 2017-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2017-2022, e-con Systems, All Rights Reserved.
+ */
 /*
  * ar1335.h - ar0330 sensor mode tables
  */
@@ -264,7 +265,7 @@ static int cam_read(struct i2c_client *client, u8 * val, u32 count);
 static int cam_write(struct i2c_client *client, u8 * val, u32 count);
 
 int cam_s_power(struct v4l2_subdev *sd, int on);
-static void toggle_gpio(unsigned int gpio, int value);
+static void toggle_gpio(struct gpio_desc *desc, int value);
 
 static int mcu_get_fw_version(struct i2c_client *client, unsigned char * fw_version, unsigned char *txt_fw_version);
 unsigned char errorcheck(char *data, unsigned int len);
